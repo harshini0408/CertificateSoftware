@@ -1,0 +1,51 @@
+# ── Python ───────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+<<<<<<< HEAD
+*.egg
+
+# ── Virtual Environment ─────────────
+.venv/
+venv/
+env/
+
+# ── Environment & Secrets ───────────
+.env
+credentials.json
+token.json
+*.pem
+*.key
+
+# ── Storage (generated at runtime) ──
+storage/certs/
+storage/assets/
+storage/tmp/
+
+# ── IDE ──────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ───────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Misc ─────────────────────────────
+*.log
+*.bak
+
+# ── Gemini / Agent ───────────────────
+.gemini/
+.agent/
+.agents/
+=======
+node_modules/
+>>>>>>> 7a2d0e5 (frontend)

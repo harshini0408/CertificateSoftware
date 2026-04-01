@@ -1,0 +1,43 @@
+from .club import Club
+from .user import User, UserRole
+from .token_blacklist import TokenBlacklist
+from .event import Event, EventStatus, QRConfig, EventAssets
+from .template import Template, TemplateType, FieldSlot, StaticElement, TemplateBackground
+from .participant import Participant, ParticipantSource
+from .certificate import Certificate, CertStatus, CertSnapshot
+from .cert_sequence import CertSequence
+from .email_log import EmailLog, EmailStatus
+from .scan_log import ScanLog
+from .credit_rule import CreditRule
+from .student_credit import StudentCredit, CreditHistoryEntry
+
+ALL_MODELS = [
+    Club,
+    User,
+    TokenBlacklist,
+    Event,
+    Template,
+    Participant,
+    Certificate,
+    CertSequence,
+    EmailLog,
+    ScanLog,
+    CreditRule,
+    StudentCredit,
+]
+
+__all__ = [
+    "Club",
+    "User", "UserRole",
+    "TokenBlacklist",
+    "Event", "EventStatus", "QRConfig", "EventAssets",
+    "Template", "TemplateType", "FieldSlot", "StaticElement", "TemplateBackground",
+    "Participant", "ParticipantSource",
+    "Certificate", "CertStatus", "CertSnapshot",
+    "CertSequence",
+    "EmailLog", "EmailStatus",
+    "ScanLog",
+    "CreditRule",
+    "StudentCredit", "CreditHistoryEntry",
+    "ALL_MODELS",
+]

@@ -1,0 +1,290 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import Navbar from '../components/Navbar'
+import Sidebar from '../components/Sidebar'
+import DataTable from '../components/DataTable'
+import StatusBadge from '../components/StatusBadge'
+import StatCard from '../components/StatCard'
+import { useCoordinatorStats, useCoordinatorEvents } from '../api/credits'
+
+// ── Icon helpers ──────────────────────────────────────────────────────────────
+const Icons = {
+  events: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  ),
+  certs: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+    </svg>
+  ),
+  email: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+    </svg>
+  ),
+  clubs: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  ),
+}
+
+// ── Event status filter tabs ───────────────────────────────────────────────────
+const STATUS_TABS = [
+  { id: 'all',       label: 'All' },
+  { id: 'active',    label: 'Active' },
+  { id: 'draft',     label: 'Draft' },
+  { id: 'completed', label: 'Completed' },
+]
+
+// ── DeptCoordinatorDashboard ──────────────────────────────────────────────────
+export default function DeptCoordinatorDashboard() {
+  const navigate = useNavigate()
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [clubFilter,   setClubFilter]   = useState('all')
+
+  const { data: stats,  isLoading: statsLoading  } = useCoordinatorStats()
+  const { data: events, isLoading: eventsLoading } = useCoordinatorEvents()
+
+  // Derive unique club list for filter
+  const clubs = Array.from(
+    new Map(
+      (events ?? []).map((e) => [e.club_id ?? e.club_name, { id: e.club_id, name: e.club_name }]),
+    ).values(),
+  )
+
+  // Apply filters
+  const filteredEvents = (events ?? []).filter((e) => {
+    const matchStatus = statusFilter === 'all' || e.status === statusFilter
+    const matchClub   = clubFilter   === 'all' || e.club_id === clubFilter || e.club_name === clubFilter
+    return matchStatus && matchClub
+  })
+
+  const columns = [
+    {
+      key: 'name',
+      header: 'Event Name',
+      sortable: true,
+      searchKey: true,
+      render: (v, row) => (
+        <div className="flex flex-col">
+          <span className="text-sm font-medium text-foreground">{v}</span>
+          <span className="text-xs text-gray-400">{row.club_name}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'event_date',
+      header: 'Date',
+      sortable: true,
+      render: (v) =>
+        v
+          ? new Date(v).toLocaleDateString('en-IN', {
+              day: '2-digit', month: 'short', year: 'numeric',
+            })
+          : '—',
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (v) => <StatusBadge status={v} />,
+    },
+    {
+      key: 'participant_count',
+      header: 'Participants',
+      align: 'right',
+      render: (v) => (v ?? 0).toLocaleString(),
+    },
+    {
+      key: 'cert_count',
+      header: 'Certs',
+      align: 'right',
+      render: (v) => (v ?? 0).toLocaleString(),
+    },
+    {
+      key: 'pending_emails',
+      header: 'Pending Emails',
+      align: 'right',
+      render: (v) =>
+        v > 0 ? (
+          <span className="font-semibold text-amber-600">{v}</span>
+        ) : (
+          <span className="text-gray-400">—</span>
+        ),
+    },
+  ]
+
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <Navbar />
+
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+
+        <main className="flex-1 overflow-y-auto bg-background">
+          <div className="page-container space-y-6">
+
+            {/* ── Page header ────────────────────────────────────────── */}
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">
+                Department Coordinator
+              </h1>
+              <p className="mt-0.5 text-sm text-gray-500">
+                Cross-club events overview for your department scope.
+              </p>
+            </div>
+
+            {/* ── Stat cards ─────────────────────────────────────────── */}
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <StatCard
+                label="Total Events"
+                value={stats?.total_events ?? events?.length ?? 0}
+                icon={Icons.events}
+                accent="navy"
+                isLoading={statsLoading}
+              />
+              <StatCard
+                label="Clubs in Scope"
+                value={stats?.clubs_count ?? clubs.length}
+                icon={Icons.clubs}
+                accent="blue"
+                isLoading={statsLoading}
+              />
+              <StatCard
+                label="Certs Issued"
+                value={stats?.certs_issued ?? 0}
+                icon={Icons.certs}
+                accent="gold"
+                isLoading={statsLoading}
+              />
+              <StatCard
+                label="Pending Emails"
+                value={stats?.pending_emails ?? 0}
+                icon={Icons.email}
+                accent="red"
+                isLoading={statsLoading}
+              />
+            </div>
+
+            {/* ── Events section ──────────────────────────────────────── */}
+            <div>
+              {/* Section header + filters */}
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="section-title">Events</h2>
+
+                {/* Status filter pills */}
+                <div className="flex flex-wrap gap-2 items-center">
+                  {/* Club dropdown */}
+                  {clubs.length > 1 && (
+                    <select
+                      id="coord-club-filter"
+                      className="form-input py-1.5 text-sm w-auto"
+                      value={clubFilter}
+                      onChange={(e) => setClubFilter(e.target.value)}
+                    >
+                      <option value="all">All Clubs</option>
+                      {clubs.map((c) => (
+                        <option key={c.id ?? c.name} value={c.id ?? c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* Status tabs */}
+                  <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+                    {STATUS_TABS.map((tab) => (
+                      <button
+                        key={tab.id}
+                        id={`coord-status-${tab.id}`}
+                        onClick={() => setStatusFilter(tab.id)}
+                        className={`
+                          rounded-md px-3 py-1 text-xs font-medium transition-colors
+                          ${statusFilter === tab.id
+                            ? 'bg-white text-navy shadow-sm'
+                            : 'text-gray-500 hover:text-navy'
+                          }
+                        `}
+                      >
+                        {tab.label}
+                        {tab.id !== 'all' && (
+                          <span className="ml-1 text-[10px] text-gray-400">
+                            {(events ?? []).filter((e) => e.status === tab.id).length}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <DataTable
+                columns={columns}
+                data={filteredEvents}
+                isLoading={eventsLoading}
+                emptyMessage={
+                  statusFilter !== 'all'
+                    ? `No ${statusFilter} events found.`
+                    : 'No events in your scope yet.'
+                }
+                searchable
+                searchPlaceholder="Search events or clubs…"
+                onRowClick={(row) =>
+                  navigate(`/club/${row.club_id}/events/${row._id ?? row.id}`)
+                }
+                rowKey="_id"
+              />
+            </div>
+
+            {/* ── Quick insights strip ────────────────────────────────── */}
+            {!eventsLoading && filteredEvents.length > 0 && (() => {
+              const active    = filteredEvents.filter((e) => e.status === 'active').length
+              const completed = filteredEvents.filter((e) => e.status === 'completed').length
+              const withPending = filteredEvents.filter((e) => (e.pending_emails ?? 0) > 0).length
+
+              return (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {[
+                    {
+                      label: 'Active Events',
+                      value: active,
+                      sub: 'currently running',
+                      color: 'border-l-green-400',
+                      fg: 'text-green-600',
+                    },
+                    {
+                      label: 'Completed',
+                      value: completed,
+                      sub: 'events concluded',
+                      color: 'border-l-navy',
+                      fg: 'text-navy',
+                    },
+                    {
+                      label: 'Needs Attention',
+                      value: withPending,
+                      sub: 'events with pending emails',
+                      color: 'border-l-amber-400',
+                      fg: 'text-amber-600',
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className={`card border-l-4 ${item.color} px-5 py-4`}
+                    >
+                      <p className={`text-2xl font-black ${item.fg}`}>{item.value}</p>
+                      <p className="text-sm font-medium text-foreground">{item.label}</p>
+                      <p className="text-xs text-gray-400">{item.sub}</p>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
+
+          </div>
+        </main>
+      </div>
+    </div>
+  )
+}

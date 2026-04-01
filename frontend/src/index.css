@@ -1,0 +1,170 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base resets ──────────────────────────────────────────────────────────── */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    min-height: 100dvh;
+  }
+
+  /* Remove default button / input chrome */
+  button {
+    cursor: pointer;
+  }
+
+  input,
+  textarea,
+  select {
+    @apply font-sans;
+  }
+
+  /* Focus-visible ring — consistent across browsers */
+  :focus-visible {
+    outline: 2px solid theme('colors.gold.DEFAULT');
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Remove number input spinners */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+/* ── Component helpers ────────────────────────────────────────────────────── */
+@layer components {
+  /* Primary button */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2
+           rounded bg-navy px-4 py-2
+           text-sm font-semibold text-white
+           shadow-sm
+           transition-colors duration-150
+           hover:bg-navy-700
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Outline / secondary button */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2
+           rounded border border-navy/30 bg-white px-4 py-2
+           text-sm font-semibold text-navy
+           shadow-sm
+           transition-colors duration-150
+           hover:bg-navy/5
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Danger button */
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2
+           rounded bg-red-600 px-4 py-2
+           text-sm font-semibold text-white
+           shadow-sm
+           transition-colors duration-150
+           hover:bg-red-700
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Ghost button */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2
+           rounded px-4 py-2
+           text-sm font-semibold text-navy
+           transition-colors duration-150
+           hover:bg-navy/10
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Card */
+  .card {
+    @apply rounded-lg bg-white shadow-card border border-gray-100;
+  }
+
+  /* Form field label */
+  .form-label {
+    @apply block text-sm font-medium text-foreground mb-1;
+  }
+
+  /* Form input */
+  .form-input {
+    @apply block w-full rounded border border-gray-300 bg-white px-3 py-2
+           text-sm text-foreground placeholder-gray-400
+           shadow-sm
+           transition-colors duration-150
+           focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy
+           disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500;
+  }
+
+  /* Form input — error state */
+  .form-input-error {
+    @apply border-red-500 focus:border-red-500 focus:ring-red-500;
+  }
+
+  /* Inline error message */
+  .form-error {
+    @apply mt-1 text-xs text-red-600;
+  }
+
+  /* Section heading */
+  .section-title {
+    @apply text-lg font-semibold text-foreground;
+  }
+
+  /* Page container */
+  .page-container {
+    @apply mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8;
+  }
+}
+
+/* ── Utility extras ───────────────────────────────────────────────────────── */
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* ── Keyframe animations ──────────────────────────────────────────────────── */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(1.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
