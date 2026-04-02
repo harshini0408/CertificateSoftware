@@ -233,7 +233,7 @@ function DashboardTab({ clubId, stats, statsLoading, events, eventsLoading, onNe
           isLoading={eventsLoading}
           emptyMessage="No events yet. Create your first event!"
           onRowClick={(row) => onViewEvent(row)}
-          rowKey="_id"
+          rowKey="id"
         />
       </div>
     </div>
@@ -281,7 +281,7 @@ function EventsTab({ clubId, events, eventsLoading, onNewEvent, onViewEvent }) {
         searchable
         searchPlaceholder="Search events…"
         onRowClick={(row) => onViewEvent(row)}
-        rowKey="_id"
+        rowKey="id"
         actions={
           <button
             id="events-tab-new-event"
@@ -376,7 +376,7 @@ export default function ClubDashboard() {
   const { data: events, isLoading: eventsLoading } = useEvents(club_id)
 
   const handleViewEvent = (row) =>
-    navigate(`/club/${club_id}/events/${row._id ?? row.id}`)
+    navigate(`/club/${club_id}/events/${row.id}`)
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">

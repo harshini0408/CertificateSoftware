@@ -239,7 +239,7 @@ function OverviewTab({ event, clubId, eventId }) {
               >
                 <option value="">— Select template —</option>
                 {(templates ?? []).map((t) => (
-                  <option key={t._id ?? t.id} value={t._id ?? t.id}>
+                  <option key={t.id} value={t.id}>
                     {t.name}
                   </option>
                 ))}
@@ -703,7 +703,7 @@ function QrTab({ clubId, eventId }) {
         ),
     },
     {
-      key: '_id',
+      key: 'id',
       header: 'Actions',
       align: 'center',
       render: (id, row) => (

@@ -68,7 +68,7 @@ function CreateClubModal({ onClose }) {
 
   // Auto-generate slug from name
   const nameVal = watch('name', '')
-  const autoSlug = nameVal.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+  const autoSlug = nameVal.toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '')
 
   const onSubmit = async (values) => {
     await createClub.mutateAsync({ ...values, slug: values.slug || autoSlug })
@@ -312,7 +312,7 @@ function ClubsTab({ navigate }) {
       render: (v) => <StatusBadge status={v ? 'active' : 'inactive'} />,
     },
     {
-      key: '_id',
+      key: 'id',
       header: 'Actions',
       align: 'center',
       render: (id, row) => (
@@ -348,7 +348,7 @@ function ClubsTab({ navigate }) {
         searchable
         searchPlaceholder="Search clubs…"
         emptyMessage="No clubs yet. Create your first club."
-        rowKey="_id"
+        rowKey="id"
         actions={
           <button id="admin-create-club" className="btn-primary text-sm" onClick={() => setShowCreate(true)}>
             + New Club
@@ -424,7 +424,7 @@ function UsersTab() {
           : 'Never',
     },
     {
-      key: '_id',
+      key: 'id',
       header: 'Actions',
       align: 'center',
       render: (id, row) => (
@@ -461,7 +461,7 @@ function UsersTab() {
         searchable
         searchPlaceholder="Search by name or email…"
         emptyMessage="No users found."
-        rowKey="_id"
+        rowKey="id"
         actions={
           <button id="admin-create-user" className="btn-primary text-sm" onClick={() => setShowCreate(true)}>
             + New User
@@ -482,7 +482,7 @@ function UsersTab() {
           confirmLabel="Reset Password"
           variant="warning"
           onConfirm={async () => {
-            await resetPwd.mutateAsync(confirmReset._id ?? confirmReset.id)
+            await resetPwd.mutateAsync(confirmReset.id)
             setConfirmReset(null)
           }}
           onCancel={() => setConfirmReset(null)}
@@ -554,7 +554,7 @@ function CertificatesAdminTab() {
       render: (v) => <StatusBadge status={v} />,
     },
     {
-      key: '_id',
+      key: 'id',
       header: 'Actions',
       align: 'center',
       render: (id, row) => (
@@ -610,7 +610,7 @@ function CertificatesAdminTab() {
         searchable
         searchPlaceholder="Search cert no., email, event…"
         emptyMessage="No certificates found."
-        rowKey="_id"
+        rowKey="id"
       />
 
       {confirmRevoke && (
@@ -620,7 +620,7 @@ function CertificatesAdminTab() {
           confirmLabel="Revoke"
           variant="danger"
           onConfirm={async () => {
-            await revokeMutation.mutateAsync(confirmRevoke._id ?? confirmRevoke.id)
+            await revokeMutation.mutateAsync(confirmRevoke.id)
             setConfirmRevoke(null)
           }}
           onCancel={() => setConfirmRevoke(null)}

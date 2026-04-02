@@ -50,7 +50,12 @@ axiosInstance.interceptors.response.use(
     }
 
     // ── 401 Unauthorized ─────────────────────────────────────────────────────
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !originalRequest.url?.includes('/auth/login') &&
+      !originalRequest.url?.includes('/auth/refresh')
+    ) {
       if (isRefreshing) {
         // Queue the request until refresh completes.
         return new Promise((resolve, reject) => {
