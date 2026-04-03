@@ -7,362 +7,245 @@ import StatCard from '../components/StatCard'
 import DataTable from '../components/DataTable'
 import StatusBadge from '../components/StatusBadge'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { useClub, useClubStats } from '../api/clubs'
-import { useEvents, useCreateEvent } from '../api/events'
+import { useClubDashboard, useClubMembers } from '../api/clubs'
+import { useAuthStore } from '../store/authStore'
+import { useChangePassword } from '../api/auth'
 
 // ── Tab ids ───────────────────────────────────────────────────────────────────
 const TABS = ['dashboard', 'events', 'templates', 'settings']
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtDate(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+const roleBadge = {
+  club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
+  guest: 'bg-amber-50 text-amber-700 ring-amber-200',
+}
+const roleLabel = {
+  club_coordinator: 'Coordinator',
+  guest: 'Guest',
+}
+
 // ── Icon helpers ──────────────────────────────────────────────────────────────
 const Icon = {
-  events: (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-    </svg>
-  ),
-  certs: (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-    </svg>
-  ),
-  email: (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-    </svg>
-  ),
-  failed: (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
+  events: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
+  active: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
+  certs: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>,
+  participants: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
+  email: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
+  failed: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// New Event Modal
-// ─────────────────────────────────────────────────────────────────────────────
-function NewEventModal({ clubId, onClose }) {
-  const createEvent = useCreateEvent(clubId)
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm({
-    defaultValues: { name: '', description: '', event_date: '' },
-  })
-
-  const onSubmit = async (values) => {
-    await createEvent.mutateAsync(values)
-    onClose()
-  }
-
-  const busy = isSubmitting || createEvent.isPending
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Panel */}
-      <div
-        className="relative z-10 w-full max-w-lg rounded-xl bg-white shadow-modal"
-        style={{ animation: 'fadeIn 0.15s ease-out' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-foreground">New Event</h2>
-          <button
-            aria-label="Close"
-            onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Body */}
-        <form onSubmit={handleSubmit(onSubmit)} className="px-6 py-5 space-y-4">
-          {/* Name */}
-          <div>
-            <label className="form-label" htmlFor="event-name">
-              Event name <span className="text-red-500">*</span>
-            </label>
-            <input
-              id="event-name"
-              className={`form-input ${errors.name ? 'form-input-error' : ''}`}
-              placeholder="e.g. Annual Tech Fest 2025"
-              disabled={busy}
-              {...register('name', { required: 'Event name is required.' })}
-            />
-            {errors.name && <p className="form-error">{errors.name.message}</p>}
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="form-label" htmlFor="event-desc">
-              Description
-            </label>
-            <textarea
-              id="event-desc"
-              rows={3}
-              className="form-input resize-none"
-              placeholder="Brief description of the event…"
-              disabled={busy}
-              {...register('description')}
-            />
-          </div>
-
-          {/* Date */}
-          <div>
-            <label className="form-label" htmlFor="event-date">
-              Event date <span className="text-red-500">*</span>
-            </label>
-            <input
-              id="event-date"
-              type="date"
-              className={`form-input ${errors.event_date ? 'form-input-error' : ''}`}
-              disabled={busy}
-              {...register('event_date', { required: 'Event date is required.' })}
-            />
-            {errors.event_date && (
-              <p className="form-error">{errors.event_date.message}</p>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={onClose}
-              disabled={busy}
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn-primary" disabled={busy}>
-              {busy ? 'Creating…' : 'Create Event'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 // Dashboard tab
-// ─────────────────────────────────────────────────────────────────────────────
-function DashboardTab({ clubId, stats, statsLoading, events, eventsLoading, onNewEvent, onViewEvent }) {
-  const recentEvents = (events ?? []).slice(0, 5)
+// ═══════════════════════════════════════════════════════════════════════════════
+function DashboardTab({ clubId, dashboard, isLoading }) {
+  const role = useAuthStore((s) => s.role)
+  const { data: members, isLoading: membersLoading } = useClubMembers(
+    role !== 'guest' ? clubId : null
+  )
+
+  if (isLoading) return <LoadingSpinner fullPage label="Loading dashboard…" />
+
+  const stats = dashboard?.stats || {}
+  const club = dashboard?.club || {}
+  const recentEvents = dashboard?.recent_events || []
 
   const eventColumns = [
-    { key: 'name',       header: 'Event',        sortable: true },
-    {
-      key: 'event_date',
-      header: 'Date',
-      sortable: true,
-      render: (v) => v ? new Date(v).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—',
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (v) => <StatusBadge status={v} />,
-    },
-    {
-      key: 'cert_count',
-      header: 'Certs Issued',
-      align: 'right',
-      render: (v) => (v ?? 0).toLocaleString(),
-    },
+    { key: 'name', header: 'Event', sortable: true },
+    { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
+    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
   ]
 
   return (
     <div className="space-y-6">
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard
-          label="Total Events"
-          value={stats?.total_events ?? 0}
-          icon={Icon.events}
-          accent="navy"
-          isLoading={statsLoading}
-        />
-        <StatCard
-          label="Certs Issued"
-          value={stats?.certs_issued ?? 0}
-          icon={Icon.certs}
-          accent="gold"
-          isLoading={statsLoading}
-        />
-        <StatCard
-          label="Pending Emails"
-          value={stats?.pending_emails ?? 0}
-          icon={Icon.email}
-          accent="blue"
-          isLoading={statsLoading}
-        />
-        <StatCard
-          label="Failed Emails"
-          value={stats?.failed_emails ?? 0}
-          icon={Icon.failed}
-          accent="red"
-          isLoading={statsLoading}
-        />
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <h1 className="text-2xl font-bold text-foreground">{club.name || 'Club Dashboard'}</h1>
+        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold text-navy">{club.slug}</span>
+        <StatusBadge status={club.is_active ? 'Active' : 'Inactive'} size="sm" />
+      </div>
+
+      {/* Stat cards — 2 rows of 3 */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        <StatCard label="Total Events" value={stats.total_events ?? 0} icon={Icon.events} accent="navy" />
+        <StatCard label="Active Events" value={stats.active_events ?? 0} icon={Icon.active} accent="gold" />
+        <StatCard label="Certificates Issued" value={stats.total_certificates_issued ?? 0} icon={Icon.certs} accent="green" />
+        <StatCard label="Total Participants" value={stats.total_participants ?? 0} icon={Icon.participants} accent="blue" />
+        <StatCard label="Pending Emails" value={stats.pending_emails ?? 0} icon={Icon.email} accent="teal" />
+        <StatCard label="Failed Emails" value={stats.failed_emails ?? 0} icon={Icon.failed} accent="red" />
       </div>
 
       {/* Recent events */}
       <div>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="section-title">Recent Events</h2>
-          <div className="flex gap-2">
-            <button className="btn-primary text-sm" onClick={onNewEvent} id="dashboard-new-event">
-              + New Event
-            </button>
-            <button className="btn-secondary text-sm" onClick={() => {}}>
-              View All
-            </button>
-          </div>
         </div>
         <DataTable
           columns={eventColumns}
           data={recentEvents}
-          isLoading={eventsLoading}
-          emptyMessage="No events yet. Create your first event!"
-          onRowClick={(row) => onViewEvent(row)}
-          rowKey="id"
+          isLoading={false}
+          emptyMessage="No events yet. Create your first event."
+          rowKey="event_id"
         />
       </div>
+
+      {/* Members section — visible to coordinators only */}
+      {role !== 'guest' && (
+        <div>
+          <h2 className="section-title mb-3">Club Members</h2>
+          {membersLoading ? (
+            <LoadingSpinner label="Loading members…" />
+          ) : (members || []).length === 0 ? (
+            <p className="text-sm text-gray-500">No other members. Admin can add coordinators and guests.</p>
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              {members.map((m) => (
+                <div key={m.id} className="card flex items-center gap-3 px-4 py-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-navy text-sm font-bold text-white shrink-0">
+                    {m.name?.charAt(0)?.toUpperCase() || '?'}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{m.name}</p>
+                    <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[m.role] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>
+                      {roleLabel[m.role] || m.role}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Events tab
-// ─────────────────────────────────────────────────────────────────────────────
-function EventsTab({ clubId, events, eventsLoading, onNewEvent, onViewEvent }) {
-  const columns = [
-    { key: 'name',       header: 'Event Name', sortable: true, searchKey: true },
-    {
-      key: 'event_date',
-      header: 'Date',
-      sortable: true,
-      render: (v) => v ? new Date(v).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—',
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (v) => <StatusBadge status={v} />,
-    },
-    {
-      key: 'participant_count',
-      header: 'Participants',
-      align: 'right',
-      render: (v) => (v ?? 0).toLocaleString(),
-    },
-    {
-      key: 'cert_count',
-      header: 'Certs Issued',
-      align: 'right',
-      render: (v) => (v ?? 0).toLocaleString(),
-    },
-  ]
-
-  return (
-    <div>
-      <DataTable
-        columns={columns}
-        data={events ?? []}
-        isLoading={eventsLoading}
-        emptyMessage="No events found. Create one to get started."
-        searchable
-        searchPlaceholder="Search events…"
-        onRowClick={(row) => onViewEvent(row)}
-        rowKey="id"
-        actions={
-          <button
-            id="events-tab-new-event"
-            className="btn-primary text-sm"
-            onClick={onNewEvent}
-          >
-            + New Event
-          </button>
-        }
-      />
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Templates tab (placeholder — TemplateBuilder is Batch 10)
-// ─────────────────────────────────────────────────────────────────────────────
-function TemplatesTab({ clubId }) {
-  const navigate = useNavigate()
-  return (
-    <div className="card p-8 flex flex-col items-center gap-4 text-center">
-      <svg className="h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
-      </svg>
-      <div>
-        <p className="section-title">Certificate Templates</p>
-        <p className="mt-1 text-sm text-gray-500">
-          Choose a preset or build a fully custom template for your events.
-        </p>
-      </div>
-      <button
-        id="templates-new"
-        className="btn-primary"
-        onClick={() => navigate(`/club/${clubId}/templates/new`)}
-      >
-        + New Template
-      </button>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 // Settings tab
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 function SettingsTab({ club, clubLoading }) {
+  const changePassword = useChangePassword()
+  const [showCurrent, setShowCurrent] = useState(false)
+  const [showNew, setShowNew] = useState(false)
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    formState: { errors },
+  } = useForm({ defaultValues: { current_password: '', new_password: '', confirm_password: '' } })
+
+  const onSubmit = (values) => {
+    changePassword.mutate(
+      { current_password: values.current_password, new_password: values.new_password },
+      { onSuccess: () => reset() },
+    )
+  }
+
   if (clubLoading) return <LoadingSpinner fullPage label="Loading club info…" />
 
   return (
-    <div className="max-w-lg space-y-6">
-      <div className="card divide-y divide-gray-100 overflow-hidden">
-        {[
-          ['Club Name',     club?.name],
-          ['Slug',          club?.slug],
-          ['Contact Email', club?.contact_email],
-          ['Status',        club?.is_active ? 'Active' : 'Inactive'],
-        ].map(([label, value]) => (
-          <div key={label} className="flex items-center justify-between px-5 py-4">
-            <span className="text-sm font-medium text-gray-500">{label}</span>
-            <span className="text-sm text-foreground font-semibold">
-              {value ?? '—'}
-            </span>
-          </div>
-        ))}
+    <div className="max-w-lg space-y-8">
+      {/* Club info (read-only) */}
+      <div>
+        <h2 className="section-title mb-3">Club Information</h2>
+        <div className="card divide-y divide-gray-100 overflow-hidden">
+          {[
+            ['Club Name', club?.name],
+            ['Slug', club?.slug],
+            ['Contact Email', club?.contact_email],
+            ['Status', club?.is_active ? 'Active' : 'Inactive'],
+            ['Created', fmtDate(club?.created_at)],
+          ].map(([label, value]) => (
+            <div key={label} className="flex items-center justify-between px-5 py-4">
+              <span className="text-sm font-medium text-gray-500">{label}</span>
+              <span className="text-sm text-foreground font-semibold">{value ?? '—'}</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-gray-400">Contact admin to make changes.</p>
       </div>
-      <p className="text-xs text-gray-400">
-        To update club details, contact the platform administrator.
-      </p>
+
+      {/* Change password */}
+      <div>
+        <h2 className="section-title mb-3">Change Password</h2>
+        <form onSubmit={handleSubmit(onSubmit)} className="card p-5 space-y-4">
+          <div>
+            <label className="form-label">Current Password *</label>
+            <div className="relative">
+              <input
+                type={showCurrent ? 'text' : 'password'}
+                className={`form-input pr-14 ${errors.current_password ? 'form-input-error' : ''}`}
+                {...register('current_password', { required: 'Required' })}
+              />
+              <button type="button" onClick={() => setShowCurrent(!showCurrent)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600">
+                {showCurrent ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {errors.current_password && <p className="form-error">{errors.current_password.message}</p>}
+          </div>
+          <div>
+            <label className="form-label">New Password *</label>
+            <div className="relative">
+              <input
+                type={showNew ? 'text' : 'password'}
+                className={`form-input pr-14 ${errors.new_password ? 'form-input-error' : ''}`}
+                {...register('new_password', { required: 'Required', minLength: { value: 8, message: 'Min 8 characters' } })}
+              />
+              <button type="button" onClick={() => setShowNew(!showNew)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600">
+                {showNew ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {errors.new_password && <p className="form-error">{errors.new_password.message}</p>}
+          </div>
+          <div>
+            <label className="form-label">Confirm New Password *</label>
+            <input
+              type="password"
+              className={`form-input ${errors.confirm_password ? 'form-input-error' : ''}`}
+              {...register('confirm_password', {
+                required: 'Required',
+                validate: (v) => v === watch('new_password') || 'Passwords do not match',
+              })}
+            />
+            {errors.confirm_password && <p className="form-error">{errors.confirm_password.message}</p>}
+          </div>
+          <button type="submit" className="btn-primary" disabled={changePassword.isPending}>
+            {changePassword.isPending ? <LoadingSpinner size="sm" label="" /> : 'Change Password'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// Placeholder tabs
+// ═══════════════════════════════════════════════════════════════════════════════
+function ComingSoonTab({ label }) {
+  return (
+    <div className="card p-8 flex flex-col items-center gap-3 text-center text-gray-400">
+      <p className="text-lg font-semibold">{label}</p>
+      <p className="text-sm">Coming soon</p>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ClubDashboard (main export)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 export default function ClubDashboard() {
   const { club_id } = useParams()
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [showNewEvent, setShowNewEvent] = useState(false)
 
-  // Derive active tab from URL ?tab= param
   const activeTab = TABS.includes(searchParams.get('tab'))
     ? searchParams.get('tab')
     : 'dashboard'
@@ -370,40 +253,16 @@ export default function ClubDashboard() {
   const setTab = (tab) =>
     setSearchParams(tab === 'dashboard' ? {} : { tab }, { replace: true })
 
-  // Data
-  const { data: club,   isLoading: clubLoading   } = useClub(club_id)
-  const { data: stats,  isLoading: statsLoading  } = useClubStats(club_id)
-  const { data: events, isLoading: eventsLoading } = useEvents(club_id)
-
-  const handleViewEvent = (row) =>
-    navigate(`/club/${club_id}/events/${row.id}`)
+  const { data: dashboard, isLoading: dashLoading } = useClubDashboard(club_id)
+  const club = dashboard?.club || null
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <Navbar />
-
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
-
-        {/* Main content */}
         <main className="flex-1 overflow-y-auto bg-background">
           <div className="page-container">
-            {/* Page header */}
-            <div className="mb-6 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">
-                  {clubLoading ? (
-                    <span className="inline-block h-7 w-40 animate-pulse rounded bg-gray-200" />
-                  ) : (
-                    club?.name ?? 'Club Dashboard'
-                  )}
-                </h1>
-                <p className="mt-0.5 text-sm text-gray-500">
-                  Manage your events, participants, and certificates.
-                </p>
-              </div>
-            </div>
-
             {/* Tab bar */}
             <div className="mb-6 flex gap-1 border-b border-gray-200">
               {TABS.map((tab) => (
@@ -419,49 +278,23 @@ export default function ClubDashboard() {
                     }
                   `}
                 >
-                  {tab === 'dashboard' ? 'Dashboard' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </button>
               ))}
             </div>
 
             {/* Tab content */}
             {activeTab === 'dashboard' && (
-              <DashboardTab
-                clubId={club_id}
-                stats={stats}
-                statsLoading={statsLoading}
-                events={events}
-                eventsLoading={eventsLoading}
-                onNewEvent={() => setShowNewEvent(true)}
-                onViewEvent={handleViewEvent}
-              />
+              <DashboardTab clubId={club_id} dashboard={dashboard} isLoading={dashLoading} />
             )}
-            {activeTab === 'events' && (
-              <EventsTab
-                clubId={club_id}
-                events={events}
-                eventsLoading={eventsLoading}
-                onNewEvent={() => setShowNewEvent(true)}
-                onViewEvent={handleViewEvent}
-              />
-            )}
-            {activeTab === 'templates' && (
-              <TemplatesTab clubId={club_id} />
-            )}
+            {activeTab === 'events' && <ComingSoonTab label="Events" />}
+            {activeTab === 'templates' && <ComingSoonTab label="Templates" />}
             {activeTab === 'settings' && (
-              <SettingsTab club={club} clubLoading={clubLoading} />
+              <SettingsTab club={club} clubLoading={dashLoading} />
             )}
           </div>
         </main>
       </div>
-
-      {/* New event modal */}
-      {showNewEvent && (
-        <NewEventModal
-          clubId={club_id}
-          onClose={() => setShowNewEvent(false)}
-        />
-      )}
     </div>
   )
 }

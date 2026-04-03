@@ -4,72 +4,109 @@ import { useToastStore } from '../store/uiStore'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const clubKeys = {
-  all:    ()           => ['clubs'],
-  list:   ()           => ['clubs', 'list'],
-  detail: (clubId)     => ['clubs', clubId],
-  stats:  (clubId)     => ['clubs', clubId, 'stats'],
+  all:       ()             => ['clubs'],
+  list:      (filters)      => ['clubs', 'list', filters],
+  detail:    (clubId)       => ['clubs', clubId],
+  dashboard: (clubId)       => ['clubs', clubId, 'dashboard'],
+  members:   (clubId)       => ['clubs', clubId, 'members'],
+  users:     (clubId)       => ['clubs', clubId, 'users'],
+}
+
+// ── useClubs (admin) ──────────────────────────────────────────────────────────
+/**
+ * GET /admin/clubs with query params
+ * @param {{ is_active?: boolean, search?: string }} filters
+ */
+export function useClubs(filters = {}) {
+  return useQuery({
+    queryKey: clubKeys.list(filters),
+    queryFn: async () => {
+      const params = {}
+      if (filters.is_active !== undefined && filters.is_active !== null) {
+        params.is_active = filters.is_active
+      }
+      if (filters.search) {
+        params.search = filters.search
+      }
+      const { data } = await axiosInstance.get('/admin/clubs', { params })
+      return data
+    },
+  })
 }
 
 // ── useClub ───────────────────────────────────────────────────────────────────
 /**
- * GET /clubs/:club_id
- * Fetches a single club's details.
+ * GET /admin/clubs/{club_id}
  */
 export function useClub(clubId) {
   return useQuery({
     queryKey: clubKeys.detail(clubId),
     queryFn: async () => {
-      const { data } = await axiosInstance.get(`/clubs/${clubId}`)
+      const { data } = await axiosInstance.get(`/admin/clubs/${clubId}`)
       return data
     },
     enabled: !!clubId,
   })
 }
 
-// ── useClubStats ──────────────────────────────────────────────────────────────
+// ── useClubDashboard ──────────────────────────────────────────────────────────
 /**
- * GET /clubs/:club_id/stats
- * Returns { total_events, certs_issued, pending_emails, failed_emails }
+ * GET /clubs/{club_id}/dashboard
  */
-export function useClubStats(clubId) {
+export function useClubDashboard(clubId) {
   return useQuery({
-    queryKey: clubKeys.stats(clubId),
+    queryKey: clubKeys.dashboard(clubId),
     queryFn: async () => {
-      const { data } = await axiosInstance.get(`/clubs/${clubId}/stats`)
+      const { data } = await axiosInstance.get(`/clubs/${clubId}/dashboard`)
       return data
     },
     enabled: !!clubId,
   })
 }
 
-// ── useAllClubs (admin) ───────────────────────────────────────────────────────
+// ── useClubMembers ────────────────────────────────────────────────────────────
 /**
- * GET /clubs
- * Admin-only: lists all clubs.
+ * GET /clubs/{club_id}/members
  */
-export function useAllClubs() {
+export function useClubMembers(clubId) {
   return useQuery({
-    queryKey: clubKeys.list(),
+    queryKey: clubKeys.members(clubId),
     queryFn: async () => {
-      const { data } = await axiosInstance.get('/clubs')
+      const { data } = await axiosInstance.get(`/clubs/${clubId}/members`)
       return data
     },
+    enabled: !!clubId,
   })
 }
 
-// ── useCreateClub (admin) ─────────────────────────────────────────────────────
+// ── useClubUsers (admin) ──────────────────────────────────────────────────────
 /**
- * POST /clubs
- * { name, slug, contact_email }
+ * GET /admin/clubs/{club_id}/users
+ */
+export function useClubUsers(clubId) {
+  return useQuery({
+    queryKey: clubKeys.users(clubId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/admin/clubs/${clubId}/users`)
+      return data
+    },
+    enabled: !!clubId,
+  })
+}
+
+// ── useCreateClub ─────────────────────────────────────────────────────────────
+/**
+ * POST /admin/clubs
+ * Body: { name, slug, contact_email }
  */
 export function useCreateClub() {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: (payload) => axiosInstance.post('/clubs', payload),
+    mutationFn: (payload) => axiosInstance.post('/admin/clubs', payload),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: clubKeys.list() })
+      qc.invalidateQueries({ queryKey: ['clubs'] })
       addToast({ type: 'success', message: 'Club created successfully.' })
     },
     onError: (err) => {
@@ -79,20 +116,20 @@ export function useCreateClub() {
   })
 }
 
-// ── usePatchClub (admin) ──────────────────────────────────────────────────────
+// ── useUpdateClub ─────────────────────────────────────────────────────────────
 /**
- * PATCH /clubs/:club_id
- * Partial update: name, contact_email, is_active
+ * PATCH /admin/clubs/{club_id}
+ * Body: { name?, contact_email?, is_active? }
  */
-export function usePatchClub(clubId) {
+export function useUpdateClub() {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: (payload) => axiosInstance.patch(`/clubs/${clubId}`, payload),
+    mutationFn: ({ clubId, ...payload }) =>
+      axiosInstance.patch(`/admin/clubs/${clubId}`, payload),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: clubKeys.detail(clubId) })
-      qc.invalidateQueries({ queryKey: clubKeys.list() })
+      qc.invalidateQueries({ queryKey: ['clubs'] })
       addToast({ type: 'success', message: 'Club updated.' })
     },
     onError: (err) => {

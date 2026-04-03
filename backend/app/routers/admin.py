@@ -8,117 +8,256 @@ from ..core.dependencies import require_role
 from ..core.security import hash_password
 from ..models.user import User, UserRole
 from ..models.club import Club
+from ..models.event import Event
 from ..models.certificate import Certificate, CertStatus
 from ..models.scan_log import ScanLog
 from ..models.credit_rule import CreditRule
 from ..models.student_credit import StudentCredit
 from ..schemas.club import ClubCreate, ClubUpdate, ClubResponse
 from ..schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
-from ..schemas.user import UserCreate, UserUpdate
+from ..schemas.user import UserCreate, UserUpdate, UserResponse
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 _admin = Depends(require_role(UserRole.SUPER_ADMIN))
 
 
-# ═══ CLUBS ═══════════════════════════════════════════════════════════════
+# ── Helper: Build UserResponse from User document ────────────────────────────
 
-@router.post("/clubs", response_model=ClubResponse)
+def _user_response(u: User) -> UserResponse:
+    return UserResponse(
+        id=str(u.id),
+        username=u.username,
+        name=u.name,
+        email=u.email,
+        role=u.role.value,
+        is_active=u.is_active,
+        created_at=u.created_at,
+        club_id=str(u.club_id) if u.club_id else None,
+        event_id=str(u.event_id) if u.event_id else None,
+        department=u.department,
+        registration_number=u.registration_number,
+        batch=u.batch,
+        section=u.section,
+    )
+
+
+def _club_response(c: Club) -> ClubResponse:
+    return ClubResponse(
+        id=str(c.id),
+        name=c.name,
+        slug=c.slug,
+        contact_email=c.contact_email or "",
+        is_active=c.is_active,
+        created_at=c.created_at,
+    )
+
+
+# ═══ CLUBS ═══════════════════════════════════════════════════════════════════
+
+
+@router.post("/clubs", response_model=ClubResponse, status_code=201)
 async def create_club(body: ClubCreate, _user: User = _admin):
-    if await Club.find_one(Club.slug == body.slug):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Club slug already exists")
-    club = Club(name=body.name, slug=body.slug, contact_email=body.contact_email)
+    slug_upper = body.slug.upper()
+
+    if await Club.find_one(Club.slug == slug_upper):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Slug already exists")
+    if await Club.find_one(Club.contact_email == body.contact_email):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
+
+    club = Club(
+        name=body.name,
+        slug=slug_upper,
+        contact_email=body.contact_email,
+    )
     await club.insert()
-    return ClubResponse(id=str(club.id), name=club.name, slug=club.slug,
-                        contact_email=club.contact_email, is_active=club.is_active,
-                        created_at=club.created_at)
+    return _club_response(club)
 
 
 @router.get("/clubs", response_model=List[ClubResponse])
-async def list_clubs(_user: User = _admin):
-    clubs = await Club.find_all().to_list()
-    return [ClubResponse(id=str(c.id), name=c.name, slug=c.slug,
-                         contact_email=c.contact_email, is_active=c.is_active,
-                         created_at=c.created_at) for c in clubs]
+async def list_clubs(
+    is_active: Optional[bool] = None,
+    search: Optional[str] = None,
+    _user: User = _admin,
+):
+    query = {}
+    if is_active is not None:
+        query["is_active"] = is_active
+    if search:
+        import re
+        pattern = re.compile(re.escape(search), re.IGNORECASE)
+        query["$or"] = [{"name": pattern}, {"slug": pattern}]
+
+    clubs = await Club.find(query).to_list()
+    return [_club_response(c) for c in clubs]
 
 
-@router.patch("/clubs/{club_id}")
-async def update_club(club_id: PydanticObjectId, body: ClubUpdate, _user: User = _admin):
+@router.get("/clubs/{club_id}", response_model=ClubResponse)
+async def get_club(club_id: PydanticObjectId, _user: User = _admin):
     club = await Club.get(club_id)
     if not club:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+    return _club_response(club)
+
+
+@router.patch("/clubs/{club_id}", response_model=ClubResponse)
+async def update_club(
+    club_id: PydanticObjectId,
+    body: ClubUpdate,
+    _user: User = _admin,
+):
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
     update_data = body.model_dump(exclude_none=True)
+
+    # If deactivating club, cascade to all users belonging to this club
+    if update_data.get("is_active") is False and club.is_active is True:
+        await User.find(
+            User.club_id == club_id,
+            User.is_active == True,
+        ).update_many({"$set": {"is_active": False}})
+
     if update_data:
         await club.set(update_data)
-    return {"message": "Club updated"}
+
+    return _club_response(club)
 
 
-# ═══ USERS ═══════════════════════════════════════════════════════════════
+@router.get("/clubs/{club_id}/users", response_model=List[UserResponse])
+async def get_club_users(club_id: PydanticObjectId, _user: User = _admin):
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
 
-@router.post("/users", status_code=201)
+    users = await User.find(User.club_id == club_id).to_list()
+    return [_user_response(u) for u in users]
+
+
+# ═══ USERS ═══════════════════════════════════════════════════════════════════
+
+
+@router.post("/users", response_model=UserResponse, status_code=201)
 async def create_user(body: UserCreate, _user: User = _admin):
+    # Uniqueness checks
     if await User.find_one(User.username == body.username):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Username already exists")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Username already taken")
     if await User.find_one(User.email == body.email):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Email already exists")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
+
+    # Club validation
+    club_oid = None
+    if body.club_id:
+        club_oid = PydanticObjectId(body.club_id)
+        club = await Club.get(club_oid)
+        if not club or not club.is_active:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Club not found or inactive",
+            )
+
+    # Event validation
+    event_oid = None
+    if body.event_id:
+        event_oid = PydanticObjectId(body.event_id)
+        event = await Event.get(event_oid)
+        if not event:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+        if club_oid and event.club_id != club_oid:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Event does not belong to the specified club",
+            )
+
+    # Student registration_number uniqueness
+    if body.role == "student" and body.registration_number:
+        if await User.find_one(
+            User.registration_number == body.registration_number
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Registration number already registered",
+            )
 
     new_user = User(
-        username=body.username, name=body.name, email=body.email,
+        username=body.username,
+        name=body.name,
+        email=body.email,
         password_hash=hash_password(body.password),
         role=UserRole(body.role),
-        club_id=PydanticObjectId(body.club_id) if body.club_id else None,
-        event_id=PydanticObjectId(body.event_id) if body.event_id else None,
+        is_active=body.is_active,
+        club_id=club_oid,
+        event_id=event_oid,
         department=body.department,
         registration_number=body.registration_number,
-        batch=body.batch, section=body.section,
+        batch=body.batch,
+        section=body.section,
     )
     await new_user.insert()
 
+    # Auto-create student_credits doc for students
     if new_user.role == UserRole.STUDENT and body.registration_number:
-        await StudentCredit(
-            student_email=body.email,
-            registration_number=body.registration_number,
-            student_name=body.name, department=body.department,
-            batch=body.batch, section=body.section,
-        ).insert()
+        existing_credit = await StudentCredit.find_one(
+            StudentCredit.student_email == body.email,
+            StudentCredit.registration_number == body.registration_number,
+        )
+        if not existing_credit:
+            await StudentCredit(
+                student_email=body.email,
+                registration_number=body.registration_number,
+                student_name=body.name,
+                department=body.department,
+                batch=body.batch,
+                section=body.section,
+                total_credits=0,
+                credit_history=[],
+                last_updated=datetime.utcnow(),
+            ).insert()
 
-    return {"message": "User created", "user_id": str(new_user.id)}
+    return _user_response(new_user)
 
 
-@router.get("/users")
+@router.get("/users", response_model=List[UserResponse])
 async def list_users(
-    role: Optional[UserRole] = None,
+    role: Optional[str] = None,
     club_id: Optional[str] = None,
     department: Optional[str] = None,
     is_active: Optional[bool] = None,
+    search: Optional[str] = None,
     _user: User = _admin,
 ):
     query = {}
     if role:
-        query["role"] = role.value
+        query["role"] = role
     if club_id:
         query["club_id"] = PydanticObjectId(club_id)
     if department:
         query["department"] = department
     if is_active is not None:
         query["is_active"] = is_active
+    if search:
+        import re
+        pattern = re.compile(re.escape(search), re.IGNORECASE)
+        query["$or"] = [
+            {"name": pattern},
+            {"username": pattern},
+            {"email": pattern},
+        ]
 
     users = await User.find(query).to_list()
-    return [
-        {
-            "id": str(u.id), "username": u.username, "name": u.name,
-            "email": u.email, "role": u.role.value, "is_active": u.is_active,
-            "club_id": str(u.club_id) if u.club_id else None,
-            "department": u.department,
-            "registration_number": u.registration_number,
-            "batch": u.batch, "section": u.section,
-            "created_at": u.created_at.isoformat(),
-        }
-        for u in users
-    ]
+    return [_user_response(u) for u in users]
 
 
-@router.patch("/users/{user_id}")
+@router.get("/users/{user_id}", response_model=UserResponse)
+async def get_user(user_id: PydanticObjectId, _user: User = _admin):
+    target = await User.get(user_id)
+    if not target:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return _user_response(target)
+
+
+@router.patch("/users/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: PydanticObjectId,
     body: UserUpdate,
@@ -127,13 +266,37 @@ async def update_user(
     target = await User.get(user_id)
     if not target:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+
     updates = body.model_dump(exclude_none=True)
+
+    # Email uniqueness check
+    if "email" in updates and updates["email"] != target.email:
+        if await User.find_one(User.email == updates["email"]):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
+
     if updates:
         await target.set(updates)
-    return {"message": "User updated"}
+
+    return _user_response(target)
 
 
-# ═══ CERTIFICATES ════════════════════════════════════════════════════════
+@router.delete("/users/{user_id}")
+async def deactivate_user(user_id: PydanticObjectId, _user: User = _admin):
+    target = await User.get(user_id)
+    if not target:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    if target.role == UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Cannot deactivate the super admin account",
+        )
+
+    await target.set({"is_active": False})
+    return {"message": "User deactivated successfully"}
+
+
+# ═══ CERTIFICATES ════════════════════════════════════════════════════════════
+
 
 @router.get("/certificates")
 async def list_certificates(
@@ -184,7 +347,8 @@ async def revoke_certificate(cert_number: str, admin: User = _admin):
     return {"message": f"Certificate {cert_number} revoked"}
 
 
-# ═══ SCAN LOGS ═══════════════════════════════════════════════════════════
+# ═══ SCAN LOGS ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/scan-logs")
 async def list_scan_logs(
@@ -216,7 +380,8 @@ async def list_scan_logs(
     ]}
 
 
-# ═══ CREDIT RULES ════════════════════════════════════════════════════════
+# ═══ CREDIT RULES ════════════════════════════════════════════════════════════
+
 
 @router.get("/credit-rules", response_model=List[CreditRuleResponse])
 async def get_credit_rules(_user: User = _admin):

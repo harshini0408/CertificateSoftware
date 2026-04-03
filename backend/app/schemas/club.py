@@ -1,18 +1,24 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class ClubCreate(BaseModel):
-    name: str
-    slug: str = Field(..., pattern=r"^[A-Z0-9_]+$")
-    contact_email: Optional[str] = None
+    name: str = Field(..., min_length=2, max_length=100)
+    slug: str = Field(
+        ...,
+        min_length=2,
+        max_length=20,
+        pattern=r"^[A-Z0-9]+$",
+        description="Uppercase letters and digits only. Used in certificate numbers.",
+    )
+    contact_email: EmailStr
 
 
 class ClubUpdate(BaseModel):
-    name: Optional[str] = None
-    contact_email: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=2, max_length=100)
+    contact_email: Optional[EmailStr] = None
     is_active: Optional[bool] = None
 
 
@@ -20,7 +26,7 @@ class ClubResponse(BaseModel):
     id: str
     name: str
     slug: str
-    contact_email: Optional[str] = None
+    contact_email: str
     is_active: bool
     created_at: datetime
 

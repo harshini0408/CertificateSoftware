@@ -1,751 +1,754 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useForm } from 'react-hook-form'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
+import { createPortal } from 'react-dom'
+
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
-import DataTable from '../components/DataTable'
-import StatusBadge from '../components/StatusBadge'
-import StatCard from '../components/StatCard'
-import ConfirmModal from '../components/ConfirmModal'
 import LoadingSpinner from '../components/LoadingSpinner'
-import {
-  useAdminStats,
-  useAdminClubs,
-  useCreateAdminClub,
-  useToggleClub,
-  useAdminUsers,
-  useCreateUser,
-  useResetUserPassword,
-  useToggleUser,
-  useAdminRecentActivity,
-} from '../api/admin'
-import { useAllCerts, useRevokeCert } from '../api/certificates'
+import StatCard from '../components/StatCard'
+import StatusBadge from '../components/StatusBadge'
+import DataTable from '../components/DataTable'
+import ConfirmModal from '../components/ConfirmModal'
 
-// ─── Tab ids ──────────────────────────────────────────────────────────────────
-const TABS = ['overview', 'clubs', 'users', 'certificates']
+import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../api/clubs'
+import { useUsers, useCreateUser, useUpdateUser, useDeactivateUser } from '../api/users'
 
-const ROLES = [
-  { value: 'club_coordinator',   label: 'Club Coordinator' },
-  { value: 'dept_coordinator',   label: 'Department Coordinator' },
-  { value: 'admin',              label: 'Admin' },
-]
+// ── Debounce hook ─────────────────────────────────────────────────────────────
+function useDebounce(value, delay = 300) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return debounced
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared modal shell
-// ─────────────────────────────────────────────────────────────────────────────
-function Modal({ title, onClose, children }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+// ── Format date helper ────────────────────────────────────────────────────────
+function fmtDate(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+// ── Role badge colors ─────────────────────────────────────────────────────────
+const roleBadge = {
+  club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
+  dept_coordinator: 'bg-purple-50 text-purple-700 ring-purple-200',
+  student: 'bg-green-50 text-green-700 ring-green-200',
+  guest: 'bg-amber-50 text-amber-700 ring-amber-200',
+  super_admin: 'bg-red-50 text-red-700 ring-red-200',
+}
+const roleLabel = {
+  club_coordinator: 'Club Coordinator',
+  dept_coordinator: 'Dept Coordinator',
+  student: 'Student',
+  guest: 'Guest',
+  super_admin: 'Super Admin',
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODAL SHELL — reusable portal wrapper
+// ═══════════════════════════════════════════════════════════════════════════════
+function Modal({ isOpen, onClose, title, children, wide = false }) {
+  useEffect(() => {
+    if (!isOpen) return
+    const h = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    document.body.style.overflow = 'hidden'
+    return () => { window.removeEventListener('keydown', h); document.body.style.overflow = '' }
+  }, [isOpen, onClose])
+
+  if (!isOpen) return null
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[10vh]" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
       <div
-        className="relative z-10 w-full max-w-lg rounded-2xl bg-white shadow-modal overflow-hidden"
-        style={{ animation: 'fadeIn 0.15s ease-out' }}
+        className={`relative z-10 w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} rounded-xl bg-white shadow-modal max-h-[80vh] flex flex-col`}
+        style={{ animation: 'fadeIn .15s ease-out' }}
+        onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 shrink-0">
           <h2 className="text-base font-semibold text-foreground">{title}</h2>
-          <button
-            onClick={onClose}
-            className="rounded p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
-            aria-label="Close"
-          >
+          <button onClick={onClose} className="rounded p-1 text-gray-400 hover:text-gray-600 transition-colors">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
-        <div className="px-6 py-5">{children}</div>
+        <div className="overflow-y-auto px-6 py-4 flex-1">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Create Club Modal
-// ─────────────────────────────────────────────────────────────────────────────
-function CreateClubModal({ onClose }) {
-  const createClub = useCreateAdminClub()
-  const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm()
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLUB DETAIL SIDE PANEL
+// ═══════════════════════════════════════════════════════════════════════════════
+function ClubDetailPanel({ clubId, onClose, onEdit }) {
+  const { data: club, isLoading } = useClub(clubId)
+  const { data: members } = useClubUsers(clubId)
 
-  // Auto-generate slug from name
-  const nameVal = watch('name', '')
-  const autoSlug = nameVal.toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '')
-
-  const onSubmit = async (values) => {
-    await createClub.mutateAsync({ ...values, slug: values.slug || autoSlug })
-    onClose()
-  }
-
-  const busy = isSubmitting || createClub.isPending
-
-  return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <label className="form-label" htmlFor="club-name">Club Name *</label>
-        <input
-          id="club-name"
-          className={`form-input ${errors.name ? 'form-input-error' : ''}`}
-          placeholder="e.g. ACM Student Chapter"
-          disabled={busy}
-          {...register('name', { required: 'Club name is required.' })}
-        />
-        {errors.name && <p className="form-error">{errors.name.message}</p>}
-      </div>
-
-      <div>
-        <label className="form-label" htmlFor="club-slug">
-          Slug
-          <span className="ml-1 text-xs text-gray-400 font-normal">(auto-generated)</span>
-        </label>
-        <input
-          id="club-slug"
-          className="form-input font-mono text-sm"
-          placeholder={autoSlug || 'acm-student-chapter'}
-          disabled={busy}
-          {...register('slug')}
-        />
-      </div>
-
-      <div>
-        <label className="form-label" htmlFor="club-email">Contact Email *</label>
-        <input
-          id="club-email"
-          type="email"
-          className={`form-input ${errors.contact_email ? 'form-input-error' : ''}`}
-          placeholder="club@psgtech.ac.in"
-          disabled={busy}
-          {...register('contact_email', {
-            required: 'Contact email is required.',
-            pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email.' },
-          })}
-        />
-        {errors.contact_email && <p className="form-error">{errors.contact_email.message}</p>}
-      </div>
-
-      <div className="flex justify-end gap-3 pt-2">
-        <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="submit" className="btn-primary" disabled={busy}>
-          {busy ? 'Creating…' : 'Create Club'}
-        </button>
-      </div>
-    </form>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Create User Modal
-// ─────────────────────────────────────────────────────────────────────────────
-function CreateUserModal({ clubs, onClose }) {
-  const createUser = useCreateUser()
-  const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm({
-    defaultValues: { role: 'club_coordinator' },
-  })
-  const role = watch('role')
-  const busy = isSubmitting || createUser.isPending
-
-  const onSubmit = async (values) => {
-    await createUser.mutateAsync(values)
-    onClose()
-  }
-
-  return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <label className="form-label" htmlFor="user-name">Full Name</label>
-        <input
-          id="user-name"
-          className="form-input"
-          placeholder="Coordinator name"
-          disabled={busy}
-          {...register('name')}
-        />
-      </div>
-
-      <div>
-        <label className="form-label" htmlFor="user-email">Email *</label>
-        <input
-          id="user-email"
-          type="email"
-          className={`form-input ${errors.email ? 'form-input-error' : ''}`}
-          placeholder="coordinator@psgtech.ac.in"
-          disabled={busy}
-          {...register('email', {
-            required: 'Email is required.',
-            pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email.' },
-          })}
-        />
-        {errors.email && <p className="form-error">{errors.email.message}</p>}
-      </div>
-
-      <div>
-        <label className="form-label" htmlFor="user-role">Role *</label>
-        <select
-          id="user-role"
-          className="form-input"
-          disabled={busy}
-          {...register('role', { required: true })}
-        >
-          {ROLES.map((r) => (
-            <option key={r.value} value={r.value}>{r.label}</option>
-          ))}
-        </select>
-      </div>
-
-      {role === 'club_coordinator' && (
-        <div>
-          <label className="form-label" htmlFor="user-club">Assign to Club *</label>
-          <select
-            id="user-club"
-            className={`form-input ${errors.club_id ? 'form-input-error' : ''}`}
-            disabled={busy}
-            {...register('club_id', { required: role === 'club_coordinator' ? 'Select a club.' : false })}
-          >
-            <option value="">— Select club —</option>
-            {(clubs ?? []).map((c) => (
-              <option key={c._id ?? c.id} value={c._id ?? c.id}>{c.name}</option>
-            ))}
-          </select>
-          {errors.club_id && <p className="form-error">{errors.club_id.message}</p>}
+  if (!clubId) return null
+  return createPortal(
+    <div className="fixed inset-0 z-40" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/20" />
+      <aside
+        className="absolute top-0 right-0 h-full w-full max-w-md bg-white shadow-xl overflow-y-auto"
+        style={{ animation: 'slideIn .2s ease-out' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-lg font-semibold text-foreground">Club Details</h2>
+          <button onClick={onClose} className="rounded p-1 text-gray-400 hover:text-gray-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
-      )}
-
-      <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-3">
-        <p className="text-xs text-blue-700">
-          A temporary password will be generated and emailed to the user automatically.
-        </p>
-      </div>
-
-      <div className="flex justify-end gap-3 pt-2">
-        <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="submit" className="btn-primary" disabled={busy}>
-          {busy ? 'Creating…' : 'Create User'}
-        </button>
-      </div>
-    </form>
+        {isLoading ? (
+          <div className="flex justify-center py-12"><LoadingSpinner /></div>
+        ) : club ? (
+          <div className="px-6 py-5 space-y-5">
+            <div>
+              <h3 className="text-xl font-bold text-foreground">{club.name}</h3>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold text-navy">{club.slug}</span>
+                <StatusBadge status={club.is_active ? 'Active' : 'Inactive'} size="sm" />
+              </div>
+            </div>
+            <dl className="space-y-3 text-sm">
+              <div><dt className="text-gray-500">Contact Email</dt><dd className="font-medium">{club.contact_email || '—'}</dd></div>
+              <div><dt className="text-gray-500">Created</dt><dd className="font-medium">{fmtDate(club.created_at)}</dd></div>
+              <div><dt className="text-gray-500">Members</dt><dd className="font-medium">{members?.length ?? 0}</dd></div>
+            </dl>
+            {members && members.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-600 mb-2">Members</h4>
+                <div className="space-y-2">
+                  {members.map((m) => (
+                    <div key={m.id} className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-navy text-xs font-bold text-white shrink-0">
+                        {m.name?.charAt(0)?.toUpperCase() || '?'}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{m.name}</p>
+                        <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[m.role] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>
+                          {roleLabel[m.role] || m.role}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex gap-3 pt-2">
+              <button className="btn-primary flex-1" onClick={() => onEdit(club)}>Edit Club</button>
+            </div>
+          </div>
+        ) : null}
+      </aside>
+    </div>,
+    document.body,
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Overview Tab
-// ─────────────────────────────────────────────────────────────────────────────
-function OverviewTab({ stats, statsLoading, activity, activityLoading }) {
-  const statItems = [
-    { label: 'Total Clubs',      value: stats?.total_clubs,   accent: 'navy',  icon: clubIcon },
-    { label: 'Active Events',    value: stats?.active_events, accent: 'green', icon: calIcon },
-    { label: 'Total Events',     value: stats?.total_events,  accent: 'blue',  icon: calIcon },
-    { label: 'Certs Issued',     value: stats?.total_certs,   accent: 'gold',  icon: certIcon },
-    { label: 'Pending Emails',   value: stats?.pending_emails, accent: 'amber', icon: mailIcon },
-    { label: 'Failed Emails',    value: stats?.failed_emails,  accent: 'red',   icon: alertIcon },
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW CLUB MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function NewClubModal({ isOpen, onClose }) {
+  const [form, setForm] = useState({ name: '', slug: '', contact_email: '' })
+  const [errors, setErrors] = useState({})
+  const createClub = useCreateClub()
+
+  const handleChange = (field, value) => {
+    if (field === 'slug') value = value.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    setForm((f) => ({ ...f, [field]: value }))
+    setErrors((e) => ({ ...e, [field]: undefined }))
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const errs = {}
+    if (!form.name.trim()) errs.name = 'Club name is required'
+    if (!form.slug.trim()) errs.slug = 'Slug is required'
+    if (!/^[A-Z0-9]+$/.test(form.slug)) errs.slug = 'Uppercase letters and digits only'
+    if (!form.contact_email.trim()) errs.contact_email = 'Email is required'
+    if (Object.keys(errs).length) { setErrors(errs); return }
+
+    createClub.mutate(form, {
+      onSuccess: () => { onClose(); setForm({ name: '', slug: '', contact_email: '' }) },
+      onError: (err) => {
+        const detail = err?.response?.data?.detail || ''
+        if (detail.toLowerCase().includes('slug')) setErrors({ slug: detail })
+        else if (detail.toLowerCase().includes('email')) setErrors({ contact_email: detail })
+      },
+    })
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="New Club">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="form-label">Club Name *</label>
+          <input className={`form-input ${errors.name ? 'form-input-error' : ''}`} value={form.name} onChange={(e) => handleChange('name', e.target.value)} />
+          {errors.name && <p className="form-error">{errors.name}</p>}
+        </div>
+        <div>
+          <label className="form-label">Slug *</label>
+          <input className={`form-input font-mono ${errors.slug ? 'form-input-error' : ''}`} value={form.slug} onChange={(e) => handleChange('slug', e.target.value)} placeholder="ECOCLUB" />
+          <p className="mt-1 text-xs text-gray-400">Used in certificate numbers. Uppercase letters and digits only. Cannot be changed later.</p>
+          {errors.slug && <p className="form-error">{errors.slug}</p>}
+        </div>
+        <div>
+          <label className="form-label">Contact Email *</label>
+          <input type="email" className={`form-input ${errors.contact_email ? 'form-input-error' : ''}`} value={form.contact_email} onChange={(e) => handleChange('contact_email', e.target.value)} />
+          {errors.contact_email && <p className="form-error">{errors.contact_email}</p>}
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary min-w-[120px]" disabled={createClub.isPending}>
+            {createClub.isPending ? <LoadingSpinner size="sm" label="" /> : 'Create Club'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EDIT CLUB MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function EditClubModal({ isOpen, onClose, club }) {
+  const [form, setForm] = useState({ name: '', contact_email: '', is_active: true })
+  const [showConfirm, setShowConfirm] = useState(false)
+  const updateClub = useUpdateClub()
+
+  useEffect(() => {
+    if (club) setForm({ name: club.name, contact_email: club.contact_email || '', is_active: club.is_active })
+  }, [club])
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!form.is_active && club?.is_active) { setShowConfirm(true); return }
+    doSave()
+  }
+
+  const doSave = () => {
+    setShowConfirm(false)
+    updateClub.mutate({ clubId: club.id, ...form }, { onSuccess: onClose })
+  }
+
+  if (!club) return null
+  return (
+    <>
+      <Modal isOpen={isOpen} onClose={onClose} title="Edit Club">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="form-label">Club Name</label>
+            <input className="form-input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div>
+            <label className="form-label">Slug</label>
+            <input className="form-input font-mono bg-gray-50 cursor-not-allowed" value={club.slug} disabled title="Cannot be changed" />
+          </div>
+          <div>
+            <label className="form-label">Contact Email</label>
+            <input type="email" className="form-input" value={form.contact_email} onChange={(e) => setForm((f) => ({ ...f, contact_email: e.target.value }))} />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="form-label mb-0">Active</label>
+            <button type="button" onClick={() => setForm((f) => ({ ...f, is_active: !f.is_active }))}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.is_active ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-primary min-w-[120px]" disabled={updateClub.isPending}>
+              {updateClub.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+      <ConfirmModal
+        isOpen={showConfirm}
+        onClose={() => setShowConfirm(false)}
+        onConfirm={doSave}
+        title="Deactivate Club?"
+        message="Deactivating this club will lock out all its coordinators and guests. This action can be reversed. Continue?"
+        confirmLabel="Deactivate"
+        isLoading={updateClub.isPending}
+      />
+    </>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW USER MODAL (multi-step, role-aware)
+// ═══════════════════════════════════════════════════════════════════════════════
+const roles = [
+  { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
+  { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
+  { value: 'student', label: 'Student', icon: '📚', desc: 'Has certificates & credits' },
+  { value: 'guest', label: 'Guest', icon: '🎟️', desc: 'Access to one event' },
+]
+
+function NewUserModal({ isOpen, onClose }) {
+  const [step, setStep] = useState(1)
+  const [selectedRole, setSelectedRole] = useState('')
+  const [form, setForm] = useState({ username: '', name: '', email: '', password: '', is_active: true, club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' })
+  const [showPassword, setShowPassword] = useState(false)
+  const [errors, setErrors] = useState({})
+  const createUser = useCreateUser()
+  const { data: clubsList } = useClubs({ is_active: true })
+  const { data: eventsList } = useQuery_events(form.club_id)
+
+  const handleChange = (field, value) => {
+    setForm((f) => ({ ...f, [field]: value }))
+    setErrors((e) => ({ ...e, [field]: undefined }))
+  }
+
+  const resetModal = () => { setStep(1); setSelectedRole(''); setForm({ username: '', name: '', email: '', password: '', is_active: true, club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' }); setErrors({}) }
+
+  const handleClose = () => { onClose(); resetModal() }
+
+  const validateStep2 = () => {
+    const errs = {}
+    if (!form.name.trim()) errs.name = 'Required'
+    if (!form.username.trim()) errs.username = 'Required'
+    else if (!/^[a-zA-Z0-9_]+$/.test(form.username)) errs.username = 'Letters, numbers, underscores only'
+    if (!form.email.trim()) errs.email = 'Required'
+    if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
+    if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
+    if (selectedRole === 'guest') { if (!form.club_id) errs.club_id = 'Required'; if (!form.event_id) errs.event_id = 'Required' }
+    if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
+    if (selectedRole === 'student') {
+      if (!form.department) errs.department = 'Required'
+      if (!form.registration_number) errs.registration_number = 'Required'
+      if (!form.batch) errs.batch = 'Required'
+      if (!form.section) errs.section = 'Required'
+    }
+    return errs
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const errs = validateStep2()
+    if (Object.keys(errs).length) { setErrors(errs); return }
+    const payload = { ...form, role: selectedRole }
+    Object.keys(payload).forEach((k) => { if (payload[k] === '') delete payload[k] })
+    createUser.mutate(payload, {
+      onSuccess: handleClose,
+      onError: (err) => {
+        const d = err?.response?.data?.detail || ''
+        if (d.toLowerCase().includes('username')) setErrors({ username: d })
+        else if (d.toLowerCase().includes('email')) setErrors({ email: d })
+        else if (d.toLowerCase().includes('registration')) setErrors({ registration_number: d })
+      },
+    })
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title={step === 1 ? 'New User — Select Role' : `New User — ${roleLabel[selectedRole]}`} wide>
+      {step === 1 ? (
+        <div className="grid grid-cols-2 gap-3">
+          {roles.map((r) => (
+            <button key={r.value} type="button" onClick={() => { setSelectedRole(r.value); setStep(2) }}
+              className="flex flex-col items-center gap-2 rounded-lg border-2 border-gray-200 p-5 text-center transition-all hover:border-navy hover:bg-navy/5">
+              <span className="text-3xl">{r.icon}</span>
+              <span className="text-sm font-semibold text-foreground">{r.label}</span>
+              <span className="text-xs text-gray-500">{r.desc}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="form-label">Full Name *</label>
+              <input className={`form-input ${errors.name ? 'form-input-error' : ''}`} value={form.name} onChange={(e) => handleChange('name', e.target.value)} />
+              {errors.name && <p className="form-error">{errors.name}</p>}
+            </div>
+            <div>
+              <label className="form-label">Username *</label>
+              <input className={`form-input font-mono ${errors.username ? 'form-input-error' : ''}`} value={form.username} onChange={(e) => handleChange('username', e.target.value)} />
+              <p className="mt-0.5 text-xs text-gray-400">Cannot be changed later</p>
+              {errors.username && <p className="form-error">{errors.username}</p>}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="form-label">Email *</label>
+              <input type="email" className={`form-input ${errors.email ? 'form-input-error' : ''}`} value={form.email} onChange={(e) => handleChange('email', e.target.value)} />
+              {errors.email && <p className="form-error">{errors.email}</p>}
+            </div>
+            <div>
+              <label className="form-label">Password *</label>
+              <div className="relative">
+                <input type={showPassword ? 'text' : 'password'} className={`form-input pr-10 ${errors.password ? 'form-input-error' : ''}`} value={form.password} onChange={(e) => handleChange('password', e.target.value)} />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">{showPassword ? 'Hide' : 'Show'}</button>
+              </div>
+              {errors.password && <p className="form-error">{errors.password}</p>}
+            </div>
+          </div>
+
+          {/* Role-specific fields */}
+          {(selectedRole === 'club_coordinator' || selectedRole === 'guest') && (
+            <div>
+              <label className="form-label">Club *</label>
+              <select className={`form-input ${errors.club_id ? 'form-input-error' : ''}`} value={form.club_id} onChange={(e) => handleChange('club_id', e.target.value)}>
+                <option value="">Select club…</option>
+                {(clubsList || []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.slug})</option>)}
+              </select>
+              {errors.club_id && <p className="form-error">{errors.club_id}</p>}
+            </div>
+          )}
+          {selectedRole === 'guest' && form.club_id && (
+            <div>
+              <label className="form-label">Event *</label>
+              <select className={`form-input ${errors.event_id ? 'form-input-error' : ''}`} value={form.event_id} onChange={(e) => handleChange('event_id', e.target.value)}>
+                <option value="">Select event…</option>
+                {(eventsList || []).map((ev) => <option key={ev.id} value={ev.id}>{ev.name}{ev.event_date ? ` — ${fmtDate(ev.event_date)}` : ''}</option>)}
+              </select>
+              {errors.event_id && <p className="form-error">{errors.event_id}</p>}
+            </div>
+          )}
+          {(selectedRole === 'dept_coordinator' || selectedRole === 'student') && (
+            <div>
+              <label className="form-label">Department *</label>
+              <input className={`form-input ${errors.department ? 'form-input-error' : ''}`} value={form.department} onChange={(e) => handleChange('department', e.target.value)} placeholder="CSE" />
+              {errors.department && <p className="form-error">{errors.department}</p>}
+            </div>
+          )}
+          {selectedRole === 'student' && (
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="form-label">Reg Number *</label>
+                <input className={`form-input ${errors.registration_number ? 'form-input-error' : ''}`} value={form.registration_number} onChange={(e) => handleChange('registration_number', e.target.value)} />
+                {errors.registration_number && <p className="form-error">{errors.registration_number}</p>}
+              </div>
+              <div>
+                <label className="form-label">Batch *</label>
+                <input className={`form-input ${errors.batch ? 'form-input-error' : ''}`} value={form.batch} onChange={(e) => handleChange('batch', e.target.value)} placeholder="2022-2026" />
+                {errors.batch && <p className="form-error">{errors.batch}</p>}
+              </div>
+              <div>
+                <label className="form-label">Section *</label>
+                <input className={`form-input ${errors.section ? 'form-input-error' : ''}`} value={form.section} onChange={(e) => handleChange('section', e.target.value)} placeholder="A" />
+                {errors.section && <p className="form-error">{errors.section}</p>}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <label className="form-label mb-0">Active</label>
+            <button type="button" onClick={() => handleChange('is_active', !form.is_active)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.is_active ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          <div className="flex justify-between pt-2">
+            <button type="button" className="btn-secondary" onClick={() => { setStep(1); setErrors({}) }}>← Back</button>
+            <button type="submit" className="btn-primary min-w-[120px]" disabled={createUser.isPending}>
+              {createUser.isPending ? <LoadingSpinner size="sm" label="" /> : 'Create User'}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  )
+}
+
+// ── Tiny hook to fetch events for a club (for guest role dropdown) ────────────
+function useQuery_events(clubId) {
+  return useQuery({
+    queryKey: ['events', 'by-club', clubId],
+    queryFn: async () => {
+      const { default: ax } = await import('../utils/axiosInstance')
+      const { data } = await ax.get(`/clubs/${clubId}/events`)
+      return data
+    },
+    enabled: !!clubId,
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EDIT USER MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function EditUserModal({ isOpen, onClose, user }) {
+  const [form, setForm] = useState({ name: '', email: '', is_active: true })
+  const [showConfirm, setShowConfirm] = useState(false)
+  const updateUser = useUpdateUser()
+
+  useEffect(() => {
+    if (user) setForm({ name: user.name, email: user.email, is_active: user.is_active })
+  }, [user])
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!form.is_active && user?.is_active) { setShowConfirm(true); return }
+    doSave()
+  }
+
+  const doSave = () => {
+    setShowConfirm(false)
+    updateUser.mutate({ userId: user.id, ...form }, { onSuccess: onClose })
+  }
+
+  if (!user) return null
+  return (
+    <>
+      <Modal isOpen={isOpen} onClose={onClose} title="Edit User">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="form-label">Username</label>
+            <input className="form-input bg-gray-50 cursor-not-allowed" value={user.username} disabled title="Cannot be changed" />
+          </div>
+          <div>
+            <label className="form-label">Role</label>
+            <input className="form-input bg-gray-50 cursor-not-allowed" value={roleLabel[user.role] || user.role} disabled title="Cannot be changed" />
+          </div>
+          <div>
+            <label className="form-label">Full Name</label>
+            <input className="form-input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div>
+            <label className="form-label">Email</label>
+            <input type="email" className="form-input" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="form-label mb-0">Active</label>
+            <button type="button" onClick={() => setForm((f) => ({ ...f, is_active: !f.is_active }))}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.is_active ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-primary min-w-[120px]" disabled={updateUser.isPending}>
+              {updateUser.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+      <ConfirmModal isOpen={showConfirm} onClose={() => setShowConfirm(false)} onConfirm={doSave}
+        title="Deactivate User?" message="Deactivating this user will prevent them from logging in. Their data will be preserved. Continue?"
+        confirmLabel="Deactivate" isLoading={updateUser.isPending} />
+    </>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN: AdminDashboard
+// ═══════════════════════════════════════════════════════════════════════════════
+export default function AdminDashboard() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'overview'
+  const setTab = (t) => setSearchParams(t === 'overview' ? {} : { tab: t })
+
+  return (
+    <>
+      <Navbar />
+      <div className="flex">
+        <Sidebar />
+        <main className="flex-1 min-h-[calc(100dvh-3.5rem)] bg-background">
+          <div className="page-container">
+            {activeTab === 'overview' && <OverviewTab />}
+            {activeTab === 'clubs' && <ClubsTab />}
+            {activeTab === 'users' && <UsersTab />}
+            {activeTab === 'certificates' && <ComingSoon label="Certificates" />}
+            {activeTab === 'credit-rules' && <ComingSoon label="Credit Rules" />}
+            {activeTab === 'scan-logs' && <ComingSoon label="Scan Logs" />}
+          </div>
+        </main>
+      </div>
+    </>
+  )
+}
+
+function ComingSoon({ label }) {
+  return <div className="flex flex-col items-center justify-center py-24 text-gray-400"><p className="text-lg font-semibold">{label}</p><p className="text-sm">Coming soon</p></div>
+}
+
+// ── OVERVIEW TAB ──────────────────────────────────────────────────────────────
+function OverviewTab() {
+  const { data: clubs, isLoading: cl } = useClubs()
+  const { data: users, isLoading: ul } = useUsers()
+
+  const activeClubs = useMemo(() => (clubs || []).filter((c) => c.is_active).length, [clubs])
+  const totalStudents = useMemo(() => (users || []).filter((u) => u.role === 'student').length, [users])
+
+  const clubCols = [
+    { key: 'name', header: 'Name', sortable: true },
+    { key: 'slug', header: 'Slug', render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span> },
+    { key: 'is_active', header: 'Status', render: (v) => <StatusBadge status={v ? 'Active' : 'Inactive'} size="sm" /> },
+    { key: 'created_at', header: 'Created', render: (v) => fmtDate(v) },
   ]
 
   return (
     <div className="space-y-6">
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        {statItems.map((s) => (
-          <StatCard
-            key={s.label}
-            label={s.label}
-            value={s.value ?? 0}
-            icon={s.icon}
-            accent={s.accent}
-            isLoading={statsLoading}
-          />
-        ))}
+      <h1 className="text-2xl font-bold text-foreground">Platform Overview</h1>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Total Clubs" value={activeClubs} accent="navy" isLoading={cl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} />
+        <StatCard label="Total Users" value={(users || []).length} accent="blue" isLoading={ul} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>} />
+        <StatCard label="Total Students" value={totalStudents} accent="green" isLoading={ul} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /></svg>} />
+        <StatCard label="Platform Status" value="Online" accent="green" icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} />
       </div>
-
-      {/* Recent activity */}
       <div>
-        <h2 className="section-title mb-3">Recent Activity</h2>
-        {activityLoading ? (
-          <LoadingSpinner label="Loading activity…" />
-        ) : !activity?.length ? (
-          <div className="card p-6 text-center text-sm text-gray-400">No recent activity.</div>
-        ) : (
-          <div className="card divide-y divide-gray-50 overflow-hidden">
-            {(activity ?? []).slice(0, 12).map((item, i) => (
-              <div key={i} className="flex items-start gap-3 px-5 py-3">
-                <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-navy/30" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-foreground truncate">
-                    <span className="font-semibold">{item.actor}</span>
-                    {' '}{item.action}{' '}
-                    <span className="text-navy font-medium">{item.target}</span>
-                  </p>
-                </div>
-                <time className="shrink-0 text-xs text-gray-400 mt-0.5">
-                  {item.timestamp
-                    ? new Date(item.timestamp).toLocaleTimeString('en-IN', {
-                        hour: '2-digit', minute: '2-digit',
-                      })
-                    : '—'}
-                </time>
-              </div>
-            ))}
-          </div>
-        )}
+        <h2 className="section-title mb-3">Recent Clubs</h2>
+        <DataTable columns={clubCols} data={(clubs || []).slice(0, 5)} isLoading={cl} emptyMessage="No clubs yet." />
       </div>
     </div>
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Clubs Tab
-// ─────────────────────────────────────────────────────────────────────────────
-function ClubsTab({ navigate }) {
-  const [showCreate, setShowCreate] = useState(false)
-  const { data: clubs, isLoading } = useAdminClubs()
-  const toggleClub = useToggleClub()
+// ── CLUBS TAB ─────────────────────────────────────────────────────────────────
+function ClubsTab() {
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const debouncedSearch = useDebounce(search)
+  const filters = useMemo(() => {
+    const f = {}
+    if (debouncedSearch) f.search = debouncedSearch
+    if (statusFilter === 'active') f.is_active = true
+    if (statusFilter === 'inactive') f.is_active = false
+    return f
+  }, [debouncedSearch, statusFilter])
+  const { data: clubs, isLoading } = useClubs(filters)
+
+  const [showNew, setShowNew] = useState(false)
+  const [editClub, setEditClub] = useState(null)
+  const [detailClubId, setDetailClubId] = useState(null)
+  const updateClub = useUpdateClub()
 
   const columns = [
-    { key: 'name',          header: 'Club Name',     sortable: true, searchKey: true },
-    { key: 'slug',          header: 'Slug',           render: (v) => <span className="font-mono text-xs text-gray-500">{v}</span> },
-    { key: 'contact_email', header: 'Contact',        searchKey: true },
-    {
-      key: 'event_count',
-      header: 'Events',
-      align: 'right',
-      render: (v) => (v ?? 0).toLocaleString(),
-    },
-    {
-      key: 'is_active',
-      header: 'Status',
-      render: (v) => <StatusBadge status={v ? 'active' : 'inactive'} />,
-    },
-    {
-      key: 'id',
-      header: 'Actions',
-      align: 'center',
-      render: (id, row) => (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={(e) => { e.stopPropagation(); navigate(`/club/${id}`) }}
-            className="rounded px-2.5 py-1 text-xs font-medium text-navy border border-navy/20 hover:bg-navy hover:text-white transition-colors"
-          >
-            Open
+    { key: 'name', header: 'Name', sortable: true, render: (v) => <span className="font-semibold">{v}</span> },
+    { key: 'slug', header: 'Slug', render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span> },
+    { key: 'contact_email', header: 'Email', sortable: true },
+    { key: 'is_active', header: 'Status', render: (v) => <StatusBadge status={v ? 'Active' : 'Inactive'} size="sm" /> },
+    { key: 'created_at', header: 'Created', sortable: true, render: (v) => fmtDate(v) },
+    { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <button title="Edit" onClick={() => setEditClub(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
           </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleClub.mutate(id) }}
-            disabled={toggleClub.isPending}
-            className={`rounded px-2.5 py-1 text-xs font-medium border transition-colors
-              ${row.is_active
-                ? 'text-red-500 border-red-200 hover:bg-red-500 hover:text-white'
-                : 'text-green-600 border-green-200 hover:bg-green-600 hover:text-white'
-              }`}
-          >
-            {row.is_active ? 'Deactivate' : 'Activate'}
+          <button title={row.is_active ? 'Deactivate' : 'Activate'}
+            onClick={() => updateClub.mutate({ clubId: row.id, is_active: !row.is_active })}
+            className={`rounded p-1 transition-colors ${row.is_active ? 'text-gray-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}>
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={row.is_active ? 'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636' : 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'} /></svg>
           </button>
         </div>
-      ),
-    },
-  ]
-
-  return (
-    <div>
-      <DataTable
-        columns={columns}
-        data={clubs ?? []}
-        isLoading={isLoading}
-        searchable
-        searchPlaceholder="Search clubs…"
-        emptyMessage="No clubs yet. Create your first club."
-        rowKey="id"
-        actions={
-          <button id="admin-create-club" className="btn-primary text-sm" onClick={() => setShowCreate(true)}>
-            + New Club
-          </button>
-        }
-      />
-      {showCreate && (
-        <Modal title="Create Club" onClose={() => setShowCreate(false)}>
-          <CreateClubModal onClose={() => setShowCreate(false)} />
-        </Modal>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Users Tab
-// ─────────────────────────────────────────────────────────────────────────────
-function UsersTab() {
-  const [showCreate, setShowCreate] = useState(false)
-  const [confirmReset, setConfirmReset] = useState(null)
-
-  const { data: users,  isLoading: usersLoading } = useAdminUsers()
-  const { data: clubs }  = useAdminClubs()
-  const toggleUser = useToggleUser()
-  const resetPwd   = useResetUserPassword()
-
-  const ROLE_BADGES = {
-    admin:              'bg-red-100 text-red-700',
-    dept_coordinator:   'bg-purple-100 text-purple-700',
-    club_coordinator:   'bg-blue-100 text-blue-700',
-    student:            'bg-gray-100 text-gray-600',
-  }
-
-  const columns = [
-    {
-      key: 'name',
-      header: 'Name',
-      sortable: true,
-      searchKey: true,
-      render: (v, row) => (
-        <div className="flex flex-col">
-          <span className="text-sm font-medium text-foreground">{v ?? '—'}</span>
-          <span className="text-xs text-gray-400">{row.email}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'role',
-      header: 'Role',
-      render: (v) => (
-        <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ROLE_BADGES[v] ?? 'bg-gray-100 text-gray-600'}`}>
-          {(v ?? '').replace(/_/g, ' ')}
-        </span>
-      ),
-    },
-    {
-      key: 'club_name',
-      header: 'Club',
-      render: (v) => <span className="text-xs text-gray-500">{v ?? '—'}</span>,
-    },
-    {
-      key: 'is_active',
-      header: 'Status',
-      render: (v) => <StatusBadge status={v ? 'active' : 'inactive'} />,
-    },
-    {
-      key: 'last_login',
-      header: 'Last Login',
-      render: (v) =>
-        v
-          ? new Date(v).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-          : 'Never',
-    },
-    {
-      key: 'id',
-      header: 'Actions',
-      align: 'center',
-      render: (id, row) => (
-        <div className="flex items-center justify-center gap-1.5">
-          <button
-            onClick={(e) => { e.stopPropagation(); setConfirmReset(row) }}
-            className="rounded px-2 py-1 text-xs text-amber-600 border border-amber-200 hover:bg-amber-500 hover:text-white transition-colors"
-            title="Reset password"
-          >
-            Reset Pwd
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleUser.mutate(id) }}
-            disabled={toggleUser.isPending}
-            className={`rounded px-2 py-1 text-xs border transition-colors
-              ${row.is_active
-                ? 'text-red-500 border-red-200 hover:bg-red-500 hover:text-white'
-                : 'text-green-600 border-green-200 hover:bg-green-600 hover:text-white'
-              }`}
-          >
-            {row.is_active ? 'Disable' : 'Enable'}
-          </button>
-        </div>
-      ),
-    },
-  ]
-
-  return (
-    <div>
-      <DataTable
-        columns={columns}
-        data={users ?? []}
-        isLoading={usersLoading}
-        searchable
-        searchPlaceholder="Search by name or email…"
-        emptyMessage="No users found."
-        rowKey="id"
-        actions={
-          <button id="admin-create-user" className="btn-primary text-sm" onClick={() => setShowCreate(true)}>
-            + New User
-          </button>
-        }
-      />
-
-      {showCreate && (
-        <Modal title="Create User" onClose={() => setShowCreate(false)}>
-          <CreateUserModal clubs={clubs} onClose={() => setShowCreate(false)} />
-        </Modal>
-      )}
-
-      {confirmReset && (
-        <ConfirmModal
-          title="Reset Password"
-          message={`Reset password for ${confirmReset.name ?? confirmReset.email}? A new temporary password will be emailed to them.`}
-          confirmLabel="Reset Password"
-          variant="warning"
-          onConfirm={async () => {
-            await resetPwd.mutateAsync(confirmReset.id)
-            setConfirmReset(null)
-          }}
-          onCancel={() => setConfirmReset(null)}
-        />
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Certificates Tab (admin view)
-// ─────────────────────────────────────────────────────────────────────────────
-function CertificatesAdminTab() {
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [confirmRevoke, setConfirmRevoke] = useState(null)
-
-  const filters = statusFilter !== 'all' ? { status: statusFilter } : {}
-  const { data: certs, isLoading } = useAllCerts(filters)
-  const revokeMutation = useRevokeCert()
-
-  const CERT_STATUS_FILTERS = [
-    { id: 'all',       label: 'All' },
-    { id: 'generated', label: 'Generated' },
-    { id: 'emailed',   label: 'Emailed' },
-    { id: 'failed',    label: 'Failed' },
-    { id: 'revoked',   label: 'Revoked' },
-  ]
-
-  const columns = [
-    {
-      key: 'cert_number',
-      header: 'Cert No.',
-      sortable: true,
-      searchKey: true,
-      render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v ?? '—'}</span>,
-    },
-    {
-      key: 'participant_email',
-      header: 'Participant',
-      sortable: true,
-      searchKey: true,
-      render: (v, row) => (
-        <div className="flex flex-col">
-          <span className="text-sm">{row.participant_name ?? v}</span>
-          {row.participant_name && <span className="text-xs text-gray-400">{v}</span>}
-        </div>
-      ),
-    },
-    {
-      key: 'event_name',
-      header: 'Event',
-      sortable: true,
-      searchKey: true,
-      render: (v, row) => (
-        <div className="flex flex-col">
-          <span className="text-sm">{v}</span>
-          <span className="text-xs text-gray-400">{row.club_name}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'cert_type',
-      header: 'Type',
-      render: (v) => <span className="text-xs capitalize">{(v ?? '').replace(/_/g, ' ')}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (v) => <StatusBadge status={v} />,
-    },
-    {
-      key: 'id',
-      header: 'Actions',
-      align: 'center',
-      render: (id, row) => (
-        <div className="flex items-center justify-center gap-2">
-          {row.pdf_url && (
-            <a
-              href={row.pdf_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="rounded p-1 text-navy hover:bg-navy/10 transition-colors"
-              title="Download"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-            </a>
-          )}
-          {row.status !== 'revoked' && (
-            <button
-              onClick={(e) => { e.stopPropagation(); setConfirmRevoke(row) }}
-              className="rounded px-2 py-1 text-xs text-red-500 border border-red-200 hover:bg-red-500 hover:text-white transition-colors"
-            >
-              Revoke
-            </button>
-          )}
-        </div>
-      ),
-    },
+    )},
   ]
 
   return (
     <div className="space-y-4">
-      {/* Status filter */}
-      <div className="flex gap-1 rounded-lg bg-gray-100 p-1 w-fit">
-        {CERT_STATUS_FILTERS.map((f) => (
-          <button
-            key={f.id}
-            id={`admin-cert-filter-${f.id}`}
-            onClick={() => setStatusFilter(f.id)}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors
-              ${statusFilter === f.id ? 'bg-white text-navy shadow-sm' : 'text-gray-500 hover:text-navy'}`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-foreground">Clubs</h1>
+        <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Club</button>
       </div>
-
-      <DataTable
-        columns={columns}
-        data={certs ?? []}
-        isLoading={isLoading}
-        searchable
-        searchPlaceholder="Search cert no., email, event…"
-        emptyMessage="No certificates found."
-        rowKey="id"
-      />
-
-      {confirmRevoke && (
-        <ConfirmModal
-          title="Revoke Certificate"
-          message={`Revoke certificate ${confirmRevoke.cert_number} for ${confirmRevoke.participant_email}? This action cannot be undone.`}
-          confirmLabel="Revoke"
-          variant="danger"
-          onConfirm={async () => {
-            await revokeMutation.mutateAsync(confirmRevoke.id)
-            setConfirmRevoke(null)
-          }}
-          onCancel={() => setConfirmRevoke(null)}
-        />
-      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="search" placeholder="Search clubs…" value={search} onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="form-input w-36">
+          <option value="">All</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+      <DataTable columns={columns} data={clubs || []} isLoading={isLoading} emptyMessage="No clubs found. Create your first club." onRowClick={(row) => setDetailClubId(row.id)} />
+      <NewClubModal isOpen={showNew} onClose={() => setShowNew(false)} />
+      <EditClubModal isOpen={!!editClub} onClose={() => setEditClub(null)} club={editClub} />
+      {detailClubId && <ClubDetailPanel clubId={detailClubId} onClose={() => setDetailClubId(null)} onEdit={(c) => { setDetailClubId(null); setEditClub(c) }} />}
     </div>
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Inline SVG icons (used in stat cards)
-// ─────────────────────────────────────────────────────────────────────────────
-const clubIcon = (
-  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
-)
-const calIcon = (
-  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-  </svg>
-)
-const certIcon = (
-  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-  </svg>
-)
-const mailIcon = (
-  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-  </svg>
-)
-const alertIcon = (
-  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-)
+// ── USERS TAB ─────────────────────────────────────────────────────────────────
+function UsersTab() {
+  const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const debouncedSearch = useDebounce(search)
+  const filters = useMemo(() => {
+    const f = {}
+    if (debouncedSearch) f.search = debouncedSearch
+    if (roleFilter) f.role = roleFilter
+    if (statusFilter === 'active') f.is_active = true
+    if (statusFilter === 'inactive') f.is_active = false
+    return f
+  }, [debouncedSearch, roleFilter, statusFilter])
+  const { data: users, isLoading } = useUsers(filters)
+  const { data: clubs } = useClubs()
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AdminDashboard (main export)
-// ─────────────────────────────────────────────────────────────────────────────
-export default function AdminDashboard() {
-  const navigate    = useNavigate()
-  const [activeTab, setActiveTab] = useState('overview')
+  const [showNew, setShowNew] = useState(false)
+  const [editUser, setEditUser] = useState(null)
+  const deactivateUser = useDeactivateUser()
+  const [confirmUser, setConfirmUser] = useState(null)
 
-  const { data: stats,    isLoading: statsLoading    } = useAdminStats()
-  const { data: activity, isLoading: activityLoading } = useAdminRecentActivity()
+  const clubMap = useMemo(() => {
+    const m = {}
+    ;(clubs || []).forEach((c) => { m[c.id] = c.name })
+    return m
+  }, [clubs])
 
-  const TAB_LABELS = {
-    overview:     'Overview',
-    clubs:        'Clubs',
-    users:        'Users',
-    certificates: 'Certificates',
+  const getScope = (u) => {
+    if (u.role === 'club_coordinator') return clubMap[u.club_id] || u.club_id || '—'
+    if (u.role === 'dept_coordinator') return u.department || '—'
+    if (u.role === 'student') return `${u.batch || ''} ${u.section || ''}`.trim() || '—'
+    if (u.role === 'guest') return `${clubMap[u.club_id] || ''} · 1 event`
+    return '—'
   }
 
-  return (
-    <div className="flex h-dvh flex-col overflow-hidden">
-      <Navbar />
-
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-
-        <main className="flex-1 overflow-y-auto bg-background">
-          <div className="page-container">
-
-            {/* ── Page header ────────────────────────────────────────── */}
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">Admin Dashboard</h1>
-                <p className="mt-0.5 text-sm text-gray-500">
-                  Platform-wide management for PSG iTech Certificate System.
-                </p>
-              </div>
-              {/* Live pulse indicator */}
-              <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                </span>
-                Live
-              </div>
-            </div>
-
-            {/* ── Tab bar ────────────────────────────────────────────── */}
-            <div className="mb-6 flex gap-1 border-b border-gray-200">
-              {TABS.map((tab) => (
-                <button
-                  key={tab}
-                  id={`admin-tab-${tab}`}
-                  onClick={() => setActiveTab(tab)}
-                  className={`
-                    relative px-4 py-2.5 text-sm font-medium capitalize transition-colors
-                    ${activeTab === tab
-                      ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
-                      : 'text-gray-500 hover:text-navy'
-                    }
-                  `}
-                >
-                  {TAB_LABELS[tab]}
-                </button>
-              ))}
-            </div>
-
-            {/* ── Tab content ────────────────────────────────────────── */}
-            {activeTab === 'overview' && (
-              <OverviewTab
-                stats={stats}
-                statsLoading={statsLoading}
-                activity={activity}
-                activityLoading={activityLoading}
-              />
-            )}
-            {activeTab === 'clubs' && (
-              <ClubsTab navigate={navigate} />
-            )}
-            {activeTab === 'users' && (
-              <UsersTab />
-            )}
-            {activeTab === 'certificates' && (
-              <CertificatesAdminTab />
-            )}
-
-          </div>
-        </main>
+  const columns = [
+    { key: 'name', header: 'Name', sortable: true },
+    { key: 'username', header: 'Username', render: (v) => <span className="font-mono text-xs">{v}</span> },
+    { key: 'role', header: 'Role', render: (v) => <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[v] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>{roleLabel[v] || v}</span> },
+    { key: '_scope', header: 'Scope', searchKey: false, render: (_, row) => <span className="text-xs text-gray-500">{getScope(row)}</span> },
+    { key: 'is_active', header: 'Status', render: (v) => <StatusBadge status={v ? 'Active' : 'Inactive'} size="sm" /> },
+    { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <button title="Edit" onClick={() => setEditUser(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+        </button>
+        {row.role !== 'super_admin' && row.is_active && (
+          <button title="Deactivate" onClick={() => setConfirmUser(row)} className="rounded p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+          </button>
+        )}
       </div>
+    )},
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-foreground">Users</h1>
+        <button className="btn-primary" onClick={() => setShowNew(true)}>+ New User</button>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="search" placeholder="Search users…" value={search} onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
+        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="form-input w-44">
+          <option value="">All Roles</option>
+          <option value="club_coordinator">Club Coordinator</option>
+          <option value="dept_coordinator">Dept Coordinator</option>
+          <option value="student">Student</option>
+          <option value="guest">Guest</option>
+        </select>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="form-input w-36">
+          <option value="">All</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+      <DataTable columns={columns} data={users || []} isLoading={isLoading} emptyMessage="No users found matching your filters." />
+      <NewUserModal isOpen={showNew} onClose={() => setShowNew(false)} />
+      <EditUserModal isOpen={!!editUser} onClose={() => setEditUser(null)} user={editUser} />
+      <ConfirmModal isOpen={!!confirmUser} onClose={() => setConfirmUser(null)}
+        onConfirm={() => { deactivateUser.mutate(confirmUser.id, { onSuccess: () => setConfirmUser(null) }) }}
+        title="Deactivate User?" message={`Deactivating "${confirmUser?.name}" will prevent them from logging in. Their data will be preserved.`}
+        confirmLabel="Deactivate" isLoading={deactivateUser.isPending} />
     </div>
   )
 }

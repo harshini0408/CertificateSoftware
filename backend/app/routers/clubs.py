@@ -1,43 +1,163 @@
-from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends
+from typing import List
 
-from ..core.dependencies import require_club_access
-from ..models.user import User
-from ..models.event import Event
+from beanie import PydanticObjectId
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from ..core.dependencies import get_current_user, require_club_access
+from ..models.user import User, UserRole
+from ..models.club import Club
+from ..models.event import Event, EventStatus
 from ..models.certificate import Certificate, CertStatus
 from ..models.email_log import EmailLog, EmailStatus
-from ..schemas.event import DashboardResponse
+from ..models.participant import Participant
+from ..schemas.club import ClubResponse
+from ..schemas.user import UserResponse
 
 router = APIRouter(prefix="/clubs", tags=["Clubs"])
 
 
-@router.get("/{club_id}/dashboard", response_model=DashboardResponse)
+# ── Helper builders ──────────────────────────────────────────────────────────
+
+def _club_response(c: Club) -> ClubResponse:
+    return ClubResponse(
+        id=str(c.id),
+        name=c.name,
+        slug=c.slug,
+        contact_email=c.contact_email or "",
+        is_active=c.is_active,
+        created_at=c.created_at,
+    )
+
+
+def _user_response(u: User) -> UserResponse:
+    return UserResponse(
+        id=str(u.id),
+        username=u.username,
+        name=u.name,
+        email=u.email,
+        role=u.role.value,
+        is_active=u.is_active,
+        created_at=u.created_at,
+        club_id=str(u.club_id) if u.club_id else None,
+        event_id=str(u.event_id) if u.event_id else None,
+        department=u.department,
+        registration_number=u.registration_number,
+        batch=u.batch,
+        section=u.section,
+    )
+
+
+# ═══ GET /clubs/{club_id} ════════════════════════════════════════════════════
+
+@router.get("/{club_id}", response_model=ClubResponse)
+async def get_club(
+    club_id: PydanticObjectId,
+    _user: User = Depends(require_club_access),
+):
+    club = await Club.get(club_id)
+    if not club or not club.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found or inactive")
+    return _club_response(club)
+
+
+# ═══ GET /clubs/{club_id}/dashboard ══════════════════════════════════════════
+
+@router.get("/{club_id}/dashboard")
 async def club_dashboard(
     club_id: PydanticObjectId,
     _user: User = Depends(require_club_access),
 ):
-    event_count = await Event.find(Event.club_id == club_id).count()
-    total_certs = await Certificate.find(
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    # ── Stats ────────────────────────────────────────────────────────────────
+    total_events = await Event.find(Event.club_id == club_id).count()
+    active_events = await Event.find(
+        Event.club_id == club_id,
+        Event.status == EventStatus.ACTIVE,
+    ).count()
+
+    total_certificates_issued = await Certificate.find(
         Certificate.club_id == club_id,
         Certificate.status != CertStatus.PENDING,
     ).count()
-    pending_emails = await EmailLog.find(
-        EmailLog.status.in_([EmailStatus.PENDING, EmailStatus.QUEUED]),
+
+    total_participants = await Participant.find(
+        Participant.club_id == club_id,
     ).count()
 
-    recent_certs = await Certificate.find(
-        Certificate.club_id == club_id
-    ).sort(-Certificate.issued_at).limit(10).to_list()
-
-    recent_activity = [
-        {"cert_number": c.cert_number, "status": c.status.value,
-         "name": c.snapshot.name, "issued_at": c.issued_at}
-        for c in recent_certs if c.issued_at
+    # EmailLog doesn't have club_id — find via club certificates
+    club_cert_ids = [
+        c.id
+        for c in await Certificate.find(
+            Certificate.club_id == club_id,
+        ).to_list()
     ]
 
-    return DashboardResponse(
-        event_count=event_count,
-        total_certs_issued=total_certs,
-        pending_emails=pending_emails,
-        recent_activity=recent_activity,
-    )
+    pending_emails = 0
+    failed_emails = 0
+    if club_cert_ids:
+        pending_emails = await EmailLog.find(
+            {"certificate_id": {"$in": club_cert_ids}},
+            EmailLog.status.in_([EmailStatus.PENDING, EmailStatus.QUEUED]),
+        ).count()
+
+        failed_emails = await EmailLog.find(
+            {"certificate_id": {"$in": club_cert_ids}},
+            EmailLog.status == EmailStatus.FAILED,
+        ).count()
+
+    # ── Recent events ────────────────────────────────────────────────────────
+    recent_events_docs = await Event.find(
+        Event.club_id == club_id,
+    ).sort(-Event.created_at).limit(5).to_list()
+
+    recent_events = []
+    for ev in recent_events_docs:
+        p_count = await Participant.find(
+            Participant.event_id == ev.id,
+        ).count()
+        c_count = await Certificate.find(
+            Certificate.event_id == ev.id,
+            Certificate.status != CertStatus.PENDING,
+        ).count()
+        recent_events.append({
+            "event_id": str(ev.id),
+            "name": ev.name,
+            "event_date": ev.event_date,
+            "status": ev.status.value,
+            "participant_count": p_count,
+            "cert_count": c_count,
+        })
+
+    return {
+        "club": _club_response(club),
+        "stats": {
+            "total_events": total_events,
+            "active_events": active_events,
+            "total_certificates_issued": total_certificates_issued,
+            "total_participants": total_participants,
+            "pending_emails": pending_emails,
+            "failed_emails": failed_emails,
+        },
+        "recent_events": recent_events,
+    }
+
+
+# ═══ GET /clubs/{club_id}/members ════════════════════════════════════════════
+
+@router.get("/{club_id}/members", response_model=List[UserResponse])
+async def club_members(
+    club_id: PydanticObjectId,
+    _user: User = Depends(require_club_access),
+):
+    # Only super_admin and club_coordinator of this club can view members
+    if _user.role == UserRole.GUEST:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Guests cannot view the member list",
+        )
+
+    users = await User.find(User.club_id == club_id).to_list()
+    return [_user_response(u) for u in users]
