@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
@@ -13,6 +14,15 @@ import ConfirmModal from '../components/ConfirmModal'
 
 import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../api/clubs'
 import { useUsers, useCreateUser, useUpdateUser, useDeactivateUser } from '../api/users'
+import {
+  useAdminStats,
+  useAdminClubs,
+  useAdminCertificates,
+  useRevokeCertificate,
+  useAdminScanLogs,
+  useCreditRules,
+  useUpdateCreditRules
+} from '../api/admin'
 
 // ── Debounce hook ─────────────────────────────────────────────────────────────
 function useDebounce(value, delay = 300) {
@@ -572,56 +582,78 @@ export default function AdminDashboard() {
 function CertificatesTab() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const debouncedSearch = useDebounce(search)
+  const [clubFilter, setClubFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  
+  // Pagination
+  const [page, setPage] = useState(1)
+
+  const { data: clubs } = useClubs()
+  
   const filters = useMemo(() => {
     const f = {}
-    if (debouncedSearch) f.search = debouncedSearch
+    if (search) f.search = search
     if (statusFilter) f.status = statusFilter
+    if (clubFilter) f.club_id = clubFilter
+    if (dateFrom) f.date_from = dateFrom
+    if (dateTo) f.date_to = dateTo
     return f
-  }, [debouncedSearch, statusFilter])
+  }, [search, statusFilter, clubFilter, dateFrom, dateTo])
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['admin', 'certificates', filters],
-    queryFn: async () => {
-      const { default: ax } = await import('../utils/axiosInstance')
-      const { data } = await ax.get('/admin/certificates', { params: filters })
-      return data
-    },
-  })
-
-  const [revoking, setRevoking] = useState(false)
-  const handleRevoke = async (certNumber) => {
-    setRevoking(true)
-    try {
-      const { default: ax } = await import('../utils/axiosInstance')
-      await ax.patch(`/admin/certificates/${certNumber}/revoke`)
-    } finally {
-      setRevoking(false)
-    }
-  }
+  // Triggers API call correctly, keepPreviousData is inside hook
+  const { data, isLoading } = useAdminCertificates(filters, page)
+  const revokeCert = useRevokeCertificate()
+  
+  const [revokeTarget, setRevokeTarget] = useState(null)
 
   const certs = data?.items ?? []
+  const total = data?.total ?? 0
+  const pages = data?.pages ?? 1
 
   const columns = [
-    { key: 'cert_number', header: 'Cert No.', sortable: true, searchKey: true,
+    { key: 'cert_number', header: 'Cert No.', searchKey: true,
       render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v ?? '—'}</span> },
     { key: 'snapshot', header: 'Participant', searchKey: false,
-      render: (snap) => <span className="text-sm">{snap?.name ?? snap?.email ?? '—'}</span> },
+      render: (snap) => <span className="text-sm">{snap?.name ?? '—'}</span> },
+    { key: 'snapshot.email', header: 'Email', searchKey: false,
+      render: (_, row) => <span className="text-sm">{row?.snapshot?.email ?? '—'}</span> },
+    { key: 'snapshot.club_name', header: 'Club', searchKey: false,
+      render: (_, row) => <span className="text-sm">{row?.snapshot?.club_name ?? '—'}</span> },
+    { key: 'snapshot.event_name', header: 'Event', searchKey: false,
+      render: (_, row) => <span className="text-sm">{row?.snapshot?.event_name ?? '—'}</span> },
+    { key: 'cert_type', header: 'Cert Type',
+      render: (v) => <StatusBadge status={v} size="sm" /> },
     { key: 'status', header: 'Status',
       render: (v) => <StatusBadge status={v} size="sm" /> },
     { key: 'issued_at', header: 'Issued', render: (v) => fmtDate(v) },
+    { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+      row.status !== 'revoked' && (
+        <button
+          onClick={() => setRevokeTarget(row)}
+          className="rounded p-1 text-xs font-semibold text-red-600 hover:bg-red-50 hover:underline"
+        >
+          Revoke
+        </button>
+      )
+    )},
   ]
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Certificates</h1>
-        <span className="text-sm text-gray-400">{data?.total ?? 0} total</span>
+        <span className="text-sm text-gray-400">{total} total</span>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <input type="search" placeholder="Search certificates…" value={search}
-          onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="form-input w-64" />
+        <select value={clubFilter} onChange={(e) => { setClubFilter(e.target.value); setPage(1); }}
+          className="form-input w-40">
+          <option value="">All Clubs</option>
+          {(clubs ?? []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           className="form-input w-40">
           <option value="">All Status</option>
           <option value="pending">Pending</option>
@@ -630,59 +662,132 @@ function CertificatesTab() {
           <option value="failed">Failed</option>
           <option value="revoked">Revoked</option>
         </select>
+        <div className="flex items-center gap-2">
+          <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} className="form-input w-36" title="Date From" />
+          <span className="text-gray-400">—</span>
+          <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} className="form-input w-36" title="Date To" />
+        </div>
       </div>
+      
       <DataTable columns={columns} data={certs} isLoading={isLoading}
         emptyMessage="No certificates found." />
+
+      {pages > 0 && (
+        <div className="flex items-center justify-between py-2">
+          <span className="text-sm text-gray-500">
+            Showing {(page - 1) * 50 + (certs.length ? 1 : 0)}–{(page - 1) * 50 + certs.length} of {total} certificates
+          </span>
+          <div className="flex gap-2">
+            <button className="btn-secondary text-sm py-1.5" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</button>
+            <button className="btn-secondary text-sm py-1.5" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next</button>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        isOpen={!!revokeTarget}
+        onClose={() => setRevokeTarget(null)}
+        onConfirm={() => {
+          revokeCert.mutate(revokeTarget?.cert_number, {
+            onSuccess: () => setRevokeTarget(null)
+          })
+        }}
+        title="Revoke Certificate?"
+        message={`Revoke certificate ${revokeTarget?.cert_number} issued to ${revokeTarget?.snapshot?.name}? This cannot be undone.`}
+        confirmLabel="Revoke"
+        isLoading={revokeCert.isPending}
+      />
     </div>
   )
 }
 
 // ── CREDIT RULES TAB ──────────────────────────────────────────────────────
 function CreditRulesTab() {
-  const WEIGHTS = {
-    participant: { points: 1, icon: '🎫', desc: 'For attending an event' },
-    volunteer: { points: 2, icon: '🤝', desc: 'For helping organize an event' },
-    mentor: { points: 3, icon: '🧑‍🏫', desc: 'For mentoring participants' },
-    judge: { points: 3, icon: '⚖️', desc: 'For judging a competition' },
-    coordinator: { points: 4, icon: '🏛️', desc: 'For coordinating an event' },
-    winner_3rd: { points: 4, icon: '🥉', desc: '3rd place winner' },
-    winner_2nd: { points: 5, icon: '🥈', desc: '2nd place winner' },
-    winner_1st: { points: 6, icon: '🥇', desc: '1st place winner' },
+  const { data: rulesData, isLoading } = useCreditRules()
+  const updateRules = useUpdateCreditRules()
+
+  const [localRules, setLocalRules] = useState([])
+  const [editingIndex, setEditingIndex] = useState(null)
+  const [editValue, setEditValue] = useState('')
+
+  useEffect(() => {
+    if (rulesData) setLocalRules(rulesData)
+  }, [rulesData])
+
+  const certTypes = ['participant', 'coordinator', 'winner_1st', 'winner_2nd', 'winner_3rd', 'mentor', 'judge', 'volunteer', 'appreciation']
+
+  // Ensure all types exist in local array
+  const orderedRules = certTypes.map(type => {
+    const r = localRules.find(x => x.cert_type === type)
+    return r || { cert_type: type, points: 0 }
+  })
+
+  const startEdit = (idx, value) => {
+    setEditingIndex(idx)
+    setEditValue(value)
+  }
+
+  const saveInline = () => {
+    const numValue = Math.min(1000, Math.max(0, parseInt(editValue) || 0))
+    const updated = [...orderedRules]
+    updated[editingIndex].points = numValue
+    setLocalRules(updated)
+    setEditingIndex(null)
+  }
+
+  const handleSaveAll = () => {
+    updateRules.mutate(localRules)
   }
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Credit Rules</h1>
+        <h1 className="text-2xl font-bold text-foreground">Credit Points Configuration</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Points awarded per certificate type. Credits are automatically calculated when certificates are issued.
+          These point values apply globally across all clubs.
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {Object.entries(WEIGHTS).map(([type, config]) => (
-          <div key={type} className="card p-5 flex flex-col gap-2 hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <span className="text-2xl">{config.icon}</span>
-              <span className="text-2xl font-black text-navy">{config.points}</span>
+      
+      {isLoading ? (
+        <div className="flex py-12 justify-center"><LoadingSpinner /></div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {orderedRules.map((rule, idx) => (
+            <div key={rule.cert_type} className="card p-5 flex items-center justify-between shadow-sm">
+              <div>
+                <p className="text-sm font-semibold text-foreground capitalize">
+                  {rule.cert_type.replace(/_/g, ' ')}
+                </p>
+                <p className="text-xs text-gray-500">Base points per certificate</p>
+              </div>
+              <div className="flex items-center gap-4">
+                {editingIndex === idx ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" className="form-input w-20 text-center text-lg font-bold p-1"
+                      min={0} max={1000} value={editValue} onChange={(e) => setEditValue(e.target.value)}
+                    />
+                    <button onClick={saveInline} className="h-8 w-8 flex items-center justify-center rounded-full bg-green-100 text-green-700 hover:bg-green-200">✓</button>
+                    <button onClick={() => setEditingIndex(null)} className="h-8 w-8 flex items-center justify-center rounded-full bg-red-100 text-red-700 hover:bg-red-200">✗</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl font-black text-navy">{rule.points}</span>
+                    <button onClick={() => startEdit(idx, rule.points)} className="p-1 text-gray-400 hover:text-navy transition-colors">
+                      ✎
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-            <p className="text-sm font-semibold text-foreground capitalize">
-              {type.replace(/_/g, ' ')}
-            </p>
-            <p className="text-xs text-gray-500">{config.desc}</p>
-            <div className="h-1.5 rounded-full bg-gray-100 mt-auto">
-              <div className="h-full rounded-full bg-navy transition-all"
-                style={{ width: `${(config.points / 6) * 100}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
-        <p className="text-xs font-semibold text-blue-700 mb-1">How Credits Work</p>
-        <p className="text-xs text-blue-600 leading-relaxed">
-          When a certificate is issued, the student automatically receives credits based on the
-          certificate type. Points accumulate on the student's profile and are visible in their
-          dashboard. Department coordinators can view and export credit summaries.
-        </p>
+          ))}
+        </div>
+      )}
+
+      <div className="flex justify-start">
+        <button className="btn-primary min-w-[200px]" onClick={handleSaveAll} disabled={updateRules.isPending}>
+          {updateRules.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save All Changes'}
+        </button>
       </div>
     </div>
   )
@@ -690,54 +795,94 @@ function CreditRulesTab() {
 
 // ── SCAN LOGS TAB ─────────────────────────────────────────────────────────
 function ScanLogsTab() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['admin', 'scan-logs'],
-    queryFn: async () => {
-      const { default: ax } = await import('../utils/axiosInstance')
-      const { data } = await ax.get('/admin/scan-logs', { params: { page_size: 100 } })
-      return data
-    },
-  })
+  const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [page, setPage] = useState(1)
+
+  const filters = useMemo(() => {
+    const f = {}
+    if (search) f.cert_number = search
+    if (dateFrom) f.date_from = dateFrom
+    if (dateTo) f.date_to = dateTo
+    return f
+  }, [search, dateFrom, dateTo])
+
+  const { data, isLoading } = useAdminScanLogs(filters, page)
 
   const logs = data?.items ?? []
+  const total = data?.total ?? 0
+  const pages = data?.pages ?? 1
 
   const columns = [
-    { key: 'cert_number', header: 'Certificate No.', sortable: true, searchKey: true,
+    { key: 'cert_number', header: 'Certificate No.', searchKey: true,
       render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v}</span> },
+    { key: 'scanned_at', header: 'Scanned At',
+      render: (v) => v ? new Date(v).toLocaleString('en-IN', {
+        dateStyle: 'medium', timeStyle: 'short'
+      }) : '—' },
     { key: 'ip_address', header: 'IP Address',
       render: (v) => <span className="text-xs text-gray-500 font-mono">{v ?? '—'}</span> },
     { key: 'user_agent', header: 'Browser',
       render: (v) => {
         if (!v) return '—'
-        const short = v.length > 50 ? v.slice(0, 50) + '…' : v
+        const short = v.length > 60 ? v.slice(0, 60) + '…' : v
         return <span className="text-xs text-gray-500" title={v}>{short}</span>
       }},
-    { key: 'scanned_at', header: 'Scanned At', sortable: true,
-      render: (v) => v ? new Date(v).toLocaleString('en-IN', {
-        dateStyle: 'medium', timeStyle: 'short'
-      }) : '—' },
   ]
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Scan Logs</h1>
-        <span className="text-sm text-gray-400">{data?.total ?? 0} total scans</span>
+        <span className="text-sm text-gray-400">{total} total scans</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="search" placeholder="Search by certificate number…" value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="form-input w-64" />
+        <div className="flex items-center gap-2">
+          <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} className="form-input w-36" title="Date From" />
+          <span className="text-gray-400">—</span>
+          <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} className="form-input w-36" title="Date To" />
+        </div>
       </div>
       <DataTable columns={columns} data={logs} isLoading={isLoading}
-        emptyMessage="No scans recorded yet."
-        searchable searchPlaceholder="Search by certificate number…" />
+        emptyMessage="No scans recorded yet." />
+
+      {pages > 0 && (
+        <div className="flex items-center justify-between py-2">
+          <span className="text-sm text-gray-500">
+            Showing {(page - 1) * 50 + (logs.length ? 1 : 0)}–{(page - 1) * 50 + logs.length} of {total} scans
+          </span>
+          <div className="flex gap-2">
+            <button className="btn-secondary text-sm py-1.5" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</button>
+            <button className="btn-secondary text-sm py-1.5" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 // ── OVERVIEW TAB ──────────────────────────────────────────────────────────────
 function OverviewTab() {
-  const { data: clubs, isLoading: cl } = useClubs()
-  const { data: users, isLoading: ul } = useUsers()
+  const [, setSearchParams] = useSearchParams()
+  const { data: stats, isLoading: sl } = useAdminStats()
+  const { data: clubs, isLoading: cl } = useAdminClubs()
 
-  const activeClubs = useMemo(() => (clubs || []).filter((c) => c.is_active).length, [clubs])
-  const totalStudents = useMemo(() => (users || []).filter((u) => u.role === 'student').length, [users])
+  const recentClubs = useMemo(() => {
+    if (!clubs) return []
+    return [...clubs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5)
+  }, [clubs])
+
+  const chartData = useMemo(() => {
+    if (!clubs) return []
+    return clubs.map(c => ({
+      slug: c.slug,
+      name: c.name,
+      count: c.total_certs ?? c.certs_issued ?? 0
+    }))
+  }, [clubs])
 
   const clubCols = [
     { key: 'name', header: 'Name', sortable: true },
@@ -746,18 +891,58 @@ function OverviewTab() {
     { key: 'created_at', header: 'Created', render: (v) => fmtDate(v) },
   ]
 
+  const hasChartData = chartData.some(d => d.count > 0)
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-foreground">Platform Overview</h1>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Clubs" value={activeClubs} accent="navy" isLoading={cl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} />
-        <StatCard label="Total Users" value={(users || []).length} accent="blue" isLoading={ul} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>} />
-        <StatCard label="Total Students" value={totalStudents} accent="green" isLoading={ul} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /></svg>} />
+      
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard label="Total Clubs" value={stats?.total_clubs ?? 0} accent="navy" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} />
+        <StatCard label="Total Users" value={stats?.total_users ?? 0} accent="blue" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>} />
+        <StatCard label="Total Students" value={stats?.total_students ?? 0} accent="green" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /></svg>} />
+        
+        <StatCard label="Certs Issued Today" value={stats?.certs_today ?? 0} accent="navy" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>} />
+        <StatCard label="Emails Sent Today" value={stats?.emails_sent_today ?? 0} accent="blue" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>} />
         <StatCard label="Platform Status" value="Online" accent="green" icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} />
       </div>
+
+      <div className="card p-6">
+        <h2 className="text-lg font-bold text-foreground mb-4">Certificates Issued per Club (all time)</h2>
+        <div className="h-[280px] w-full">
+          {cl ? (
+            <div className="h-full flex items-center justify-center"><LoadingSpinner /></div>
+          ) : !hasChartData ? (
+            <div className="h-full flex items-center justify-center text-sm text-gray-500">No certificates issued yet.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <XAxis dataKey="slug" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} width={40} />
+                <Tooltip
+                  cursor={{ fill: '#f3f4f6' }}
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  formatter={(value, name, props) => [
+                    `${value} certificates`,
+                    props.payload.name || props.payload.slug
+                  ]}
+                  labelStyle={{ display: 'none' }}
+                />
+                <Bar dataKey="count" fill="#1E3A5F" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
       <div>
-        <h2 className="section-title mb-3">Recent Clubs</h2>
-        <DataTable columns={clubCols} data={(clubs || []).slice(0, 5)} isLoading={cl} emptyMessage="No clubs yet." />
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="section-title mb-0">Recent Clubs</h2>
+          <button className="text-sm font-medium text-navy hover:underline" onClick={() => setSearchParams({ tab: 'clubs' })}>
+            View all &rarr;
+          </button>
+        </div>
+        <DataTable columns={clubCols} data={recentClubs} isLoading={cl} emptyMessage="No clubs yet." />
       </div>
     </div>
   )

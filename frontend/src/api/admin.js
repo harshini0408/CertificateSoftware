@@ -4,20 +4,23 @@ import { useToastStore } from '../store/uiStore'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const adminKeys = {
-  stats:    ()       => ['admin', 'stats'],
-  clubs:    ()       => ['admin', 'clubs'],
-  users:    ()       => ['admin', 'users'],
-  certs:    (f)      => ['admin', 'certificates', f],
-  activity: ()       => ['admin', 'activity'],
+  stats:     ()            => ['admin', 'stats'],
+  clubs:     ()            => ['admin', 'clubs'],
+  users:     ()            => ['admin', 'users'],
+  certs:     (filters, p) => ['admin', 'certificates', filters, p],
+  scanLogs:  (filters, p) => ['admin', 'scan-logs', filters, p],
+  creditRules: ()          => ['admin', 'credit-rules'],
+  activity:  ()            => ['admin', 'activity'],
 }
 
 // ── useAdminStats ─────────────────────────────────────────────────────────────
 /**
  * GET /admin/stats
  * {
- *   total_clubs, total_events, active_events,
- *   total_certs, total_students,
- *   pending_emails, failed_emails
+ *   total_clubs, total_users, total_students,
+ *   total_events, active_events,
+ *   total_certs, certs_today,
+ *   pending_emails, failed_emails, emails_sent_today
  * }
  */
 export function useAdminStats() {
@@ -27,7 +30,7 @@ export function useAdminStats() {
       const { data } = await axiosInstance.get('/admin/stats')
       return data
     },
-    refetchInterval: 60_000,   // refresh stats every minute
+    refetchInterval: 60_000,
   })
 }
 
@@ -188,5 +191,131 @@ export function useAdminRecentActivity() {
       return data
     },
     refetchInterval: 30_000,
+  })
+}
+
+// ── useAdminCertificates ──────────────────────────────────────────────────────
+/**
+ * GET /admin/certificates
+ * Query params: club_id?, status?, date_from?, date_to?, page, limit
+ *
+ * Returns:
+ * {
+ *   items: Array<{
+ *     cert_number, status, cert_type, issued_at,
+ *     snapshot: { name, email, club_name, event_name }
+ *   }>,
+ *   total, page, pages
+ * }
+ */
+export function useAdminCertificates(filters = {}, page = 1) {
+  return useQuery({
+    queryKey: adminKeys.certs(filters, page),
+    queryFn: async () => {
+      const params = { ...filters, page, limit: 50 }
+      // Remove empty/undefined filter values
+      Object.keys(params).forEach((k) => {
+        if (params[k] === '' || params[k] == null) delete params[k]
+      })
+      const { data } = await axiosInstance.get('/admin/certificates', { params })
+      return data
+    },
+    keepPreviousData: true,
+  })
+}
+
+// ── useRevokeCertificate ──────────────────────────────────────────────────────
+/**
+ * PATCH /admin/certificates/:cert_number/revoke
+ * Revokes an issued certificate.
+ */
+export function useRevokeCertificate() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (certNumber) =>
+      axiosInstance.patch(`/admin/certificates/${certNumber}/revoke`),
+    onSuccess: () => {
+      // Invalidate all certificate queries (any filter/page combination)
+      qc.invalidateQueries({ queryKey: ['admin', 'certificates'] })
+      addToast({ type: 'success', message: 'Certificate revoked.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to revoke certificate.',
+      })
+    },
+  })
+}
+
+// ── useAdminScanLogs ──────────────────────────────────────────────────────────
+/**
+ * GET /admin/scan-logs
+ * Query params: cert_number?, date_from?, date_to?, page, limit
+ *
+ * Returns:
+ * {
+ *   items: Array<{
+ *     cert_number, scanned_at, ip_address, user_agent
+ *   }>,
+ *   total, page, pages
+ * }
+ */
+export function useAdminScanLogs(filters = {}, page = 1) {
+  return useQuery({
+    queryKey: adminKeys.scanLogs(filters, page),
+    queryFn: async () => {
+      const params = { ...filters, page, limit: 50 }
+      Object.keys(params).forEach((k) => {
+        if (params[k] === '' || params[k] == null) delete params[k]
+      })
+      const { data } = await axiosInstance.get('/admin/scan-logs', { params })
+      return data
+    },
+    keepPreviousData: true,
+  })
+}
+
+// ── useCreditRules ────────────────────────────────────────────────────────────
+/**
+ * GET /admin/credit-rules
+ * Returns:
+ * Array<{ cert_type: string, points: number }>
+ */
+export function useCreditRules() {
+  return useQuery({
+    queryKey: adminKeys.creditRules(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/admin/credit-rules')
+      return data
+    },
+  })
+}
+
+// ── useUpdateCreditRules ──────────────────────────────────────────────────────
+/**
+ * PUT /admin/credit-rules
+ * Body: { rules: Array<{ cert_type: string, points: number }> }
+ * Replaces the full set of credit rules.
+ */
+export function useUpdateCreditRules() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (rules) =>
+      axiosInstance.put('/admin/credit-rules', { rules }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: adminKeys.creditRules() })
+      addToast({ type: 'success', message: 'Credit rules updated.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to update credit rules.',
+      })
+    },
   })
 }

@@ -4,9 +4,9 @@ import { useToastStore } from '../store/uiStore'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const eventKeys = {
-  all:    ()                       => ['events'],
-  list:   (clubId)                 => ['events', 'list', clubId],
-  detail: (clubId, eventId)        => ['events', clubId, eventId],
+  all:    ()                  => ['events'],
+  list:   (clubId)            => ['events', 'list', clubId],
+  detail: (clubId, eventId)   => ['events', clubId, eventId],
 }
 
 // ── useEvents ─────────────────────────────────────────────────────────────────
@@ -46,7 +46,11 @@ export function useEvent(clubId, eventId) {
 // ── useCreateEvent ────────────────────────────────────────────────────────────
 /**
  * POST /clubs/:club_id/events
- * { name, description, event_date, template_map? }
+ * { name, description?, event_date }
+ *
+ * Usage:
+ *   const { mutate, isPending } = useCreateEvent(clubId)
+ *   mutate({ name, description, event_date })
  */
 export function useCreateEvent(clubId) {
   const qc = useQueryClient()
@@ -70,8 +74,12 @@ export function useCreateEvent(clubId) {
 
 // ── useUpdateEvent ────────────────────────────────────────────────────────────
 /**
- * PATCH /clubs/:club_id/events/:event_id
- * Partial update: name, description, event_date, status, template_map
+ * PUT /clubs/:club_id/events/:event_id
+ * Full update: name, description, event_date, status
+ *
+ * Usage:
+ *   const { mutate, isPending } = useUpdateEvent(clubId, eventId)
+ *   mutate({ name, description, event_date, status })
  */
 export function useUpdateEvent(clubId, eventId) {
   const qc = useQueryClient()
@@ -79,7 +87,7 @@ export function useUpdateEvent(clubId, eventId) {
 
   return useMutation({
     mutationFn: (payload) =>
-      axiosInstance.patch(`/clubs/${clubId}/events/${eventId}`, payload),
+      axiosInstance.put(`/clubs/${clubId}/events/${eventId}`, payload),
 
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
@@ -89,6 +97,36 @@ export function useUpdateEvent(clubId, eventId) {
 
     onError: (err) => {
       const msg = err?.response?.data?.detail || 'Failed to update event.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useDeleteEvent ────────────────────────────────────────────────────────────
+/**
+ * DELETE /clubs/:club_id/events/:event_id
+ * Only allowed for draft events with no issued certificates.
+ *
+ * Usage:
+ *   const { mutate, isPending } = useDeleteEvent(clubId)
+ *   mutate(eventId)
+ */
+export function useDeleteEvent(clubId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (eventId) =>
+      axiosInstance.delete(`/clubs/${clubId}/events/${eventId}`),
+
+    onSuccess: (_data, eventId) => {
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      qc.removeQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      addToast({ type: 'success', message: 'Event deleted.' })
+    },
+
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to delete event.'
       addToast({ type: 'error', message: msg })
     },
   })

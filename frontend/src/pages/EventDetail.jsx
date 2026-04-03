@@ -14,6 +14,7 @@ import axiosInstance from '../utils/axiosInstance'
 import { eventKeys } from '../api/events'
 import FieldMappingCanvas from './FieldMappingCanvas'
 import CertificateIssue from './CertificateIssue'
+import PresetSlotEditor from '../components/PresetSlotEditor'
 
 // ─── Tab ids ──────────────────────────────────────────────────────────────────
 const TABS = ['overview', 'participants', 'field-mapping', 'certificates']
@@ -63,6 +64,14 @@ function OverviewTab({ event, clubId, eventId }) {
     },
     enabled: !!clubId,
   })
+
+  // ── Slot Editor state ─────────────────────────────────────────────────
+  const [slotEditorType, setSlotEditorType] = useState(null)
+  
+  const selectedTemplateDetails = (type) => {
+     const tId = templateMap[type]
+     return (templates ?? []).find(t => t.id === tId)
+  }
 
   // ── Asset handlers ─────────────────────────────────────────────────────
   const handleLogoChange = (file) => {
@@ -218,7 +227,9 @@ function OverviewTab({ event, clubId, eventId }) {
         </p>
 
         <div className="space-y-3">
-          {CERT_TYPES.map((certType) => (
+          {CERT_TYPES.map((certType) => {
+            const mappedTpl = selectedTemplateDetails(certType)
+            return (
             <div
               key={certType}
               className="flex items-center gap-4 rounded-lg bg-gray-50 px-4 py-3"
@@ -244,8 +255,16 @@ function OverviewTab({ event, clubId, eventId }) {
                   </option>
                 ))}
               </select>
+              {mappedTpl?.is_preset && (
+                <button
+                  onClick={() => setSlotEditorType(certType)}
+                  className="btn-secondary text-xs px-3 py-1.5 whitespace-nowrap"
+                >
+                  Edit Slots
+                </button>
+              )}
             </div>
-          ))}
+          )})}
         </div>
 
         <div className="mt-5 flex justify-end">
@@ -259,6 +278,15 @@ function OverviewTab({ event, clubId, eventId }) {
           </button>
         </div>
       </section>
+
+      <PresetSlotEditor
+         isOpen={!!slotEditorType}
+         onClose={() => setSlotEditorType(null)}
+         clubId={clubId}
+         eventId={eventId}
+         certType={slotEditorType}
+         template={selectedTemplateDetails(slotEditorType)}
+      />
     </div>
   )
 }

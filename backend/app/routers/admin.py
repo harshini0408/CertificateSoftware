@@ -10,6 +10,7 @@ from ..models.user import User, UserRole
 from ..models.club import Club
 from ..models.event import Event
 from ..models.certificate import Certificate, CertStatus
+from ..models.email_log import EmailLog, EmailStatus
 from ..models.scan_log import ScanLog
 from ..models.credit_rule import CreditRule
 from ..models.student_credit import StudentCredit
@@ -402,3 +403,63 @@ async def upsert_credit_rules(body: CreditRulesUpdateRequest, admin: User = _adm
             await CreditRule(cert_type=rule.cert_type, points=rule.points,
                              updated_by=admin.id, updated_at=datetime.utcnow()).insert()
     return {"message": f"{len(body.rules)} credit rules upserted"}
+
+
+# ═══ PLATFORM STATS ══════════════════════════════════════════════════════════
+
+
+@router.get("/stats")
+async def platform_stats(_user: User = _admin):
+    """Return aggregated platform-wide statistics for the admin overview dashboard."""
+    from datetime import time as _time
+
+    # Today 00:00:00 UTC — used as the lower bound for "today" counts
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # ── Simple counts ────────────────────────────────────────────────────
+    total_clubs = await Club.find(Club.is_active == True).count()
+    total_users = await User.find(User.role != UserRole.SUPER_ADMIN).count()
+    total_students = await User.find(User.role == UserRole.STUDENT).count()
+    total_certificates = await Certificate.find_all().count()
+
+    certificates_today = await Certificate.find(
+        {"issued_at": {"$gte": today_start}}
+    ).count()
+
+    emails_sent_today = await EmailLog.find(
+        {"sent_at": {"$gte": today_start}, "status": EmailStatus.SENT.value}
+    ).count()
+
+    # ── Certs per club (aggregation pipeline) ────────────────────────────
+    pipeline = [
+        {"$group": {"_id": "$club_id", "count": {"$sum": 1}}},
+    ]
+    raw_groups = await Certificate.aggregate(pipeline).to_list()
+
+    # Build an id → Club lookup to resolve names & slugs
+    all_clubs = await Club.find_all().to_list()
+    club_map: dict = {str(c.id): c for c in all_clubs}
+
+    certs_per_club = []
+    for item in raw_groups:
+        club_oid = item.get("_id")
+        if not club_oid:
+            continue
+        club = club_map.get(str(club_oid))
+        if club:
+            certs_per_club.append(
+                {"club_name": club.name, "slug": club.slug, "count": item["count"]}
+            )
+
+    # Sort descending by count so the bar chart renders highest bars first
+    certs_per_club.sort(key=lambda x: x["count"], reverse=True)
+
+    return {
+        "total_clubs": total_clubs,
+        "total_users": total_users,
+        "total_students": total_students,
+        "total_certificates": total_certificates,
+        "certificates_today": certificates_today,
+        "emails_sent_today": emails_sent_today,
+        "certs_per_club": certs_per_club,
+    }

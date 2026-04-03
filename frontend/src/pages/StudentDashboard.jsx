@@ -253,6 +253,31 @@ export default function StudentDashboard() {
               total={totalCredits}
             />
 
+            {/* ── Credit History ────────────────────────────────────────── */}
+            <div>
+              <h2 className="section-title mb-3">Credit History</h2>
+              <DataTable
+                columns={[
+                 { key: 'cert_number', header: 'Cert No.', searchKey: true,
+                   render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v}</span> },
+                 { key: 'event_name', header: 'Event' },
+                 { key: 'club_name', header: 'Club',
+                   render: (v) => <span className="text-xs text-gray-500">{v}</span> },
+                 { key: 'cert_type', header: 'Type',
+                   render: (v) => <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${TYPE_COLORS[v] ?? 'bg-gray-100 text-gray-600'}`}>{v.replace(/_/g, ' ')}</span> },
+                 { key: 'credits', header: 'Credits Earned', align: 'right',
+                   render: (v) => <span className="font-bold text-green-600">+{v}</span> },
+                 { key: 'issued_at', header: 'Date',
+                   render: (v) => v ? new Date(v).toLocaleDateString('en-IN') : '—' }
+               ]}
+                data={credits?.credit_history ?? []}
+                isLoading={creditsLoading}
+                emptyMessage="No credit history found."
+                searchable
+                searchPlaceholder="Search history..."
+              />
+            </div>
+
             {/* ── Certificates table ──────────────────────────────────── */}
             <div>
               <h2 className="section-title mb-3">My Certificates</h2>

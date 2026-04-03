@@ -4,10 +4,10 @@ import { useToastStore } from '../store/uiStore'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const templateKeys = {
-  all:    ()         => ['templates'],
-  list:   (clubId)   => ['templates', 'list', clubId],
-  presets: ()        => ['templates', 'presets'],
-  detail: (id)       => ['templates', id],
+  all:     ()          => ['templates'],
+  list:    (clubId)    => ['templates', 'list', clubId],
+  presets: ()          => ['templates', 'presets'],
+  detail:  (id)        => ['templates', id],
 }
 
 // ── useTemplates ──────────────────────────────────────────────────────────────
@@ -70,8 +70,8 @@ export function useTemplate(templateId) {
  *   typography: { font_family: string, font_color: string },
  *   elements: Array<{
  *     kind: 'static'|'dynamic'|'divider',
- *     text?: string,              // static text content
- *     label?: string,             // dynamic field slot name
+ *     text?: string,
+ *     label?: string,
  *     font_size: number,
  *     font_weight: 'normal'|'semibold'|'bold',
  *     alignment: 'left'|'center'|'right',
@@ -121,6 +121,53 @@ export function useAssignPreset(clubId, eventId) {
       addToast({
         type: 'error',
         message: err?.response?.data?.detail || 'Failed to assign preset.',
+      })
+    },
+  })
+}
+
+// ── useUpdatePresetSlots ──────────────────────────────────────────────────────
+/**
+ * PATCH /clubs/:club_id/events/:event_id/templates/preset-slots
+ *
+ * Allows resizing field slot dimensions/font-size on a preset template
+ * that has been assigned to an event cert type.
+ *
+ * Body:
+ * {
+ *   cert_type: string,
+ *   slot_updates: Array<{
+ *     slot_id: string,
+ *     width: number,
+ *     height: number,
+ *     font_size: number
+ *   }>
+ * }
+ *
+ * Usage:
+ *   const { mutate } = useUpdatePresetSlots(clubId, eventId)
+ *   mutate({ cert_type, slot_updates })
+ */
+export function useUpdatePresetSlots(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ cert_type, slot_updates }) =>
+      axiosInstance.patch(
+        `/clubs/${clubId}/events/${eventId}/templates/preset-slots`,
+        { cert_type, slot_updates },
+      ),
+    onSuccess: () => {
+      // Refresh both the event detail and any template queries
+      qc.invalidateQueries({ queryKey: ['events', clubId, eventId] })
+      qc.invalidateQueries({ queryKey: templateKeys.all() })
+      addToast({ type: 'success', message: 'Slot sizes saved.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to save slot sizes.',
       })
     },
   })

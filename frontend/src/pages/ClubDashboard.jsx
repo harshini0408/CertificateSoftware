@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
 import StatCard from '../components/StatCard'
 import DataTable from '../components/DataTable'
 import StatusBadge from '../components/StatusBadge'
 import LoadingSpinner from '../components/LoadingSpinner'
+import ConfirmModal from '../components/ConfirmModal'
 import { useClubDashboard, useClubMembers } from '../api/clubs'
+import { useCreateEvent, useDeleteEvent } from '../api/events'
 import { useTemplates, usePresetTemplates } from '../api/templates'
 import { useAuthStore } from '../store/authStore'
 import { useChangePassword } from '../api/auth'
@@ -134,6 +136,14 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function EventsTab({ clubId }) {
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const createEvent = useCreateEvent(clubId)
+  const deleteEvent = useDeleteEvent(clubId)
+
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+
+  const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm()
 
   const { data: events, isLoading } = useQuery({
     queryKey: ['events', clubId, 'list'],
@@ -144,28 +154,55 @@ function EventsTab({ clubId }) {
     enabled: !!clubId,
   })
 
+  const onSubmit = (data) => {
+    createEvent.mutate(data, {
+      onSuccess: (res) => {
+        setIsModalOpen(false)
+        reset()
+        navigate(`/club/${clubId}/events/${res.id ?? res._id}`)
+      }
+    })
+  }
+
+  const handleDelete = () => {
+    deleteEvent.mutate(deleteTarget.id ?? deleteTarget._id, {
+      onSuccess: () => setDeleteTarget(null)
+    })
+  }
+
   const eventColumns = [
     { key: 'name', header: 'Event Name', sortable: true, searchKey: true,
       render: (v, row) => (
         <button
           className="text-sm font-semibold text-navy hover:underline text-left"
-          onClick={() => navigate(`/clubs/${clubId}/events/${row.id}`)}
+          onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)}
         >
+          {v}
           {v}
         </button>
       ) },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
     { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    { key: '_actions', header: 'Actions', align: 'center', searchKey: false, render: (_, row) => (
+        <div className="flex justify-center gap-2">
+          <button onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)} className="text-navy hover:bg-gray-100 p-1.5 rounded" title="Edit">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+          </button>
+          <button onClick={() => setDeleteTarget(row)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Delete">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          </button>
+        </div>
+      ) }
   ]
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 relative">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Events</h1>
         <button
           className="btn-primary"
-          onClick={() => navigate(`/clubs/${clubId}/events/new`)}
+          onClick={() => setIsModalOpen(true)}
         >
           + New Event
         </button>
@@ -177,6 +214,42 @@ function EventsTab({ clubId }) {
         emptyMessage="No events yet. Click '+ New Event' to create one."
         searchable
         searchPlaceholder="Search events…"
+      />
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy/40 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-navy">Create New Event</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
+              <div>
+                <label className="form-label" htmlFor="title">Event Name *</label>
+                <input id="title" type="text" className={`form-input ${errors.name ? 'form-input-error' : ''}`} placeholder="e.g. Hackathon 2024" {...register('name', { required: 'Event name is required' })} />
+                {errors.name && <p className="form-error">{errors.name.message}</p>}
+              </div>
+              <div>
+                <label className="form-label" htmlFor="date">Event Date</label>
+                <input id="date" type="date" className="form-input" {...register('event_date')} />
+              </div>
+              <div className="pt-2 flex justify-end gap-3">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={isSubmitting} className="btn-primary">{isSubmitting ? 'Creating...' : 'Create'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete Event"
+        message={`Are you sure you want to delete '${deleteTarget?.name}'? This will remove all associated certificates and history.`}
+        confirmLabel="Delete"
+        onConfirm={handleDelete}
+        isLoading={deleteEvent.isPending}
       />
     </div>
   )

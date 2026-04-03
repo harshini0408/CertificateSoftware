@@ -3,9 +3,11 @@ import axiosInstance from '../utils/axiosInstance'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const creditKeys = {
-  mine:        ()           => ['credits', 'me'],
-  myHistory:   ()           => ['credits', 'me', 'history'],
-  student:     (id)         => ['credits', 'student', id],
+  mine:           ()      => ['credits', 'me'],
+  myHistory:      ()      => ['credits', 'me', 'history'],
+  myCertificates: ()      => ['credits', 'me', 'certificates'],
+  student:        (id)    => ['credits', 'student', id],
+  studentDetail:  (regNo) => ['dept', 'students', regNo],
 }
 
 // ── Credit weights (mirrors backend config) ───────────────────────────────────
@@ -19,6 +21,7 @@ export const CREDIT_WEIGHTS = {
   winner_3rd:  4,
   winner_2nd:  5,
   winner_1st:  6,
+  appreciation: 1,
 }
 
 /**
@@ -84,7 +87,7 @@ export function useMyCreditsHistory() {
  */
 export function useMyCertificates() {
   return useQuery({
-    queryKey: ['student', 'me', 'certificates'],
+    queryKey: creditKeys.myCertificates(),
     queryFn: async () => {
       const { data } = await axiosInstance.get('/students/me/certificates')
       return data
@@ -120,6 +123,43 @@ export function useStudentCredits(studentId) {
       return data
     },
     enabled: !!studentId,
+  })
+}
+
+/**
+ * GET /dept/students/:registration_number
+ *
+ * Fetches a single student's full credit history for the dept coordinator.
+ * Only fetched when the row is expanded (pass enabled: isExpanded).
+ *
+ * Returns:
+ * {
+ *   registration_number: string,
+ *   name: string,
+ *   section: string,
+ *   batch: string,
+ *   total_credits: number,
+ *   last_activity: string | null,
+ *   credit_history: Array<{
+ *     event_name: string,
+ *     club_name: string,
+ *     cert_type: string,
+ *     points: number,
+ *     earned_at: string
+ *   }>
+ * }
+ */
+export function useStudentDetail(registrationNumber, isExpanded = false) {
+  return useQuery({
+    queryKey: creditKeys.studentDetail(registrationNumber),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(
+        `/dept/students/${registrationNumber}`,
+      )
+      return data
+    },
+    enabled: !!registrationNumber && isExpanded,
+    staleTime: 2 * 60 * 1000, // 2 min — history doesn't change frequently
   })
 }
 

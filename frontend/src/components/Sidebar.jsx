@@ -134,14 +134,13 @@ export default function Sidebar() {
         />
       )}
 
-      {/* Sidebar panel */}
       <aside
         className={`
-          fixed top-14 left-0 z-20 flex h-[calc(100dvh-3.5rem)] w-60 flex-col
-          border-r border-gray-200 bg-white shadow-card
-          transition-transform duration-200 ease-in-out
-          lg:sticky lg:translate-x-0 lg:shadow-none
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+          fixed top-14 left-0 z-20 flex h-[calc(100dvh-3.5rem)] flex-col
+          border-gray-200 bg-white shadow-card
+          transition-all duration-300 ease-in-out
+          lg:sticky lg:shadow-none min-h-0
+          ${sidebarOpen ? 'w-60 translate-x-0 border-r' : 'w-0 -translate-x-full border-none px-0'}
         `}
       >
         {/* Nav links */}

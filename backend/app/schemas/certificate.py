@@ -19,6 +19,7 @@ class CertificateResponse(BaseModel):
     pdf_url: Optional[str] = None
     generated_at: Optional[datetime] = None
     issued_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
