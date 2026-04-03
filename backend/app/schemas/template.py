@@ -47,6 +47,28 @@ class TemplateCreate(BaseModel):
     font_color: Optional[str] = None
 
 
+# ── HTML editor schemas ──────────────────────────────────────────────────
+
+class TemplateHtmlResponse(BaseModel):
+    """Returned by GET /templates/{id}/html"""
+    template_id: str
+    html_content: str
+    field_slots: List[FieldSlotSchema] = Field(default_factory=list)
+
+
+class TemplateHtmlUpdate(BaseModel):
+    """Body for PATCH /templates/{id}/html"""
+    html_content: str
+    field_slots: List[FieldSlotSchema] = Field(default_factory=list)
+
+
+class TemplateFieldsUpdate(BaseModel):
+    """Body for PATCH /templates/{id}/fields"""
+    field_slots: List[FieldSlotSchema]
+
+
+# ── Full response ────────────────────────────────────────────────────────
+
 class TemplateResponse(BaseModel):
     id: str
     club_id: Optional[str] = None
@@ -61,6 +83,11 @@ class TemplateResponse(BaseModel):
     font_family: Optional[str] = None
     font_color: Optional[str] = None
     is_preset: bool
+    is_editable: bool = False
+    source_preset_id: Optional[str] = None
+    forked_from: Optional[str] = None
+    forked_from_name: Optional[str] = None
+    last_edited_at: Optional[datetime] = None
     preview_url: Optional[str] = None
     created_at: datetime
 

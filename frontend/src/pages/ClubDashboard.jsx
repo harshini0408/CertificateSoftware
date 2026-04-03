@@ -11,7 +11,8 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import ConfirmModal from '../components/ConfirmModal'
 import { useClubDashboard, useClubMembers } from '../api/clubs'
 import { useCreateEvent, useDeleteEvent } from '../api/events'
-import { useTemplates, usePresetTemplates } from '../api/templates'
+import { useTemplates, usePresetTemplates, useClubOwnedTemplates } from '../api/templates'
+import TemplateEditorModal from '../components/templates/TemplateEditorModal'
 import { useAuthStore } from '../store/authStore'
 import { useChangePassword } from '../api/auth'
 import axiosInstance from '../utils/axiosInstance'
@@ -255,66 +256,171 @@ function EventsTab({ clubId }) {
   )
 }
 
+// ── Cert type metadata for thumbnail rendering ──────────────────────────────
+const certTypeMeta = {
+  participant:  { label: 'Participant',   cls: 'bg-blue-100 text-blue-700',     accent: '#1B4D3E', bg: '#FFFDF7' },
+  coordinator:  { label: 'Coordinator',   cls: 'bg-green-100 text-green-700',   accent: '#1B5E20', bg: '#F0FFF0' },
+  winner_1st:   { label: '1st Place',     cls: 'bg-amber-100 text-amber-700',   accent: '#DAA520', bg: '#FFFEF5' },
+  winner_2nd:   { label: '2nd Place',     cls: 'bg-gray-200 text-gray-700',     accent: '#8C8C8C', bg: '#FAFAFA' },
+  winner_3rd:   { label: '3rd Place',     cls: 'bg-orange-100 text-orange-700', accent: '#CD7F32', bg: '#FFF9F0' },
+  volunteer:    { label: 'Appreciation',  cls: 'bg-yellow-100 text-yellow-700', accent: '#B8860B', bg: '#FFF8F0' },
+}
+
+// ── Rich certificate thumbnail ───────────────────────────────────────────────
+function CertThumbnail({ template }) {
+  const meta = certTypeMeta[template.cert_type] ?? { accent: '#6366f1', bg: '#fff' }
+  const accent = meta.accent
+  const bgColor = template.background?.value ?? meta.bg
+  const bgStyle = bgColor.includes('gradient') ? { background: bgColor } : { backgroundColor: bgColor }
+  const slots = template.field_slots ?? []
+  const scaleX = 1 / 2480
+  const scaleY = 1 / 3508
+
+  return (
+    <div className="relative w-full overflow-hidden rounded-lg" style={{ ...bgStyle, aspectRatio: '210/297' }}>
+      {/* Border */}
+      <div className="absolute inset-1 rounded border-2" style={{ borderColor: `${accent}50` }} />
+      {/* Title watermark */}
+      <div className="absolute top-[12%] w-full text-center pointer-events-none">
+        <div className="font-bold uppercase tracking-widest" style={{ fontSize: '7px', color: `${accent}90`, letterSpacing: '2px' }}>CERTIFICATE</div>
+        <div className="mt-0.5 font-medium capitalize" style={{ fontSize: '5px', color: `${accent}60` }}>{template.cert_type?.replace(/_/g, ' ')}</div>
+      </div>
+      {/* Slot outlines */}
+      {slots.slice(0, 4).map((slot, i) => (
+        <div key={slot.slot_id ?? i} className="absolute" style={{
+          left: `${(slot.x ?? 200) * scaleX * 100}%`,
+          top: `${(slot.y ?? (800 + i * 80)) * scaleY * 100}%`,
+          width: `${(slot.width ?? 1680) * scaleX * 100}%`,
+          height: `${(slot.height ?? 60) * scaleY * 100}%`,
+          border: `1px dashed ${accent}40`,
+          background: `${accent}08`,
+          borderRadius: '1px',
+        }} />
+      ))}
+      {/* Signature line */}
+      <div className="absolute" style={{ bottom: '14%', left: '15%', width: '30%', height: '1px', background: `${accent}30` }} />
+      {/* QR zone */}
+      <div className="absolute" style={{ bottom: '8%', right: '10%', width: '12%', height: `${12 * (210/297)}%`, border: `1px dashed ${accent}25`, borderRadius: '2px' }} />
+      {/* Preset badge */}
+      {template.is_preset && (
+        <span className="absolute top-1.5 right-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 px-1.5 py-0.5 text-[8px] font-bold text-white shadow-sm">Preset</span>
+      )}
+    </div>
+  )
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Templates tab
 // ═══════════════════════════════════════════════════════════════════════════════
 function TemplatesTab({ clubId }) {
   const navigate = useNavigate()
   const { data: templates, isLoading } = useTemplates(clubId)
+  const { data: clubDocs, isLoading: isClubDocsLoading } = useClubOwnedTemplates()
+
+  const [editingTemplateId, setEditingTemplateId] = useState(null)
 
   const presets = (templates ?? []).filter(t => t.is_preset)
   const custom = (templates ?? []).filter(t => !t.is_preset)
 
-  const certTypeColors = {
-    participant: 'bg-green-50 text-green-700',
-    coordinator: 'bg-blue-50 text-blue-700',
-    volunteer: 'bg-amber-50 text-amber-700',
-    winner_1st: 'bg-yellow-50 text-yellow-700',
-    winner_2nd: 'bg-gray-50 text-gray-700',
-    winner_3rd: 'bg-orange-50 text-orange-700',
+  // Map of preset_id -> club's forked document
+  const clubForkMap = {}
+  if (clubDocs) {
+    for (const doc of clubDocs) {
+      if (doc.forked_from) {
+        clubForkMap[doc.forked_from] = doc
+      }
+    }
   }
 
-  const TemplateCard = ({ template }) => (
-    <div
-      className="card group cursor-pointer overflow-hidden transition-all hover:shadow-lg hover:ring-2 hover:ring-navy/20"
-      onClick={() => navigate(`/templates/${template.id}`)}
-    >
-      {/* Preview area */}
-      <div className="relative h-40 bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center overflow-hidden">
-        <div
-          className="flex h-full w-full items-center justify-center text-3xl font-bold text-gray-200"
-          style={{ background: template.background?.value || '#f7f7f7' }}
-        >
-          {template.name?.charAt(0)?.toUpperCase() || '?'}
-        </div>
-        <span className={`absolute top-2 right-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${certTypeColors[template.cert_type] || 'bg-gray-100 text-gray-600'}`}>
-          {template.cert_type?.replace(/_/g, ' ')}
-        </span>
-        {template.is_preset && (
-          <span className="absolute top-2 left-2 rounded-full bg-navy/80 px-2 py-0.5 text-[10px] font-semibold text-white">
-            Preset
-          </span>
-        )}
-      </div>
-      {/* Info */}
-      <div className="p-4">
-        <p className="text-sm font-semibold text-foreground truncate">{template.name}</p>
-        <p className="mt-1 text-xs text-gray-400">
-          {template.field_slots?.length ?? 0} fields · {template.font_family?.split(',')[0] || 'Default font'}
-        </p>
-      </div>
-    </div>
-  )
+  const RichTemplateCard = ({ template }) => {
+    const meta = certTypeMeta[template.cert_type] ?? { label: template.cert_type, cls: 'bg-gray-100 text-gray-600' }
+    const slotCount = template.field_slots?.length ?? 0
+    
+    // Check if this is a preset that the club has customized
+    const clubFork = template.is_preset ? clubForkMap[template.id] : null
+    const hasFork = !!clubFork
 
-  if (isLoading) return <LoadingSpinner fullPage label="Loading templates…" />
+    const handleCustomize = (e) => {
+      e.stopPropagation()
+      setEditingTemplateId(template.id)
+    }
+
+    return (
+      <div
+        className="card group cursor-pointer overflow-hidden transition-all duration-200 hover:shadow-lg hover:ring-2 hover:ring-navy/20 relative"
+        onClick={() => navigate(`/templates/${template.id}`)}
+      >
+        {/* Customized Badge */}
+        {hasFork && (
+          <div className="absolute top-2 left-2 z-10 bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm border border-emerald-200 flex items-center gap-1">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+            Customized
+          </div>
+        )}
+
+        {/* Rich thumbnail */}
+        <div className="p-3 pb-0">
+          <CertThumbnail template={template} />
+        </div>
+        {/* Info */}
+        <div className="p-3 pt-2.5 space-y-2">
+          <div>
+            <p className="text-sm font-semibold text-foreground truncate group-hover:text-navy transition-colors">
+              {template.name}
+            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${meta.cls}`}>
+                {meta.label}
+              </span>
+              <span className="text-[10px] text-gray-400">
+                {slotCount} slot{slotCount !== 1 ? 's' : ''} · {template.font_family?.split(',')[0] || 'Default'}
+              </span>
+            </div>
+          </div>
+          
+          {/* Action Buttons */}
+          <div className="flex gap-2 relative z-20">
+            <button 
+              className="flex-1 btn-primary text-xs py-1.5"
+              onClick={(e) => { e.stopPropagation(); navigate(`/templates/${template.id}`) }}
+            >
+              Assign
+            </button>
+            <button 
+              className={`flex-1 text-xs py-1.5 rounded-lg font-medium transition-colors border ${
+                hasFork 
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' 
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+              }`}
+              onClick={handleCustomize}
+            >
+              {hasFork ? 'Edit Custom' : 'Customize'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (isLoading || isClubDocsLoading) return <LoadingSpinner fullPage label="Loading templates…" />
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {editingTemplateId && (
+        <TemplateEditorModal 
+          templateId={editingTemplateId} 
+          onClose={() => setEditingTemplateId(null)} 
+        />
+      )}
+
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Templates</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Templates</h1>
+          <p className="text-sm text-gray-500 mt-1">{(templates ?? []).length} template{(templates ?? []).length !== 1 ? 's' : ''} available</p>
+        </div>
         <button
           className="btn-primary"
-          onClick={() => navigate(`/clubs/${clubId}/templates/new`)}
+          onClick={() => navigate(`/club/${clubId}/templates/new`)}
         >
           + Create Template
         </button>
@@ -325,7 +431,7 @@ function TemplatesTab({ clubId }) {
         <div>
           <h2 className="section-title mb-3">Custom Templates</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {custom.map(t => <TemplateCard key={t.id} template={t} />)}
+            {custom.map(t => <RichTemplateCard key={t.id} template={t} />)}
           </div>
         </div>
       )}
@@ -333,18 +439,24 @@ function TemplatesTab({ clubId }) {
       {/* Preset templates */}
       {presets.length > 0 && (
         <div>
-          <h2 className="section-title mb-3">Preset Templates</h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Built-in templates available for all clubs. Assign these to your events.
+          <div className="flex items-center gap-3 mb-3">
+            <h2 className="section-title">Preset Templates</h2>
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{presets.length} presets</span>
+          </div>
+          <p className="text-xs text-gray-500 mb-4">
+            Built-in certificate designs. Assign these to your events from the event detail page.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {presets.map(t => <TemplateCard key={t.id} template={t} />)}
+            {presets.map(t => <RichTemplateCard key={t.id} template={t} />)}
           </div>
         </div>
       )}
 
       {templates?.length === 0 && (
         <div className="card p-12 text-center text-gray-400">
+          <svg className="h-12 w-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+          </svg>
           <p className="text-lg font-semibold">No templates available</p>
           <p className="text-sm mt-1">Preset templates may not be seeded yet. Contact admin.</p>
         </div>

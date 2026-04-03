@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -5,18 +6,41 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
-from ..core.dependencies import require_club_access, require_event_access
-from ..models.template import FieldSlot, FieldSlot as FieldSlotModel, StaticElement, Template, TemplateBackground, TemplateType
+from ..core.dependencies import get_current_user, require_club_access, require_event_access
+from ..models.template import FieldSlot, StaticElement, Template, TemplateBackground, TemplateType
 from ..models.event import Event
-from ..models.user import User
-from ..schemas.template import BackgroundSchema, FieldSlotSchema, StaticElementSchema, TemplateCreate, TemplateResponse
+from ..models.user import User, UserRole
+from ..schemas.template import (
+    BackgroundSchema, FieldSlotSchema, StaticElementSchema,
+    TemplateCreate, TemplateFieldsUpdate, TemplateHtmlResponse,
+    TemplateHtmlUpdate, TemplateResponse,
+)
 
 router = APIRouter(tags=["Templates"])
 
 
+# ── HTML sanitisation ────────────────────────────────────────────────────
+
+_SCRIPT_RE = re.compile(r"<script[\s\S]*?</script>", re.IGNORECASE)
+_STYLE_RE  = re.compile(r"<style[\s\S]*?</style>", re.IGNORECASE)
+_ONEVENT_RE = re.compile(r"""\s+on\w+\s*=\s*["'][^"']*["']""", re.IGNORECASE)
+
+def _sanitise_html(raw: str) -> str:
+    """Strip <script>, <style> blocks and on* event attributes."""
+    html = _SCRIPT_RE.sub("", raw)
+    html = _STYLE_RE.sub("", html)
+    html = _ONEVENT_RE.sub("", html)
+    return html
+
+
 # ── Response helper ──────────────────────────────────────────────────────
 
-def _resp(t: Template) -> TemplateResponse:
+async def _resp(t: Template, include_forked_name: bool = False) -> TemplateResponse:
+    forked_name = None
+    if include_forked_name and t.forked_from:
+        source = await Template.get(t.forked_from)
+        if source:
+            forked_name = source.name
     return TemplateResponse(
         id=str(t.id),
         club_id=str(t.club_id) if t.club_id else None,
@@ -31,18 +55,43 @@ def _resp(t: Template) -> TemplateResponse:
         font_family=t.font_family,
         font_color=t.font_color,
         is_preset=t.is_preset,
+        is_editable=t.is_editable,
+        source_preset_id=str(t.source_preset_id) if t.source_preset_id else None,
+        forked_from=str(t.forked_from) if t.forked_from else None,
+        forked_from_name=forked_name,
+        last_edited_at=t.last_edited_at,
         preview_url=t.preview_url,
         created_at=t.created_at,
     )
 
 
-# ── Preset templates (public browsing) ───────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Preset templates (public browsing)
+# ══════════════════════════════════════════════════════════════════════════
 
 @router.get("/templates/presets", response_model=List[TemplateResponse])
 async def list_presets():
     """Return all built-in preset templates (no auth required)."""
     presets = await Template.find(Template.is_preset == True).to_list()
-    return [_resp(t) for t in presets]
+    return [await _resp(t) for t in presets]
+
+
+@router.get("/templates/club", response_model=List[TemplateResponse])
+async def list_club_own_templates(
+    user: User = Depends(get_current_user),
+):
+    """Return all templates owned by the coordinator's club."""
+    if user.role == UserRole.SUPER_ADMIN:
+        # Super admin sees everything non-preset
+        templates = await Template.find(Template.is_preset == False).to_list()
+    elif user.role == UserRole.CLUB_COORDINATOR:
+        if not user.club_id:
+            return []
+        templates = await Template.find(Template.club_id == user.club_id).to_list()
+    else:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
+
+    return [await _resp(t, include_forked_name=True) for t in templates]
 
 
 @router.get("/templates/{template_id}", response_model=TemplateResponse)
@@ -51,10 +100,149 @@ async def get_template(template_id: PydanticObjectId):
     tpl = await Template.get(template_id)
     if not tpl:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
-    return _resp(tpl)
+    return await _resp(tpl, include_forked_name=True)
 
 
-# ── Club-scoped templates ────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# HTML editor endpoints
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get("/templates/{template_id}/html", response_model=TemplateHtmlResponse)
+async def get_template_html(
+    template_id: PydanticObjectId,
+    user: User = Depends(get_current_user),
+):
+    """Return raw HTML + field_slots for the editor."""
+    tpl = await Template.get(template_id)
+    if not tpl:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
+
+    # Presets are publicly readable; club templates require ownership
+    if not tpl.is_preset and tpl.club_id:
+        if user.role != UserRole.SUPER_ADMIN and user.club_id != tpl.club_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this template")
+
+    return TemplateHtmlResponse(
+        template_id=str(tpl.id),
+        html_content=tpl.html_content,
+        field_slots=[FieldSlotSchema(**s.model_dump()) for s in tpl.field_slots],
+    )
+
+
+@router.patch("/templates/{template_id}/html", response_model=TemplateResponse)
+async def update_template_html(
+    template_id: PydanticObjectId,
+    body: TemplateHtmlUpdate,
+    user: User = Depends(get_current_user),
+):
+    """Update HTML content and field slots for a club-owned editable template."""
+    tpl = await Template.get(template_id)
+    if not tpl:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
+
+    if tpl.is_preset or not tpl.is_editable:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot edit preset templates directly. Fork first.")
+
+    if user.role != UserRole.SUPER_ADMIN:
+        if user.role != UserRole.CLUB_COORDINATOR or user.club_id != tpl.club_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this template")
+
+    # Sanitise HTML
+    clean_html = _sanitise_html(body.html_content)
+    new_slots = [FieldSlot(**s.model_dump()) for s in body.field_slots]
+
+    await tpl.set({
+        "html_content": clean_html,
+        "field_slots": [s.model_dump() for s in new_slots],
+        "last_edited_at": datetime.utcnow(),
+    })
+    await tpl.sync()
+    return await _resp(tpl, include_forked_name=True)
+
+
+@router.patch("/templates/{template_id}/fields", response_model=TemplateResponse)
+async def update_template_fields(
+    template_id: PydanticObjectId,
+    body: TemplateFieldsUpdate,
+    user: User = Depends(get_current_user),
+):
+    """Update only field slot metadata (labels, positions) — no HTML change."""
+    tpl = await Template.get(template_id)
+    if not tpl:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
+
+    if tpl.is_preset:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot edit preset templates")
+
+    if user.role != UserRole.SUPER_ADMIN:
+        if user.role != UserRole.CLUB_COORDINATOR or user.club_id != tpl.club_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this template")
+
+    new_slots = [FieldSlot(**s.model_dump()) for s in body.field_slots]
+    await tpl.set({
+        "field_slots": [s.model_dump() for s in new_slots],
+        "last_edited_at": datetime.utcnow(),
+    })
+    await tpl.sync()
+    return await _resp(tpl, include_forked_name=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Fork endpoint
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.post("/templates/{template_id}/fork", response_model=TemplateResponse, status_code=201)
+async def fork_template(
+    template_id: PydanticObjectId,
+    user: User = Depends(get_current_user),
+):
+    """Fork a preset template into an editable club-owned copy. Idempotent."""
+    if user.role != UserRole.CLUB_COORDINATOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only club coordinators can fork templates")
+
+    club_id = user.club_id
+    if not club_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to your account")
+
+    source = await Template.get(template_id)
+    if not source:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Source template not found")
+
+    # Check for existing fork — idempotent
+    existing = await Template.find_one(
+        Template.forked_from == template_id,
+        Template.club_id == club_id,
+    )
+    if existing:
+        return await _resp(existing, include_forked_name=True)
+
+    # Deep-copy into a new club-owned editable template
+    fork = Template(
+        club_id=club_id,
+        name=f"{source.name} (Custom)",
+        cert_type=source.cert_type,
+        type=TemplateType.CUSTOM,
+        html_content=source.html_content,
+        field_slots=[FieldSlot(**s.model_dump()) for s in source.field_slots],
+        static_elements=[StaticElement(**el.model_dump()) for el in source.static_elements],
+        background=TemplateBackground(**source.background.model_dump()),
+        border_color=source.border_color,
+        font_family=source.font_family,
+        font_color=source.font_color,
+        is_preset=False,
+        is_editable=True,
+        source_preset_id=source.id if source.is_preset else source.source_preset_id,
+        forked_from=source.id,
+        preview_url=source.preview_url,
+        created_at=datetime.utcnow(),
+    )
+    await fork.insert()
+    return await _resp(fork, include_forked_name=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Club-scoped templates
+# ══════════════════════════════════════════════════════════════════════════
 
 @router.get("/clubs/{club_id}/templates", response_model=List[TemplateResponse])
 async def list_templates(
@@ -69,10 +257,33 @@ async def list_templates(
         if t.id not in seen_ids:
             seen_ids.add(t.id)
             combined.append(t)
-    return [_resp(t) for t in combined]
+    return [await _resp(t) for t in combined]
 
 
-@router.post("/clubs/{club_id}/templates", response_model=TemplateResponse, status_code=201)
+# ── Club-scoped presets (global presets + club copies) ───────────────────
+
+@router.get("/clubs/{club_id}/templates/presets", response_model=List[TemplateResponse])
+async def list_club_presets(
+    club_id: PydanticObjectId,
+    _user: User = Depends(require_club_access),
+):
+    """Return all 6 global presets plus any club-specific copies."""
+    presets = await Template.find(Template.is_preset == True).to_list()
+    copies = await Template.find(
+        Template.club_id == club_id,
+        Template.source_preset_id != None,
+    ).to_list()
+
+    seen_ids: set = set()
+    combined = []
+    for t in presets + copies:
+        if t.id not in seen_ids:
+            seen_ids.add(t.id)
+            combined.append(t)
+    return [await _resp(t) for t in combined]
+
+
+
 async def create_template(
     club_id: PydanticObjectId,
     body: TemplateCreate,
@@ -93,10 +304,12 @@ async def create_template(
         is_preset=False,
     )
     await tpl.insert()
-    return _resp(tpl)
+    return await _resp(tpl)
 
 
-# ── Assign preset to event ───────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Assign preset to event
+# ══════════════════════════════════════════════════════════════════════════
 
 @router.post("/clubs/{club_id}/events/{event_id}/templates/assign-preset")
 async def assign_preset(
@@ -105,10 +318,7 @@ async def assign_preset(
     body: dict,
     _user: User = Depends(require_event_access),
 ):
-    """Assign a preset template to an event's template_map for a given cert_type.
-
-    Body: { "preset_id": "...", "cert_type": "participant" }
-    """
+    """Assign a preset template to an event's template_map for a given cert_type."""
     preset_id = body.get("preset_id")
     cert_type = body.get("cert_type", "participant")
 
@@ -129,10 +339,11 @@ async def assign_preset(
     return {"message": f"Preset '{preset.name}' assigned for {cert_type}"}
 
 
-# ── Preset slot editor ───────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Preset slot editor (copy-on-write resize)
+# ══════════════════════════════════════════════════════════════════════════
 
 class SlotUpdate(BaseModel):
-    """A single slot resize instruction. Only width, height, font_size allowed."""
     slot_id: str
     width: Optional[float] = Field(None, ge=1, le=2480)
     height: Optional[float] = Field(None, ge=1, le=3508)
@@ -140,7 +351,6 @@ class SlotUpdate(BaseModel):
 
 
 class PresetSlotPatchRequest(BaseModel):
-    """Body for PATCH preset-slots."""
     cert_type: str
     slot_updates: List[SlotUpdate]
 
@@ -162,16 +372,11 @@ async def patch_preset_slots(
     body: PresetSlotPatchRequest,
     _user: User = Depends(require_event_access),
 ):
-    """Allow a club coordinator to resize field slots on a preset template
-    assigned to their event.  The original preset is never mutated —
-    a club-specific copy is created (or reused) transparently.
-    """
-    # ── 1. Verify event belongs to club ─────────────────────────────────
+    """Resize field slots via copy-on-write."""
     event = await Event.get(event_id)
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
-    # ── 2. Resolve template_id from event.template_map ──────────────────
     cert_type = body.cert_type
     template_id = event.template_map.get(cert_type)
     if not template_id:
@@ -184,58 +389,44 @@ async def patch_preset_slots(
     if not template:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Assigned template not found")
 
-    # ── 3. Copy-on-write for preset templates ────────────────────────────
+    # Copy-on-write for preset templates
     if template.is_preset:
         copy_name = f"{template.name} (customised)"
-
-        # Check if a club-specific copy already exists
         existing_copy = await Template.find_one(
             Template.club_id == club_id,
-            Template.name == copy_name,
+            Template.source_preset_id == template.id,
             Template.cert_type == cert_type,
         )
 
         if existing_copy:
-            # Reuse the existing copy
             working_template = existing_copy
         else:
-            # Duplicate the preset — deep-copy all embedded sub-documents
             working_template = Template(
                 club_id=club_id,
                 name=copy_name,
                 cert_type=template.cert_type,
-                type=TemplateType.CUSTOM,
+                type=TemplateType.PRESET,
                 html_content=template.html_content,
-                field_slots=[
-                    FieldSlot(**slot.model_dump()) for slot in template.field_slots
-                ],
-                static_elements=[
-                    StaticElement(**el.model_dump()) for el in template.static_elements
-                ],
+                field_slots=[FieldSlot(**slot.model_dump()) for slot in template.field_slots],
+                static_elements=[StaticElement(**el.model_dump()) for el in template.static_elements],
                 background=TemplateBackground(**template.background.model_dump()),
                 border_color=template.border_color,
                 font_family=template.font_family,
                 font_color=template.font_color,
                 is_preset=False,
+                source_preset_id=template.id,
                 preview_url=template.preview_url,
                 created_at=datetime.utcnow(),
             )
             await working_template.insert()
 
-        # Point event.template_map to the copy
         event.template_map[cert_type] = working_template.id
         await event.set({"template_map": {k: v for k, v in event.template_map.items()}})
-
     else:
-        # Already a custom/copy template — apply directly
         working_template = template
 
-    # ── 4. Build a lookup map of existing slots ──────────────────────────
-    slot_map: dict[str, FieldSlot] = {
-        s.slot_id: s for s in working_template.field_slots
-    }
+    slot_map: dict[str, FieldSlot] = {s.slot_id: s for s in working_template.field_slots}
 
-    # ── 5. Validate all slot_ids exist before applying any changes ───────
     missing = [u.slot_id for u in body.slot_updates if u.slot_id not in slot_map]
     if missing:
         raise HTTPException(
@@ -243,7 +434,6 @@ async def patch_preset_slots(
             f"Slot id(s) not found in template: {', '.join(missing)}",
         )
 
-    # ── 6. Apply updates (only width, height, font_size) ─────────────────
     for update in body.slot_updates:
         slot = slot_map[update.slot_id]
         if update.width is not None:
@@ -253,10 +443,8 @@ async def patch_preset_slots(
         if update.font_size is not None:
             slot.font_size = update.font_size
 
-    # ── 7. Persist the updated field_slots list ──────────────────────────
     updated_slots = [s.model_dump() for s in working_template.field_slots]
     await working_template.set({"field_slots": updated_slots})
 
-    # Reload to return fresh document
     await working_template.sync()
-    return _resp(working_template)
+    return await _resp(working_template)

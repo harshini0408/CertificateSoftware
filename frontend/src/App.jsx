@@ -13,6 +13,7 @@ import StudentDashboard from './pages/StudentDashboard'
 import VerifyPage from './pages/VerifyPage'
 import VenueRegister from './pages/VenueRegister'
 import TemplateBuilder from './pages/TemplateBuilder'
+import TemplateSelector from './pages/TemplateSelector'
 
 // ── Role constants ─────────────────────────────────────────────────────────────
 const ROLES = {
@@ -61,6 +62,14 @@ export default function App() {
               allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN, ROLES.GUEST]}
             >
               <EventDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/club/:club_id/events/:event_id/templates/select"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN, ROLES.GUEST]}>
+              <TemplateSelector />
             </ProtectedRoute>
           }
         />

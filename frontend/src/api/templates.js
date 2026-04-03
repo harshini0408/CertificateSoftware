@@ -4,17 +4,17 @@ import { useToastStore } from '../store/uiStore'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const templateKeys = {
-  all:     ()          => ['templates'],
-  list:    (clubId)    => ['templates', 'list', clubId],
-  presets: ()          => ['templates', 'presets'],
-  detail:  (id)        => ['templates', id],
+  all:          ()       => ['templates'],
+  list:         (clubId) => ['templates', 'list', clubId],
+  presets:      ()       => ['templates', 'presets'],
+  clubPresets:  (clubId) => ['templates', 'clubPresets', clubId],
+  clubOwned:    ()       => ['templates', 'clubOwned'],
+  detail:       (id)     => ['templates', id],
+  html:         (id)     => ['templates', 'html', id],
 }
 
 // ── useTemplates ──────────────────────────────────────────────────────────────
-/**
- * GET /clubs/:club_id/templates
- * Returns club's custom templates + all preset templates.
- */
+
 export function useTemplates(clubId) {
   return useQuery({
     queryKey: templateKeys.list(clubId),
@@ -27,10 +27,6 @@ export function useTemplates(clubId) {
 }
 
 // ── usePresetTemplates ────────────────────────────────────────────────────────
-/**
- * GET /templates/presets
- * Admin-visible list of the 6 built-in preset templates.
- */
 export function usePresetTemplates() {
   return useQuery({
     queryKey: templateKeys.presets(),
@@ -41,11 +37,23 @@ export function usePresetTemplates() {
   })
 }
 
-// ── useTemplate ───────────────────────────────────────────────────────────────
+// ── useClubPresets ────────────────────────────────────────────────────────────
 /**
- * GET /templates/:template_id
- * Fetches a single template's full definition (elements, slots, styles).
+ * GET /clubs/:club_id/templates/presets
+ * Returns all 6 global presets + any club-specific copies (source_preset_id set).
  */
+export function useClubPresets(clubId) {
+  return useQuery({
+    queryKey: templateKeys.clubPresets(clubId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/clubs/${clubId}/templates/presets`)
+      return data
+    },
+    enabled: !!clubId,
+  })
+}
+
+// ── useTemplate ───────────────────────────────────────────────────────────────
 export function useTemplate(templateId) {
   return useQuery({
     queryKey: templateKeys.detail(templateId),
@@ -58,27 +66,6 @@ export function useTemplate(templateId) {
 }
 
 // ── useCreateTemplate ─────────────────────────────────────────────────────────
-/**
- * POST /clubs/:club_id/templates
- * Creates a new custom template.
- *
- * Payload shape:
- * {
- *   name: string,
- *   cert_type: string,
- *   background: { type: 'solid'|'gradient'|'decorated'|'minimalist', colors: string[] },
- *   typography: { font_family: string, font_color: string },
- *   elements: Array<{
- *     kind: 'static'|'dynamic'|'divider',
- *     text?: string,
- *     label?: string,
- *     font_size: number,
- *     font_weight: 'normal'|'semibold'|'bold',
- *     alignment: 'left'|'center'|'right',
- *     position: { x: number, y: number, width: number, height: number }
- *   }>
- * }
- */
 export function useCreateTemplate(clubId) {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
@@ -98,11 +85,6 @@ export function useCreateTemplate(clubId) {
 }
 
 // ── useAssignPreset ───────────────────────────────────────────────────────────
-/**
- * POST /clubs/:club_id/events/:event_id/templates/assign-preset
- * { preset_id, cert_type }
- * Assigns a preset to the event's template_map for that cert type.
- */
 export function useAssignPreset(clubId, eventId) {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
@@ -127,27 +109,6 @@ export function useAssignPreset(clubId, eventId) {
 }
 
 // ── useUpdatePresetSlots ──────────────────────────────────────────────────────
-/**
- * PATCH /clubs/:club_id/events/:event_id/templates/preset-slots
- *
- * Allows resizing field slot dimensions/font-size on a preset template
- * that has been assigned to an event cert type.
- *
- * Body:
- * {
- *   cert_type: string,
- *   slot_updates: Array<{
- *     slot_id: string,
- *     width: number,
- *     height: number,
- *     font_size: number
- *   }>
- * }
- *
- * Usage:
- *   const { mutate } = useUpdatePresetSlots(clubId, eventId)
- *   mutate({ cert_type, slot_updates })
- */
 export function useUpdatePresetSlots(clubId, eventId) {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
@@ -159,7 +120,6 @@ export function useUpdatePresetSlots(clubId, eventId) {
         { cert_type, slot_updates },
       ),
     onSuccess: () => {
-      // Refresh both the event detail and any template queries
       qc.invalidateQueries({ queryKey: ['events', clubId, eventId] })
       qc.invalidateQueries({ queryKey: templateKeys.all() })
       addToast({ type: 'success', message: 'Slot sizes saved.' })
@@ -168,6 +128,74 @@ export function useUpdatePresetSlots(clubId, eventId) {
       addToast({
         type: 'error',
         message: err?.response?.data?.detail || 'Failed to save slot sizes.',
+      })
+    },
+  })
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HTML Editor APIs
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── useClubOwnedTemplates ───────────────────────────────────────────────────
+export function useClubOwnedTemplates() {
+  return useQuery({
+    queryKey: templateKeys.clubOwned(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/templates/club')
+      return data
+    },
+  })
+}
+
+// ── useForkTemplate ─────────────────────────────────────────────────────────
+export function useForkTemplate() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (templateId) => axiosInstance.post(`/templates/${templateId}/fork`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: templateKeys.all() })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to fork template.',
+      })
+    },
+  })
+}
+
+// ── useTemplateHtml ─────────────────────────────────────────────────────────
+export function useTemplateHtml(templateId) {
+  return useQuery({
+    queryKey: templateKeys.html(templateId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/templates/${templateId}/html`)
+      return data
+    },
+    enabled: !!templateId,
+  })
+}
+
+// ── useUpdateTemplateHtml ───────────────────────────────────────────────────
+export function useUpdateTemplateHtml(templateId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (payload) => axiosInstance.patch(`/templates/${templateId}/html`, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: templateKeys.detail(templateId) })
+      qc.invalidateQueries({ queryKey: templateKeys.html(templateId) })
+      addToast({ type: 'success', message: 'Template saved.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to save template.',
       })
     },
   })
