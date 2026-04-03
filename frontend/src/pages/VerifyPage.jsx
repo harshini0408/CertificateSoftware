@@ -141,6 +141,15 @@ export default function VerifyPage() {
             </a>
           </div>
         )}
+
+        {/* Scan count */}
+        {data.scan_count > 0 && (
+          <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50">
+            <p className="text-[11px] text-gray-400 text-center">
+              This certificate has been verified {data.scan_count} time{data.scan_count !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
       </div>
     )
   }

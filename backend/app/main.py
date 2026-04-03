@@ -6,9 +6,12 @@ if sys.platform == 'win32':
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from .config import get_settings
 from .database import connect_db, disconnect_db
@@ -16,6 +19,9 @@ from .core.security import hash_password
 from .models.user import User, UserRole
 
 settings = get_settings()
+
+# ── Rate limiter ─────────────────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
 
 
 async def _seed_superadmin() -> None:
@@ -32,17 +38,24 @@ async def _seed_superadmin() -> None:
         print(f"[SEED] Super-admin '{settings.superadmin_username}' created")
 
 
+async def _seed_templates() -> None:
+    """Seed preset certificate templates from static HTML files."""
+    from .seed_templates import seed_preset_templates
+    await seed_preset_templates()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────
-    print("🚀 Starting PSG iTech Certificate Platform …")
+    print("[START] Starting PSG iTech Certificate Platform...")
     settings.ensure_storage_dirs()
     await connect_db()
     await _seed_superadmin()
+    await _seed_templates()
 
     from .scheduler import start_scheduler
     start_scheduler()
-    print("✓ Scheduler started")
+    print("[OK] Scheduler started")
 
     yield
 
@@ -50,7 +63,7 @@ async def lifespan(app: FastAPI):
     from .scheduler import stop_scheduler
     stop_scheduler()
     await disconnect_db()
-    print("🛑 Shutdown complete")
+    print("[STOP] Shutdown complete")
 
 
 app = FastAPI(
@@ -59,6 +72,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# ── Rate limiting ────────────────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ─────────────────────────────────────────────────────────────────
 app.add_middleware(

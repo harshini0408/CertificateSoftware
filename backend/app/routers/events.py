@@ -13,6 +13,7 @@ from ..models.club import Club
 from ..models.event import Event, EventStatus, EventAssets, QRConfig
 from ..models.template import Template
 from ..models.certificate import Certificate
+from ..models.participant import Participant
 from ..schemas.event import EventCreate, EventUpdate, EventResponse, QRGenerateRequest, QRGenerateResponse
 from ..services.qr_service import create_event_qr_token, generate_qr_base64
 from ..services.signature_service import process_signature, save_logo
@@ -28,6 +29,8 @@ def _event_response(e: Event) -> EventResponse:
         description=e.description, event_date=e.event_date,
         status=e.status.value, template_map={k: str(v) if v else None for k, v in e.template_map.items()},
         qr_config=e.qr_config.model_dump(), assets=e.assets.model_dump(),
+        mapping_confirmed=e.mapping_confirmed,
+        participant_count=e.participant_count,
         created_at=e.created_at,
     )
 
@@ -55,6 +58,13 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
     event = await Event.get(event_id)
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    # Sync participant count on read
+    actual_count = await Participant.find(Participant.event_id == event_id).count()
+    if actual_count != event.participant_count:
+        event.participant_count = actual_count
+        await event.set({"participant_count": actual_count})
+
     return _event_response(event)
 
 
@@ -107,11 +117,13 @@ async def upload_assets(club_id: PydanticObjectId, event_id: PydanticObjectId,
         logo_bytes = await logo.read()
         assets.logo_hash = hashlib.md5(logo_bytes).hexdigest()
         assets.logo_path = save_logo(logo_bytes, club_slug)
+        assets.logo_url = f"/storage/assets/{club_slug}/logo.png"
 
     if signature:
         sig_bytes = await signature.read()
         assets.signature_hash = hashlib.md5(sig_bytes).hexdigest()
         assets.signature_path = process_signature(sig_bytes, club_slug)
+        assets.signature_url = f"/storage/assets/{club_slug}/signature.png"
 
     await event.set({"assets": assets.model_dump()})
     return {"message": "Assets uploaded", "assets": assets.model_dump()}

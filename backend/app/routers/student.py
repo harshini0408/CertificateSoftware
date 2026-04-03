@@ -1,15 +1,21 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core.dependencies import require_role
 from ..models.user import User, UserRole
 from ..models.student_credit import StudentCredit
+from ..models.certificate import Certificate, CertStatus
+from ..models.event import Event
+from ..models.club import Club
 
-router = APIRouter(prefix="/student", tags=["Student"])
+router = APIRouter(tags=["Student"])
 
 
-@router.get("/me")
+# ── /students/me ─────────────────────────────────────────────────────────
+
+@router.get("/students/me")
 async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT))):
     return {
+        "id": str(current_user.id),
         "name": current_user.name,
         "username": current_user.username,
         "email": current_user.email,
@@ -20,14 +26,94 @@ async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT
     }
 
 
-@router.get("/credits")
+# ── /students/me/credits ─────────────────────────────────────────────────
+
+@router.get("/students/me/credits")
 async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT))):
     credit_doc = await StudentCredit.find_one(
         StudentCredit.student_email == current_user.email
     )
     if not credit_doc:
-        return {"total_credits": 0, "credit_history": []}
+        return {"total_credits": 0, "breakdown": [], "credit_history": []}
+
+    # Build breakdown by cert_type
+    breakdown = {}
+    for entry in credit_doc.credit_history:
+        ct = entry.cert_type
+        if ct not in breakdown:
+            breakdown[ct] = {"cert_type": ct, "count": 0, "credits": 0}
+        breakdown[ct]["count"] += 1
+        breakdown[ct]["credits"] += entry.points
+
     return {
         "total_credits": credit_doc.total_credits,
+        "breakdown": list(breakdown.values()),
+        "credit_history": [e.model_dump() for e in credit_doc.credit_history],
+    }
+
+
+# ── /students/me/credits/history ──────────────────────────────────────────
+
+@router.get("/students/me/credits/history")
+async def get_credits_history(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    credit_doc = await StudentCredit.find_one(
+        StudentCredit.student_email == current_user.email
+    )
+    if not credit_doc:
+        return []
+    return [e.model_dump() for e in credit_doc.credit_history]
+
+
+# ── /students/me/certificates ────────────────────────────────────────────
+
+@router.get("/students/me/certificates")
+async def get_my_certificates(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    """Return all certificates belonging to the current student.
+
+    Matches by email in snapshot, since participants may not have a user_id link.
+    """
+    certs = await Certificate.find(
+        {"snapshot.email": current_user.email}
+    ).to_list()
+
+    results = []
+    for c in certs:
+        snap = c.snapshot
+        results.append({
+            "_id": str(c.id),
+            "cert_number": c.cert_number,
+            "cert_type": getattr(snap, "cert_type", "participant") if snap else "participant",
+            "event_name": getattr(snap, "event_name", "") if snap else "",
+            "club_name": getattr(snap, "club_name", "") if snap else "",
+            "issued_at": c.issued_at,
+            "status": c.status.value,
+            "pdf_url": getattr(c, "pdf_url", None),
+        })
+
+    return results
+
+
+# ── /students/{student_id}/credits (admin/coordinator view) ──────────────
+
+@router.get("/students/{student_id}/credits")
+async def get_student_credits(student_id: str):
+    """Fetch credits for a specific student by ID (admin/coordinator use)."""
+    credit_doc = await StudentCredit.find_one(
+        StudentCredit.registration_number == student_id
+    )
+    if not credit_doc:
+        return {"total_credits": 0, "breakdown": [], "credit_history": []}
+
+    breakdown = {}
+    for entry in credit_doc.credit_history:
+        ct = entry.cert_type
+        if ct not in breakdown:
+            breakdown[ct] = {"cert_type": ct, "count": 0, "credits": 0}
+        breakdown[ct]["count"] += 1
+        breakdown[ct]["credits"] += entry.points
+
+    return {
+        "total_credits": credit_doc.total_credits,
+        "breakdown": list(breakdown.values()),
         "credit_history": [e.model_dump() for e in credit_doc.credit_history],
     }

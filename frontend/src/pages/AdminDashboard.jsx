@@ -558,9 +558,9 @@ export default function AdminDashboard() {
             {activeTab === 'overview' && <OverviewTab />}
             {activeTab === 'clubs' && <ClubsTab />}
             {activeTab === 'users' && <UsersTab />}
-            {activeTab === 'certificates' && <ComingSoon label="Certificates" />}
-            {activeTab === 'credit-rules' && <ComingSoon label="Credit Rules" />}
-            {activeTab === 'scan-logs' && <ComingSoon label="Scan Logs" />}
+            {activeTab === 'certificates' && <CertificatesTab />}
+            {activeTab === 'credit-rules' && <CreditRulesTab />}
+            {activeTab === 'scan-logs' && <ScanLogsTab />}
           </div>
         </main>
       </div>
@@ -568,8 +568,167 @@ export default function AdminDashboard() {
   )
 }
 
-function ComingSoon({ label }) {
-  return <div className="flex flex-col items-center justify-center py-24 text-gray-400"><p className="text-lg font-semibold">{label}</p><p className="text-sm">Coming soon</p></div>
+// ── CERTIFICATES TAB ──────────────────────────────────────────────────────
+function CertificatesTab() {
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const debouncedSearch = useDebounce(search)
+  const filters = useMemo(() => {
+    const f = {}
+    if (debouncedSearch) f.search = debouncedSearch
+    if (statusFilter) f.status = statusFilter
+    return f
+  }, [debouncedSearch, statusFilter])
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin', 'certificates', filters],
+    queryFn: async () => {
+      const { default: ax } = await import('../utils/axiosInstance')
+      const { data } = await ax.get('/admin/certificates', { params: filters })
+      return data
+    },
+  })
+
+  const [revoking, setRevoking] = useState(false)
+  const handleRevoke = async (certNumber) => {
+    setRevoking(true)
+    try {
+      const { default: ax } = await import('../utils/axiosInstance')
+      await ax.patch(`/admin/certificates/${certNumber}/revoke`)
+    } finally {
+      setRevoking(false)
+    }
+  }
+
+  const certs = data?.items ?? []
+
+  const columns = [
+    { key: 'cert_number', header: 'Cert No.', sortable: true, searchKey: true,
+      render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v ?? '—'}</span> },
+    { key: 'snapshot', header: 'Participant', searchKey: false,
+      render: (snap) => <span className="text-sm">{snap?.name ?? snap?.email ?? '—'}</span> },
+    { key: 'status', header: 'Status',
+      render: (v) => <StatusBadge status={v} size="sm" /> },
+    { key: 'issued_at', header: 'Issued', render: (v) => fmtDate(v) },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-foreground">Certificates</h1>
+        <span className="text-sm text-gray-400">{data?.total ?? 0} total</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="search" placeholder="Search certificates…" value={search}
+          onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+          className="form-input w-40">
+          <option value="">All Status</option>
+          <option value="pending">Pending</option>
+          <option value="generated">Generated</option>
+          <option value="emailed">Emailed</option>
+          <option value="failed">Failed</option>
+          <option value="revoked">Revoked</option>
+        </select>
+      </div>
+      <DataTable columns={columns} data={certs} isLoading={isLoading}
+        emptyMessage="No certificates found." />
+    </div>
+  )
+}
+
+// ── CREDIT RULES TAB ──────────────────────────────────────────────────────
+function CreditRulesTab() {
+  const WEIGHTS = {
+    participant: { points: 1, icon: '🎫', desc: 'For attending an event' },
+    volunteer: { points: 2, icon: '🤝', desc: 'For helping organize an event' },
+    mentor: { points: 3, icon: '🧑‍🏫', desc: 'For mentoring participants' },
+    judge: { points: 3, icon: '⚖️', desc: 'For judging a competition' },
+    coordinator: { points: 4, icon: '🏛️', desc: 'For coordinating an event' },
+    winner_3rd: { points: 4, icon: '🥉', desc: '3rd place winner' },
+    winner_2nd: { points: 5, icon: '🥈', desc: '2nd place winner' },
+    winner_1st: { points: 6, icon: '🥇', desc: '1st place winner' },
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Credit Rules</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Points awarded per certificate type. Credits are automatically calculated when certificates are issued.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {Object.entries(WEIGHTS).map(([type, config]) => (
+          <div key={type} className="card p-5 flex flex-col gap-2 hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <span className="text-2xl">{config.icon}</span>
+              <span className="text-2xl font-black text-navy">{config.points}</span>
+            </div>
+            <p className="text-sm font-semibold text-foreground capitalize">
+              {type.replace(/_/g, ' ')}
+            </p>
+            <p className="text-xs text-gray-500">{config.desc}</p>
+            <div className="h-1.5 rounded-full bg-gray-100 mt-auto">
+              <div className="h-full rounded-full bg-navy transition-all"
+                style={{ width: `${(config.points / 6) * 100}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
+        <p className="text-xs font-semibold text-blue-700 mb-1">How Credits Work</p>
+        <p className="text-xs text-blue-600 leading-relaxed">
+          When a certificate is issued, the student automatically receives credits based on the
+          certificate type. Points accumulate on the student's profile and are visible in their
+          dashboard. Department coordinators can view and export credit summaries.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ── SCAN LOGS TAB ─────────────────────────────────────────────────────────
+function ScanLogsTab() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin', 'scan-logs'],
+    queryFn: async () => {
+      const { default: ax } = await import('../utils/axiosInstance')
+      const { data } = await ax.get('/admin/scan-logs', { params: { page_size: 100 } })
+      return data
+    },
+  })
+
+  const logs = data?.items ?? []
+
+  const columns = [
+    { key: 'cert_number', header: 'Certificate No.', sortable: true, searchKey: true,
+      render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v}</span> },
+    { key: 'ip_address', header: 'IP Address',
+      render: (v) => <span className="text-xs text-gray-500 font-mono">{v ?? '—'}</span> },
+    { key: 'user_agent', header: 'Browser',
+      render: (v) => {
+        if (!v) return '—'
+        const short = v.length > 50 ? v.slice(0, 50) + '…' : v
+        return <span className="text-xs text-gray-500" title={v}>{short}</span>
+      }},
+    { key: 'scanned_at', header: 'Scanned At', sortable: true,
+      render: (v) => v ? new Date(v).toLocaleString('en-IN', {
+        dateStyle: 'medium', timeStyle: 'short'
+      }) : '—' },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-foreground">Scan Logs</h1>
+        <span className="text-sm text-gray-400">{data?.total ?? 0} total scans</span>
+      </div>
+      <DataTable columns={columns} data={logs} isLoading={isLoading}
+        emptyMessage="No scans recorded yet."
+        searchable searchPlaceholder="Search by certificate number…" />
+    </div>
+  )
 }
 
 // ── OVERVIEW TAB ──────────────────────────────────────────────────────────────

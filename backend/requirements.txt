@@ -13,9 +13,7 @@ rembg==2.0.56
 imgkit==1.2.3
 Jinja2==3.1.4
 qrcode[pil]==7.4.2
-google-auth==2.29.0
-google-auth-oauthlib==1.2.0
-google-api-python-client==2.128.0
+slowapi==0.1.9
 apscheduler==3.10.4
 pydantic-settings==2.2.1
 python-dotenv==1.0.1

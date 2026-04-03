@@ -34,10 +34,14 @@ class Settings(BaseSettings):
     # ── Storage ──────────────────────────────────────────────────────────
     storage_path: str = "./storage"
 
-    # ── Gmail OAuth2 ─────────────────────────────────────────────────────
-    gmail_credentials_path: str = "./credentials.json"
-    gmail_token_path: str = "./token.json"
-    gmail_sender_email: str = "certs@psgit.edu"
+    # ── Email (SMTP) ─────────────────────────────────────────────────────
+    email_provider: Literal["gmail_smtp", "brevo", "console"] = "console"
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""           # Gmail App Password or Brevo SMTP key
+    email_sender: str = "certs@psgit.edu"
+    email_sender_name: str = "PSG iTech Certificates"
     email_daily_limit: int = 500
 
     # ── Super Admin Seed ─────────────────────────────────────────────────

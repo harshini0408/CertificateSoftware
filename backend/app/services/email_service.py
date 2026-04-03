@@ -1,24 +1,28 @@
+"""Email service — SMTP-based email delivery for certificate dispatch.
+
+Supports multiple providers via configuration:
+  - gmail_smtp : Gmail with App Password (no OAuth popups)
+  - brevo      : Brevo (Sendinblue) SMTP relay
+  - console    : Prints emails to stdout (development)
+"""
+
 import base64
-import os
-from datetime import datetime, date
+import logging
+import smtplib
+from abc import ABC, abstractmethod
+from datetime import date
+from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email import encoders
 from pathlib import Path
 from typing import Optional
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-
 from ..config import get_settings
-from ..database import get_database
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 # ── In-memory daily counter ─────────────────────────────────────────────
 _daily_count: int = 0
@@ -44,33 +48,141 @@ def _increment_counter() -> None:
     _daily_count += 1
 
 
-# ── Gmail API auth ───────────────────────────────────────────────────────
+# ── Abstract provider ───────────────────────────────────────────────────
 
-def _get_gmail_service():
-    creds = None
-    token_path = Path(settings.gmail_token_path)
-    creds_path = Path(settings.gmail_credentials_path)
+class EmailProvider(ABC):
+    """Abstract email provider interface."""
 
-    if token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not creds_path.exists():
-                raise RuntimeError(
-                    f"Gmail credentials file not found at {creds_path}. "
-                    "Please set up OAuth2 credentials."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
-            creds = flow.run_local_server(port=0)
-        token_path.write_text(creds.to_json())
-
-    return build("gmail", "v1", credentials=creds)
+    @abstractmethod
+    def send(self, msg: MIMEMultipart) -> bool:
+        """Send a MIME message. Returns True on success."""
+        ...
 
 
-# ── Send email ───────────────────────────────────────────────────────────
+class SMTPProvider(EmailProvider):
+    """Generic SMTP sender (works for Gmail App Password, Brevo, etc.)."""
+
+    def __init__(self, host: str, port: int, user: str, password: str, use_tls: bool = True):
+        self.host = host
+        self.port = port
+        self.user = user
+        self.password = password
+        self.use_tls = use_tls
+
+    def send(self, msg: MIMEMultipart) -> bool:
+        try:
+            with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+                if self.use_tls:
+                    server.starttls()
+                if self.user and self.password:
+                    server.login(self.user, self.password)
+                server.send_message(msg)
+            return True
+        except Exception as exc:
+            logger.error("SMTP send failed: %s", exc)
+            return False
+
+
+class ConsoleProvider(EmailProvider):
+    """Development-only provider that logs emails to console."""
+
+    def send(self, msg: MIMEMultipart) -> bool:
+        logger.info(
+            "[EMAIL-DEV] To=%s | Subject=%s | Attachments=%d",
+            msg["To"],
+            msg["Subject"],
+            sum(1 for p in msg.walk() if p.get_content_disposition() == "attachment"),
+        )
+        print(f"  📧 DEV EMAIL → {msg['To']}: {msg['Subject']}")
+        return True
+
+
+# ── Provider factory ─────────────────────────────────────────────────────
+
+_provider_instance: Optional[EmailProvider] = None
+
+
+def get_email_provider() -> EmailProvider:
+    """Return the configured email provider singleton."""
+    global _provider_instance
+    if _provider_instance is not None:
+        return _provider_instance
+
+    provider = settings.email_provider
+
+    if provider == "gmail_smtp":
+        _provider_instance = SMTPProvider(
+            host="smtp.gmail.com",
+            port=587,
+            user=settings.smtp_user,
+            password=settings.smtp_password,
+        )
+    elif provider == "brevo":
+        _provider_instance = SMTPProvider(
+            host="smtp-relay.brevo.com",
+            port=587,
+            user=settings.smtp_user,
+            password=settings.smtp_password,
+        )
+    elif provider == "console":
+        _provider_instance = ConsoleProvider()
+    else:
+        # Fallback: use generic SMTP settings from config
+        _provider_instance = SMTPProvider(
+            host=settings.smtp_host,
+            port=settings.smtp_port,
+            user=settings.smtp_user,
+            password=settings.smtp_password,
+        )
+
+    logger.info("Email provider initialized: %s", provider)
+    return _provider_instance
+
+
+# ── Build email message ──────────────────────────────────────────────────
+
+def _build_certificate_email(
+    recipient_email: str,
+    recipient_name: str,
+    cert_number: str,
+    event_name: str,
+    club_name: str,
+    png_path: str,
+) -> MIMEMultipart:
+    """Construct a MIME message with certificate PNG attachment."""
+    msg = MIMEMultipart()
+    msg["To"] = recipient_email
+    msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
+    msg["Subject"] = f"Your Certificate — {event_name} | {club_name}"
+
+    body = (
+        f"Dear {recipient_name},\n\n"
+        f"Congratulations! Please find your certificate for "
+        f'"{event_name}" (organized by {club_name}) attached.\n\n'
+        f"Certificate Number: {cert_number}\n"
+        f"You can verify this certificate at: "
+        f"{settings.base_url}/verify/{cert_number}\n\n"
+        f"Regards,\n{club_name}\nPSG iTech Certificate Platform"
+    )
+    msg.attach(MIMEText(body, "plain"))
+
+    # Attach PNG
+    png = Path(png_path)
+    if png.exists():
+        with open(png, "rb") as f:
+            part = MIMEBase("image", "png")
+            part.set_payload(f.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition",
+                f'attachment; filename="{cert_number}.png"',
+            )
+            msg.attach(part)
+
+    return msg
+
+
+# ── Public API ───────────────────────────────────────────────────────────
 
 async def send_certificate_email(
     recipient_email: str,
@@ -88,46 +200,22 @@ async def send_certificate_email(
     _reset_counter_if_new_day()
 
     if _daily_count >= settings.email_daily_limit:
+        logger.warning("Daily email limit (%d) reached", settings.email_daily_limit)
         return False
 
     try:
-        service = _get_gmail_service()
-
-        msg = MIMEMultipart()
-        msg["To"] = recipient_email
-        msg["From"] = settings.gmail_sender_email
-        msg["Subject"] = f"Your Certificate — {event_name} | {club_name}"
-
-        body = (
-            f"Dear {recipient_name},\n\n"
-            f"Congratulations! Please find your certificate for "
-            f'"{event_name}" (organized by {club_name}) attached.\n\n'
-            f"Certificate Number: {cert_number}\n"
-            f"You can verify this certificate at: "
-            f"{settings.base_url}/verify/{cert_number}\n\n"
-            f"Regards,\n{club_name}\nPSG iTech Certificate Platform"
+        msg = _build_certificate_email(
+            recipient_email, recipient_name, cert_number,
+            event_name, club_name, png_path,
         )
-        msg.attach(MIMEText(body, "plain"))
+        provider = get_email_provider()
+        success = provider.send(msg)
 
-        # Attach PNG
-        if Path(png_path).exists():
-            with open(png_path, "rb") as f:
-                part = MIMEBase("image", "png")
-                part.set_payload(f.read())
-                encoders.encode_base64(part)
-                part.add_header(
-                    "Content-Disposition",
-                    f'attachment; filename="{cert_number}.png"',
-                )
-                msg.attach(part)
+        if success:
+            _increment_counter()
 
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        service.users().messages().send(
-            userId="me", body={"raw": raw}
-        ).execute()
+        return success
 
-        _increment_counter()
-        return True
-
-    except Exception:
+    except Exception as exc:
+        logger.error("send_certificate_email failed: %s", exc)
         return False

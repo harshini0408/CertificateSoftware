@@ -7,7 +7,7 @@ export const verifyKeys = {
 }
 
 /**
- * GET /certificates/verify/:cert_number
+ * GET /verify/:cert_number
  *
  * Public endpoint — no auth needed.
  *
@@ -24,6 +24,7 @@ export const verifyKeys = {
  *   cert_type: string,
  *   issued_at: string,
  *   pdf_url?: string,
+ *   scan_count: number,
  *   status: 'generated' | 'emailed' | 'revoked'
  * }
  * OR
@@ -34,7 +35,7 @@ export function useVerifyCert(certNumber) {
     queryKey: verifyKeys.cert(certNumber),
     queryFn: async () => {
       const { data } = await axiosInstance.get(
-        `/certificates/verify/${encodeURIComponent(certNumber)}`,
+        `/verify/${encodeURIComponent(certNumber)}`,
       )
       return data
     },

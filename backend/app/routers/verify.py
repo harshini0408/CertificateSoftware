@@ -21,12 +21,26 @@ async def verify_certificate(cert_number: str, request: Request):
         user_agent=request.headers.get("user-agent"),
     ).insert()
 
+    # Count total scans for this cert
+    scan_count = await ScanLog.find(ScanLog.cert_number == cert_number).count()
+
+    # Determine validity
+    is_valid = cert.status in (CertStatus.GENERATED, CertStatus.EMAILED)
+
     return VerifyResponse(
+        valid=is_valid,
         cert_number=cert.cert_number,
-        name=cert.snapshot.name,
-        event_name=cert.snapshot.event_name,
-        club_name=cert.snapshot.club_name,
-        cert_type=cert.snapshot.cert_type,
-        issued_date=cert.snapshot.issued_date,
+        name=getattr(cert.snapshot, "name", "") if cert.snapshot else "",
+        participant_name=getattr(cert.snapshot, "name", None) if cert.snapshot else None,
+        participant_email=getattr(cert.snapshot, "email", None) if cert.snapshot else None,
+        event_name=getattr(cert.snapshot, "event_name", "") if cert.snapshot else "",
+        club_name=getattr(cert.snapshot, "club_name", "") if cert.snapshot else "",
+        cert_type=getattr(cert.snapshot, "cert_type", "") if cert.snapshot else "",
+        event_date=getattr(cert.snapshot, "event_date", None) if cert.snapshot else None,
+        issued_date=getattr(cert.snapshot, "issued_date", None) if cert.snapshot else None,
+        issued_at=cert.issued_at if hasattr(cert, "issued_at") else None,
         status=cert.status.value,
+        pdf_url=getattr(cert, "pdf_url", None),
+        registration_number=getattr(cert.snapshot, "registration_number", None) if cert.snapshot else None,
+        scan_count=scan_count,
     )

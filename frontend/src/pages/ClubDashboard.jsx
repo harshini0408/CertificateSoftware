@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
+import { useQuery } from '@tanstack/react-query'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
 import StatCard from '../components/StatCard'
@@ -8,8 +9,10 @@ import DataTable from '../components/DataTable'
 import StatusBadge from '../components/StatusBadge'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useClubDashboard, useClubMembers } from '../api/clubs'
+import { useTemplates, usePresetTemplates } from '../api/templates'
 import { useAuthStore } from '../store/authStore'
 import { useChangePassword } from '../api/auth'
+import axiosInstance from '../utils/axiosInstance'
 
 // ── Tab ids ───────────────────────────────────────────────────────────────────
 const TABS = ['dashboard', 'events', 'templates', 'settings']
@@ -127,6 +130,157 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Events tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function EventsTab({ clubId }) {
+  const navigate = useNavigate()
+
+  const { data: events, isLoading } = useQuery({
+    queryKey: ['events', clubId, 'list'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/clubs/${clubId}/events`)
+      return data
+    },
+    enabled: !!clubId,
+  })
+
+  const eventColumns = [
+    { key: 'name', header: 'Event Name', sortable: true, searchKey: true,
+      render: (v, row) => (
+        <button
+          className="text-sm font-semibold text-navy hover:underline text-left"
+          onClick={() => navigate(`/clubs/${clubId}/events/${row.id}`)}
+        >
+          {v}
+        </button>
+      ) },
+    { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
+    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-foreground">Events</h1>
+        <button
+          className="btn-primary"
+          onClick={() => navigate(`/clubs/${clubId}/events/new`)}
+        >
+          + New Event
+        </button>
+      </div>
+      <DataTable
+        columns={eventColumns}
+        data={events ?? []}
+        isLoading={isLoading}
+        emptyMessage="No events yet. Click '+ New Event' to create one."
+        searchable
+        searchPlaceholder="Search events…"
+      />
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Templates tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function TemplatesTab({ clubId }) {
+  const navigate = useNavigate()
+  const { data: templates, isLoading } = useTemplates(clubId)
+
+  const presets = (templates ?? []).filter(t => t.is_preset)
+  const custom = (templates ?? []).filter(t => !t.is_preset)
+
+  const certTypeColors = {
+    participant: 'bg-green-50 text-green-700',
+    coordinator: 'bg-blue-50 text-blue-700',
+    volunteer: 'bg-amber-50 text-amber-700',
+    winner_1st: 'bg-yellow-50 text-yellow-700',
+    winner_2nd: 'bg-gray-50 text-gray-700',
+    winner_3rd: 'bg-orange-50 text-orange-700',
+  }
+
+  const TemplateCard = ({ template }) => (
+    <div
+      className="card group cursor-pointer overflow-hidden transition-all hover:shadow-lg hover:ring-2 hover:ring-navy/20"
+      onClick={() => navigate(`/templates/${template.id}`)}
+    >
+      {/* Preview area */}
+      <div className="relative h-40 bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center overflow-hidden">
+        <div
+          className="flex h-full w-full items-center justify-center text-3xl font-bold text-gray-200"
+          style={{ background: template.background?.value || '#f7f7f7' }}
+        >
+          {template.name?.charAt(0)?.toUpperCase() || '?'}
+        </div>
+        <span className={`absolute top-2 right-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${certTypeColors[template.cert_type] || 'bg-gray-100 text-gray-600'}`}>
+          {template.cert_type?.replace(/_/g, ' ')}
+        </span>
+        {template.is_preset && (
+          <span className="absolute top-2 left-2 rounded-full bg-navy/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+            Preset
+          </span>
+        )}
+      </div>
+      {/* Info */}
+      <div className="p-4">
+        <p className="text-sm font-semibold text-foreground truncate">{template.name}</p>
+        <p className="mt-1 text-xs text-gray-400">
+          {template.field_slots?.length ?? 0} fields · {template.font_family?.split(',')[0] || 'Default font'}
+        </p>
+      </div>
+    </div>
+  )
+
+  if (isLoading) return <LoadingSpinner fullPage label="Loading templates…" />
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-foreground">Templates</h1>
+        <button
+          className="btn-primary"
+          onClick={() => navigate(`/clubs/${clubId}/templates/new`)}
+        >
+          + Create Template
+        </button>
+      </div>
+
+      {/* Custom templates */}
+      {custom.length > 0 && (
+        <div>
+          <h2 className="section-title mb-3">Custom Templates</h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {custom.map(t => <TemplateCard key={t.id} template={t} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Preset templates */}
+      {presets.length > 0 && (
+        <div>
+          <h2 className="section-title mb-3">Preset Templates</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Built-in templates available for all clubs. Assign these to your events.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {presets.map(t => <TemplateCard key={t.id} template={t} />)}
+          </div>
+        </div>
+      )}
+
+      {templates?.length === 0 && (
+        <div className="card p-12 text-center text-gray-400">
+          <p className="text-lg font-semibold">No templates available</p>
+          <p className="text-sm mt-1">Preset templates may not be seeded yet. Contact admin.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Settings tab
 // ═══════════════════════════════════════════════════════════════════════════════
 function SettingsTab({ club, clubLoading }) {
@@ -228,18 +382,6 @@ function SettingsTab({ club, clubLoading }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Placeholder tabs
-// ═══════════════════════════════════════════════════════════════════════════════
-function ComingSoonTab({ label }) {
-  return (
-    <div className="card p-8 flex flex-col items-center gap-3 text-center text-gray-400">
-      <p className="text-lg font-semibold">{label}</p>
-      <p className="text-sm">Coming soon</p>
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // ClubDashboard (main export)
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function ClubDashboard() {
@@ -287,8 +429,8 @@ export default function ClubDashboard() {
             {activeTab === 'dashboard' && (
               <DashboardTab clubId={club_id} dashboard={dashboard} isLoading={dashLoading} />
             )}
-            {activeTab === 'events' && <ComingSoonTab label="Events" />}
-            {activeTab === 'templates' && <ComingSoonTab label="Templates" />}
+            {activeTab === 'events' && <EventsTab clubId={club_id} />}
+            {activeTab === 'templates' && <TemplatesTab clubId={club_id} />}
             {activeTab === 'settings' && (
               <SettingsTab club={club} clubLoading={dashLoading} />
             )}
