@@ -296,13 +296,8 @@ async def send_remaining(
 
     queued = 0
     for cert in certs:
-        log = await EmailLog.find_one(
-            EmailLog.certificate_id == cert.id,
-            EmailLog.status.in_([EmailStatus.QUEUED, EmailStatus.PENDING]),
-        )
-        if log or cert.status == CertStatus.GENERATED:
-            background_tasks.add_task(_send_email_for_generated, cert.id)
-            queued += 1
+        background_tasks.add_task(_send_email_for_generated, cert.id)
+        queued += 1
 
     return {"queued": queued, "message": f"{queued} emails queued for sending"}
 

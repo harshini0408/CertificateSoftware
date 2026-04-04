@@ -99,8 +99,10 @@ async def club_dashboard(
     failed_emails = 0
     if club_cert_ids:
         pending_emails = await EmailLog.find(
-            {"certificate_id": {"$in": club_cert_ids}},
-            EmailLog.status.in_([EmailStatus.PENDING, EmailStatus.QUEUED]),
+            {
+                "certificate_id": {"$in": club_cert_ids},
+                "status": {"$in": [EmailStatus.PENDING.value, EmailStatus.QUEUED.value]},
+            },
         ).count()
 
         failed_emails = await EmailLog.find(
