@@ -3,67 +3,182 @@
 <head>
 <meta charset="utf-8">
 <style>
-  @font-face { font-family: 'Playfair Display'; src: url('file:///app/static/fonts/PlayfairDisplay.ttf'); }
-  @font-face { font-family: 'Montserrat'; src: url('file:///app/static/fonts/Montserrat.ttf'); }
-  @font-face { font-family: 'Dancing Script'; src: url('file:///app/static/fonts/DancingScript.ttf'); }
+  @font-face { font-family: 'Playfair Display'; src: url('/static/fonts/PlayfairDisplay.ttf'); }
+  @font-face { font-family: 'Montserrat'; src: url('/static/fonts/Montserrat.ttf'); }
+  @font-face { font-family: 'Dancing Script'; src: url('/static/fonts/DancingScript.ttf'); }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { width: 2480px; height: 3508px; position: relative; font-family: 'Montserrat', sans-serif; background: linear-gradient(135deg, #F5F5F5 0%, #FAFAFA 100%); }
-  .border-frame { position: absolute; top: 60px; left: 60px; right: 60px; bottom: 60px; border: 10px solid #A0A0A0; border-radius: 12px; }
-  .inner-border { position: absolute; top: 85px; left: 85px; right: 85px; bottom: 85px; border: 3px solid #C0C0C0; }
-  .trophy { position: absolute; top: 140px; left: 50%; transform: translateX(-50%); font-size: 160px; }
-  .logo { position: absolute; top: 140px; left: 200px; width: 180px; height: 180px; object-fit: contain; }
-  .header { position: absolute; top: 380px; width: 100%; text-align: center; font-family: 'Playfair Display', serif; color: #555; }
-  .header h1 { font-size: 96px; letter-spacing: 8px; text-transform: uppercase; }
-  .header h2 { font-size: 56px; color: #A0A0A0; margin-top: 20px; letter-spacing: 6px; }
-  .place-badge { position: absolute; top: 560px; left: 50%; transform: translateX(-50%); background: #A0A0A0; color: white; padding: 20px 80px; border-radius: 50px; font-size: 48px; font-weight: bold; letter-spacing: 4px; }
-  .subtext { position: absolute; top: 700px; width: 100%; text-align: center; font-size: 36px; color: #555; }
-  .participant-name { position: absolute; top: 820px; width: 100%; text-align: center; font-family: 'Dancing Script', cursive; font-size: 120px; color: #555; }
-  .name-line { position: absolute; top: 970px; left: 400px; right: 400px; height: 3px; background: #C0C0C0; }
-  .details { position: absolute; top: 1040px; width: 100%; text-align: center; font-size: 36px; color: #333; line-height: 1.8; }
-  .cert-number { position: absolute; top: 1320px; width: 100%; text-align: center; font-size: 28px; color: #888; letter-spacing: 2px; }
-  .fields-container { position: absolute; top: 1420px; left: 200px; right: 200px; }
-  .signature-block { position: absolute; bottom: 400px; left: 200px; right: 200px; display: flex; justify-content: space-between; align-items: flex-end; }
-  .sig-item { text-align: center; width: 500px; }
-  .sig-item img { height: 150px; object-fit: contain; }
-  .sig-item .sig-line { width: 100%; height: 2px; background: #A0A0A0; margin-top: 10px; }
-  .sig-item .sig-label { font-size: 28px; color: #555; margin-top: 10px; }
-  .qr-code { position: absolute; bottom: 160px; right: 200px; width: 250px; height: 250px; }
-  .qr-code img { width: 100%; height: 100%; }
-  .footer { position: absolute; bottom: 100px; width: 100%; text-align: center; font-size: 24px; color: #999; }
+  body {
+    width: 2480px; height: 3508px; position: relative; overflow: hidden;
+    font-family: 'Montserrat', sans-serif;
+    background: #FAFAFA;
+  }
+
+  /* ── Decorative frame ────────────────────────────────────────────────── */
+  .border-outer {
+    position: absolute; top: 60px; left: 60px; right: 60px; bottom: 60px;
+    border: 8px solid #8C8C8C; border-radius: 4px;
+    pointer-events: none;
+  }
+  .border-inner {
+    position: absolute; top: 80px; left: 80px; right: 80px; bottom: 80px;
+    border: 1px solid #B0B0B0;
+    pointer-events: none;
+  }
+
+  /* Corner ornaments */
+  .corner-line { position: absolute; background: #8C8C8C; }
+  .cl-tl-h { top: 120px; left: 80px; width: 100px; height: 3px; }
+  .cl-tl-v { top: 80px; left: 120px; width: 3px; height: 100px; }
+  .cl-tr-h { top: 120px; right: 80px; width: 100px; height: 3px; }
+  .cl-tr-v { top: 80px; right: 120px; width: 3px; height: 100px; }
+  .cl-bl-h { bottom: 120px; left: 80px; width: 100px; height: 3px; }
+  .cl-bl-v { bottom: 80px; left: 120px; width: 3px; height: 100px; }
+  .cl-br-h { bottom: 120px; right: 80px; width: 100px; height: 3px; }
+  .cl-br-v { bottom: 80px; right: 120px; width: 3px; height: 100px; }
+
+
+  /* ── Logo ────────────────────────────────────────────────────────────── */
+  .logo-wrap {
+    position: absolute; top: 170px; left: 200px;
+    width: 220px; height: 220px;
+  }
+  .logo-wrap img { width: 100%; height: 100%; object-fit: contain; }
+
+  /* ── Institution block ───────────────────────────────────────────────── */
+  .institution-header {
+    position: absolute; top: 190px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 48px; font-weight: 700;
+    color: #333; letter-spacing: 8px; text-transform: uppercase;
+  }
+  .institution-sub {
+    position: absolute; top: 260px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 28px; color: #666;
+    letter-spacing: 3px; text-transform: uppercase;
+  }
+
+  /* ── Title block ─────────────────────────────────────────────────────── */
+  .cert-title {
+    position: absolute; top: 480px; width: 100%; text-align: center;
+    font-family: 'Playfair Display', serif; font-size: 120px; font-weight: 700;
+    color: #333; letter-spacing: 12px; text-transform: uppercase;
+  }
+  .cert-subtitle {
+    position: absolute; top: 630px; width: 100%; text-align: center;
+    font-family: 'Playfair Display', serif; font-size: 56px;
+    color: #666; letter-spacing: 4px; font-style: italic;
+  }
+
+  /* ── Place badge ─────────────────────────────────────────────────────── */
+  .place-badge {
+    position: absolute; top: 760px; left: 50%; transform: translateX(-50%);
+    background: linear-gradient(135deg, #a8a8a8 0%, #8C8C8C 100%);
+    color: #fff; padding: 25px 90px; border-radius: 6px;
+    font-family: 'Montserrat', sans-serif; font-size: 44px; font-weight: 700;
+    letter-spacing: 6px; text-transform: uppercase;
+  }
+
+  /* ── Preamble ────────────────────────────────────────────────────────── */
+  .preamble {
+    position: absolute; top: 930px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 36px; color: #555;
+  }
+
+  /* Dynamic field slots (renderer injects fields_block) */
+  .fields-block-wrap {
+    position: absolute; top: 0; left: 0; width: 2480px; height: 3508px;
+    pointer-events: none;
+  }
+
+  .name-underline {
+    position: absolute; top: 1190px; left: 350px; right: 350px;
+    height: 2px; background: linear-gradient(90deg, transparent, #8C8C8C, transparent);
+  }
+
+  /* Body text */
+  .body-text-1 {
+    position: absolute; top: 1630px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 34px; color: #555;
+  }
+
+  /* ── Signature block ─────────────────────────────────────────────────── */
+  .signature-block {
+    position: absolute; bottom: 580px; left: 200px; right: 200px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+  }
+  .sig-col { text-align: center; width: 550px; }
+  .sig-col img { height: 160px; max-width: 500px; object-fit: contain; }
+  .sig-line { width: 100%; height: 2px; background: #8C8C8C; margin-top: 15px; }
+  .sig-label {
+    font-family: 'Montserrat', sans-serif; font-size: 28px; color: #333;
+    margin-top: 20px; letter-spacing: 2px;
+  }
+
+  /* ── QR code ─────────────────────────────────────────────────────────── */
+  .qr-wrap {
+    position: absolute; bottom: 250px; right: 250px;
+    width: 250px; height: 250px; padding: 10px; background: #fff;
+    border: 1px solid #CCC;
+  }
+  .qr-wrap img { width: 100%; height: 100%; }
+
+  /* ── Cert number & footer ────────────────────────────────────────────── */
+  .cert-number {
+    position: absolute; bottom: 180px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 26px;
+    color: #888; letter-spacing: 4px;
+  }
+  .footer-line {
+    position: absolute; bottom: 120px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 22px; color: #aaa;
+  }
 </style>
 </head>
 <body>
-  <div class="border-frame"></div>
-  <div class="inner-border"></div>
-  <div class="trophy">🥈</div>
-  {% if logo_base64 %}<img class="logo" src="{{ logo_base64 }}" alt="Logo">{% endif %}
-  <div class="header">
-    <h1>Certificate</h1>
-    <h2>of Achievement</h2>
+  <div class="border-outer"></div>
+  <div class="border-inner"></div>
+  
+  <div class="corner-line cl-tl-h"></div><div class="corner-line cl-tl-v"></div>
+  <div class="corner-line cl-tr-h"></div><div class="corner-line cl-tr-v"></div>
+  <div class="corner-line cl-bl-h"></div><div class="corner-line cl-bl-v"></div>
+  <div class="corner-line cl-br-h"></div><div class="corner-line cl-br-v"></div>
+
+  <div class="logo-wrap">
+    {% if logo_base64 %}<img src="{{ logo_base64 }}" alt="Club Logo">{% endif %}
   </div>
-  <div class="place-badge">2ND PLACE</div>
-  <div class="subtext">This is proudly awarded to</div>
-  <div class="participant-name">{{ slot_values.get('name', participant_name) }}</div>
-  <div class="name-line"></div>
-  <div class="details">
-    for securing <strong>Second Place</strong> in<br>
-    <strong>{{ slot_values.get('event_name', '') }}</strong><br>
-    organized by <strong>{{ slot_values.get('club_name', '') }}</strong>
-  </div>
-  <div class="cert-number">Certificate No: {{ cert_number }}</div>
-  <div class="fields-container">{{ fields_block }}</div>
+
+  <div class="institution-header">PSG iTech</div>
+  <div class="institution-sub">Institution of Technology, Coimbatore</div>
+
+  <div class="cert-title">Certificate</div>
+  <div class="cert-subtitle">of Excellence</div>
+
+  <div class="place-badge">SECOND PLACE</div>
+
+  <div class="preamble">This certificate is proudly awarded to</div>
+
+  <div class="fields-block-wrap">{{ fields_block }}</div>
+
+  <div class="name-underline"></div>
+
+  <div class="body-text-1">for their outstanding achievement and exceptional performance.</div>
+
   <div class="signature-block">
-    <div class="sig-item">
+    <div class="sig-col">
       {% if signature_base64 %}<img src="{{ signature_base64 }}" alt="Signature">{% endif %}
       <div class="sig-line"></div>
-      <div class="sig-label">Coordinator</div>
+      <div class="sig-label">Club Coordinator</div>
     </div>
-    <div class="sig-item">
+    <div class="sig-col">
       <div class="sig-line"></div>
       <div class="sig-label">Faculty Advisor</div>
     </div>
   </div>
-  <div class="qr-code">{% if qr_base64 %}<img src="{{ qr_base64 }}" alt="QR">{% endif %}</div>
-  <div class="footer">Verify at {{ cert_number }} | PSG iTech</div>
+
+  <div class="qr-wrap">
+    {% if qr_base64 %}<img src="{{ qr_base64 }}" alt="Verify QR">{% endif %}
+  </div>
+
+  <div class="cert-number">Certificate No: {{ cert_number }}</div>
+  <div class="footer-line">Verify at PSG iTech Certificate Portal&nbsp;&nbsp;|&nbsp;&nbsp;{{ cert_number }}</div>
 </body>
 </html>

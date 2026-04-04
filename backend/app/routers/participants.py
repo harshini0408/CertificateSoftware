@@ -110,6 +110,25 @@ async def upload_participants(
     content = await file.read()
     rows, errors = parse_participants_excel(content, all_slots)
 
+    # Task 4: Slot count validation
+    if rows:
+        system_cols = {"Email", "Registration Number", "Reg No"}
+        headers = list(rows[0].keys())
+        data_cols = [h for h in headers if h not in system_cols]
+        excel_cols = len(data_cols)
+
+        # Using "participant" as cert_type since that is what the created participant gets assigned
+        tid = event.template_map.get("participant")
+        if tid:
+            tpl = await Template.get(tid)
+            if tpl:
+                template_slots = len(tpl.field_slots)
+                if excel_cols != template_slots:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Excel has {excel_cols} columns but the template expects {template_slots} field slots. Please download the template again."
+                    )
+
     created = 0
     for row in rows:
         email = row.get("Email", "")

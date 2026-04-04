@@ -2,7 +2,6 @@
 
 Reads the 6 HTML template files from app/static/templates/ and inserts
 them as Template documents with is_preset=True if they don't already exist.
-This makes presets available system-wide for all clubs to assign.
 """
 
 import logging
@@ -12,8 +11,23 @@ from .models.template import Template, TemplateType, FieldSlot, TemplateBackgrou
 
 logger = logging.getLogger(__name__)
 
-# ── Template manifest ────────────────────────────────────────────────────
-# Maps filename → (display name, cert_type, border_color, font_color)
+# Base width for x calculations: 2480. Center is 2480/2 - width/2
+
+def _name_slot(y: int) -> FieldSlot:
+    # Width 2000, x = (2480-2000)/2 = 240
+    return FieldSlot(
+        slot_id="name_slot", label="Participant Name",
+        x=240, y=y, width=2000, height=150,
+        font_size=120, font_weight="bold", text_align="center"
+    )
+
+def _default_slot_args(slot_id: str, label: str, y: int, font_size: int = 36) -> FieldSlot:
+    # Width 1680, x = (2480-1680)/2 = 400
+    return FieldSlot(
+        slot_id=slot_id, label=label,
+        x=400, y=y, width=1680, height=80,
+        font_size=font_size, font_weight="bold", text_align="center"
+    )
 
 PRESET_MANIFEST = [
     {
@@ -24,6 +38,12 @@ PRESET_MANIFEST = [
         "font_color": "#1B4D3E",
         "font_family": "Montserrat, sans-serif",
         "background": {"type": "color", "value": "#FFFDF7"},
+        "slots": [
+            _name_slot(920),
+            _default_slot_args("event_slot", "Event Name", 1110),
+            _default_slot_args("dept_slot", "Department", 1200),
+            _default_slot_args("date_slot", "Event Date", 1290, font_size=28),
+        ]
     },
     {
         "filename": "coordinator.html",
@@ -33,15 +53,27 @@ PRESET_MANIFEST = [
         "font_color": "#1E3A5F",
         "font_family": "Playfair Display, serif",
         "background": {"type": "color", "value": "#FFFEF5"},
+        "slots": [
+            _name_slot(820),
+            _default_slot_args("event_slot", "Event Name", 1010),
+            _default_slot_args("role_slot", "Role", 1100),
+            _default_slot_args("date_slot", "Event Date", 1198, font_size=28),
+        ]
     },
     {
         "filename": "appreciation.html",
         "name": "Appreciation Blue",
-        "cert_type": "volunteer",
+        "cert_type": "appreciation",
         "border_color": "#1E3A5F",
         "font_color": "#1E3A5F",
         "font_family": "Montserrat, sans-serif",
         "background": {"type": "color", "value": "#F8FAFF"},
+        "slots": [
+            _name_slot(1150),
+            _default_slot_args("event_slot", "Event Name", 1350),
+            _default_slot_args("contribution_slot", "Contribution", 1450),
+            _default_slot_args("date_slot", "Event Date", 1550, font_size=28),
+        ]
     },
     {
         "filename": "winner_1st.html",
@@ -51,6 +83,13 @@ PRESET_MANIFEST = [
         "font_color": "#1B4D3E",
         "font_family": "Playfair Display, serif",
         "background": {"type": "gradient", "value": "linear-gradient(135deg, #FFFDF7, #FFF8E1)"},
+        "slots": [
+            _name_slot(1020),
+            _default_slot_args("event_slot", "Event Name", 1220),
+            _default_slot_args("category_slot", "Category", 1320),
+            _default_slot_args("dept_slot", "Department", 1420),
+            _default_slot_args("date_slot", "Event Date", 1520, font_size=28),
+        ]
     },
     {
         "filename": "winner_2nd.html",
@@ -60,6 +99,13 @@ PRESET_MANIFEST = [
         "font_color": "#333333",
         "font_family": "Playfair Display, serif",
         "background": {"type": "color", "value": "#FAFAFA"},
+        "slots": [
+            _name_slot(1020),
+            _default_slot_args("event_slot", "Event Name", 1220),
+            _default_slot_args("category_slot", "Category", 1320),
+            _default_slot_args("dept_slot", "Department", 1420),
+            _default_slot_args("date_slot", "Event Date", 1520, font_size=28),
+        ]
     },
     {
         "filename": "winner_3rd.html",
@@ -69,31 +115,14 @@ PRESET_MANIFEST = [
         "font_color": "#4A2C0A",
         "font_family": "Playfair Display, serif",
         "background": {"type": "color", "value": "#FFF9F0"},
+        "slots": [
+            _name_slot(1020),
+            _default_slot_args("event_slot", "Event Name", 1220),
+            _default_slot_args("category_slot", "Category", 1320),
+            _default_slot_args("dept_slot", "Department", 1420),
+            _default_slot_args("date_slot", "Event Date", 1520, font_size=28),
+        ]
     },
-]
-
-# Default field slots common to all preset templates
-DEFAULT_FIELD_SLOTS = [
-    FieldSlot(
-        slot_id="name", label="Participant Name",
-        x=240, y=800, width=2000, height=150,
-        font_size=72, font_weight="bold", text_align="center",
-    ),
-    FieldSlot(
-        slot_id="event_name", label="Event Name",
-        x=400, y=1050, width=1680, height=80,
-        font_size=36, font_weight="bold", text_align="center",
-    ),
-    FieldSlot(
-        slot_id="club_name", label="Club Name",
-        x=400, y=1130, width=1680, height=80,
-        font_size=36, font_weight="bold", text_align="center",
-    ),
-    FieldSlot(
-        slot_id="date", label="Event Date",
-        x=400, y=1210, width=1680, height=60,
-        font_size=28, font_weight="normal", text_align="center",
-    ),
 ]
 
 
@@ -113,6 +142,8 @@ async def seed_preset_templates() -> None:
             Template.name == manifest["name"],
         )
         if existing:
+            # We want to force update slots on startup if they changed.
+            await existing.set({"field_slots": [s.model_dump() for s in manifest["slots"]]})
             continue
 
         # Read HTML file
@@ -130,7 +161,7 @@ async def seed_preset_templates() -> None:
             cert_type=manifest["cert_type"],
             type=TemplateType.PRESET,
             html_content=html_content,
-            field_slots=DEFAULT_FIELD_SLOTS.copy(),
+            field_slots=manifest["slots"],
             background=TemplateBackground(
                 type=manifest["background"]["type"],
                 value=manifest["background"]["value"],

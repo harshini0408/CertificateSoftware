@@ -61,6 +61,7 @@ class TemplateResponse(BaseModel):
     font_family: Optional[str] = None
     font_color: Optional[str] = None
     is_preset: bool
+    source_preset_id: Optional[str] = None
     preview_url: Optional[str] = None
     created_at: datetime
 

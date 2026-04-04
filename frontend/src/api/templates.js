@@ -172,3 +172,18 @@ export function useUpdatePresetSlots(clubId, eventId) {
     },
   })
 }
+
+// ── Added per specifications ──────────────────────────────────────────────────
+export const templateApi = {
+  getPresets: (clubId) =>
+    axiosInstance.get(`/clubs/${clubId}/templates/presets`).then(r => r.data),
+
+  patchSlots: (clubId, templateId, slots) =>
+    axiosInstance.patch(`/clubs/${clubId}/templates/presets/${templateId}/slots`, { slots })
+      .then(r => r.data),
+
+  assignToEvent: (clubId, eventId, certType, templateId) =>
+    axiosInstance.patch(`/clubs/${clubId}/events/${eventId}`, {
+      template_map: { [certType]: templateId }
+    }).then(r => r.data),
+}

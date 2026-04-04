@@ -3,63 +3,218 @@
 <head>
 <meta charset="utf-8">
 <style>
-  @font-face { font-family: 'Playfair Display'; src: url('file:///app/static/fonts/PlayfairDisplay.ttf'); }
-  @font-face { font-family: 'Montserrat'; src: url('file:///app/static/fonts/Montserrat.ttf'); }
-  @font-face { font-family: 'Dancing Script'; src: url('file:///app/static/fonts/DancingScript.ttf'); }
+  @font-face { font-family: 'Raleway'; src: url('/static/fonts/Raleway.ttf'); }
+  @font-face { font-family: 'Playfair Display'; src: url('/static/fonts/PlayfairDisplay.ttf'); }
+  @font-face { font-family: 'Dancing Script'; src: url('/static/fonts/DancingScript.ttf'); }
+  @font-face { font-family: 'Montserrat'; src: url('/static/fonts/Montserrat.ttf'); }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { width: 2480px; height: 3508px; position: relative; font-family: 'Montserrat', sans-serif; background: #F5F0FF; }
-  .border-frame { position: absolute; top: 60px; left: 60px; right: 60px; bottom: 60px; border: 8px solid #4A148C; border-radius: 12px; }
-  .inner-border { position: absolute; top: 80px; left: 80px; right: 80px; bottom: 80px; border: 2px solid #CE93D8; }
-  .logo { position: absolute; top: 140px; left: 50%; transform: translateX(-50%); width: 200px; height: 200px; object-fit: contain; }
-  .header { position: absolute; top: 380px; width: 100%; text-align: center; font-family: 'Playfair Display', serif; color: #4A148C; }
-  .header h1 { font-size: 96px; letter-spacing: 8px; text-transform: uppercase; }
-  .header h2 { font-size: 48px; color: #CE93D8; margin-top: 20px; letter-spacing: 12px; text-transform: uppercase; }
-  .subtext { position: absolute; top: 640px; width: 100%; text-align: center; font-size: 36px; color: #555; }
-  .participant-name { position: absolute; top: 800px; width: 100%; text-align: center; font-family: 'Dancing Script', cursive; font-size: 120px; color: #4A148C; }
-  .name-line { position: absolute; top: 950px; left: 400px; right: 400px; height: 3px; background: #CE93D8; }
-  .details { position: absolute; top: 1020px; width: 100%; text-align: center; font-size: 36px; color: #333; line-height: 1.8; }
-  .cert-number { position: absolute; top: 1300px; width: 100%; text-align: center; font-size: 28px; color: #888; letter-spacing: 2px; }
-  .fields-container { position: absolute; top: 1400px; left: 200px; right: 200px; }
-  .signature-block { position: absolute; bottom: 400px; left: 200px; right: 200px; display: flex; justify-content: space-between; align-items: flex-end; }
-  .sig-item { text-align: center; width: 500px; }
-  .sig-item img { height: 150px; object-fit: contain; }
-  .sig-item .sig-line { width: 100%; height: 2px; background: #4A148C; margin-top: 10px; }
-  .sig-item .sig-label { font-size: 28px; color: #555; margin-top: 10px; }
-  .qr-code { position: absolute; bottom: 160px; right: 200px; width: 250px; height: 250px; }
-  .qr-code img { width: 100%; height: 100%; }
-  .footer { position: absolute; bottom: 100px; width: 100%; text-align: center; font-size: 24px; color: #999; }
+  body {
+    width: 2480px; height: 3508px; position: relative; overflow: hidden;
+    font-family: 'Raleway', sans-serif;
+    background: #F0F7F4;
+  }
+
+  /* Background accent panel */
+  .bg-accent {
+    position: absolute; top: 0; left: 0; width: 2480px; height: 420px;
+    background: linear-gradient(135deg, #1B5E3B 0%, #2E7D52 60%, #1B5E3B 100%);
+  }
+  .bg-accent-bottom {
+    position: absolute; bottom: 0; left: 0; width: 2480px; height: 200px;
+    background: linear-gradient(135deg, #1B5E3B 0%, #2E7D52 100%);
+  }
+
+  /* ── Border ──────────────────────────────────────────────────────────── */
+  .border-outer {
+    position: absolute; top: 55px; left: 55px; right: 55px; bottom: 55px;
+    border: 6px solid rgba(255,255,255,0.35); border-radius: 16px;
+    pointer-events: none;
+  }
+
+  /* ── Logo ────────────────────────────────────────────────────────────── */
+  .logo-wrap {
+    position: absolute; top: 80px; left: 190px;
+    width: 240px; height: 240px;
+  }
+  .logo-wrap img { width: 100%; height: 100%; object-fit: contain; filter: brightness(0) invert(1); }
+
+  /* ── Institution (white on green) ───────────────────────────────────── */
+  .institution {
+    position: absolute; top: 100px; left: 460px;
+    font-family: 'Raleway', sans-serif; font-size: 50px; font-weight: 800;
+    color: #FFFFFF; letter-spacing: 5px; text-transform: uppercase;
+  }
+  .institution-sub {
+    position: absolute; top: 175px; left: 460px;
+    font-family: 'Raleway', sans-serif; font-size: 28px;
+    color: rgba(255,255,255,0.75); letter-spacing: 2px;
+  }
+
+  /* ── Title block ─────────────────────────────────────────────────────── */
+  .cert-title {
+    position: absolute; top: 470px; width: 100%; text-align: center;
+    font-family: 'Raleway', sans-serif; font-size: 100px; font-weight: 700;
+    color: #1B5E3B; letter-spacing: 8px; text-transform: uppercase;
+  }
+  .cert-subtitle {
+    position: absolute; top: 600px; width: 100%; text-align: center;
+    font-family: 'Raleway', sans-serif; font-size: 50px;
+    color: #3AAA70; letter-spacing: 14px; text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  /* Green accent rule */
+  .green-rule {
+    position: absolute; top: 690px; left: 50%; transform: translateX(-50%);
+    width: 600px; height: 4px;
+    background: linear-gradient(90deg, transparent, #1B5E3B, transparent);
+  }
+
+  /* ── Preamble ────────────────────────────────────────────────────────── */
+  .preamble {
+    position: absolute; top: 750px; width: 100%; text-align: center;
+    font-family: 'Raleway', sans-serif; font-size: 36px; color: #666;
+    letter-spacing: 2px;
+  }
+
+  /* Dynamic field slots (renderer injects fields_block) */
+  /* name_slot  : y≈820px  */
+  /* event_slot : y≈1010px */
+  /* role_slot  : y≈1100px */
+  /* date_slot  : y≈1198px */
+  .fields-block-wrap {
+    position: absolute; top: 0; left: 0; width: 2480px; height: 3508px;
+    pointer-events: none;
+  }
+
+  .name-underline {
+    position: absolute; top: 976px; left: 350px; right: 350px;
+    height: 3px; background: linear-gradient(90deg, transparent, #3AAA70, transparent);
+  }
+
+  /* Body text */
+  .appreciation-text {
+    position: absolute; top: 1340px; width: 100%; text-align: center;
+    font-family: 'Raleway', sans-serif; font-size: 34px; color: #444;
+    line-height: 1.8;
+  }
+
+  /* Leafy ornament */
+  .ornament {
+    position: absolute; top: 2100px; width: 100%; text-align: center;
+    font-size: 80px; opacity: 0.18;
+  }
+
+  /* Green icon strip */
+  .icon-strip {
+    position: absolute; top: 2250px; width: 100%; display: flex;
+    justify-content: center; gap: 120px; align-items: center;
+  }
+  .icon-dot {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #1B5E3B; opacity: 0.4;
+  }
+
+  /* ── Signature block ─────────────────────────────────────────────────── */
+  .signature-block {
+    position: absolute; bottom: 520px; left: 200px; right: 200px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+  }
+  .sig-col { text-align: center; width: 600px; }
+  .sig-col img { height: 160px; max-width: 520px; object-fit: contain; }
+  .sig-line { width: 100%; height: 2px; background: #1B5E3B; margin-top: 12px; }
+  .sig-label {
+    font-family: 'Raleway', sans-serif; font-size: 30px; color: #555;
+    margin-top: 14px; letter-spacing: 1px;
+  }
+
+  /* ── QR code ─────────────────────────────────────────────────────────── */
+  .qr-wrap {
+    position: absolute; bottom: 230px; right: 220px;
+    width: 260px; height: 260px;
+  }
+  .qr-wrap img { width: 100%; height: 100%; }
+
+  /* ── Cert number & footer ────────────────────────────────────────────── */
+  .cert-number {
+    position: absolute; bottom: 115px; width: 100%; text-align: center;
+    font-family: 'Raleway', sans-serif; font-size: 26px;
+    color: rgba(255,255,255,0.8); letter-spacing: 3px;
+  }
+  .footer-line {
+    position: absolute; bottom: 68px; width: 100%; text-align: center;
+    font-family: 'Raleway', sans-serif; font-size: 22px;
+    color: rgba(255,255,255,0.5);
+  }
 </style>
 </head>
 <body>
-  <div class="border-frame"></div>
-  <div class="inner-border"></div>
-  {% if logo_base64 %}<img class="logo" src="{{ logo_base64 }}" alt="Logo">{% endif %}
-  <div class="header">
-    <h1>Certificate</h1>
-    <h2>of Coordination</h2>
+  <!-- Background accent panels -->
+  <div class="bg-accent"></div>
+  <div class="bg-accent-bottom"></div>
+
+  <!-- Border frame -->
+  <div class="border-outer"></div>
+
+  <!-- Logo -->
+  <div class="logo-wrap">
+    {% if logo_base64 %}<img src="{{ logo_base64 }}" alt="Club Logo">{% endif %}
   </div>
-  <div class="subtext">This is to certify that</div>
-  <div class="participant-name">{{ slot_values.get('name', participant_name) }}</div>
-  <div class="name-line"></div>
-  <div class="details">
-    has served as <strong>Event Coordinator</strong> for<br>
-    <strong>{{ slot_values.get('event_name', '') }}</strong><br>
-    organized by <strong>{{ slot_values.get('club_name', '') }}</strong>
+  <div class="institution">PSG iTech</div>
+  <div class="institution-sub">Institution of Technology</div>
+
+  <!-- Title -->
+  <div class="cert-title">Certificate</div>
+  <div class="cert-subtitle">of Appreciation</div>
+  <div class="green-rule"></div>
+
+  <!-- Preamble -->
+  <div class="preamble">This certificate is proudly presented to</div>
+
+  <!-- Dynamic field slots -->
+  <div class="fields-block-wrap">{{ fields_block }}</div>
+
+  <!-- Name underline -->
+  <div class="name-underline"></div>
+
+  <!-- Body text -->
+  <div class="appreciation-text">
+    for their dedicated service and outstanding contribution<br>
+    as a coordinator at PSG iTech — College of Technology, Coimbatore.
   </div>
-  <div class="cert-number">Certificate No: {{ cert_number }}</div>
-  <div class="fields-container">{{ fields_block }}</div>
+
+  <!-- Ornament -->
+  <div class="ornament">❦</div>
+
+  <!-- Icon strip -->
+  <div class="icon-strip">
+    <div class="icon-dot"></div>
+    <div class="icon-dot"></div>
+    <div class="icon-dot"></div>
+    <div class="icon-dot"></div>
+    <div class="icon-dot"></div>
+  </div>
+
+  <!-- Signature block -->
   <div class="signature-block">
-    <div class="sig-item">
+    <div class="sig-col">
       {% if signature_base64 %}<img src="{{ signature_base64 }}" alt="Signature">{% endif %}
       <div class="sig-line"></div>
-      <div class="sig-label">Club President</div>
+      <div class="sig-label">Club Coordinator</div>
     </div>
-    <div class="sig-item">
+    <div class="sig-col">
       <div class="sig-line"></div>
       <div class="sig-label">Faculty Advisor</div>
     </div>
   </div>
-  <div class="qr-code">{% if qr_base64 %}<img src="{{ qr_base64 }}" alt="QR">{% endif %}</div>
-  <div class="footer">Verify at {{ cert_number }} | PSG iTech</div>
+
+  <!-- QR code -->
+  <div class="qr-wrap">
+    {% if qr_base64 %}<img src="{{ qr_base64 }}" alt="Verify QR">{% endif %}
+  </div>
+
+  <!-- Cert number & footer -->
+  <div class="cert-number">Certificate No: {{ cert_number }}</div>
+  <div class="footer-line">Verify at PSG iTech Certificate Portal&nbsp;&nbsp;|&nbsp;&nbsp;{{ cert_number }}</div>
 </body>
 </html>

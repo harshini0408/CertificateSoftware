@@ -1,18 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosInstance from '../utils/axiosInstance'
 import { useToastStore } from '../store/uiStore'
-
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const adminKeys = {
-  stats:     ()            => ['admin', 'stats'],
-  clubs:     ()            => ['admin', 'clubs'],
-  users:     ()            => ['admin', 'users'],
-  certs:     (filters, p) => ['admin', 'certificates', filters, p],
-  scanLogs:  (filters, p) => ['admin', 'scan-logs', filters, p],
-  creditRules: ()          => ['admin', 'credit-rules'],
-  activity:  ()            => ['admin', 'activity'],
+  stats: () => ['admin', 'stats'],
+  clubs: () => ['admin', 'clubs'],
+  users: () => ['admin', 'users'],
+  certs: (filters, p) => ['admin', 'certificates', filters, p],
+  scanLogs: (filters, p) => ['admin', 'scan-logs', filters, p],
+  creditRules: () => ['admin', 'credit-rules'],
+  activity: () => ['admin', 'activity'],
 }
-
 // ── useAdminStats ─────────────────────────────────────────────────────────────
 /**
  * GET /admin/stats
