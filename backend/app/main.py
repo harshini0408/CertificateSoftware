@@ -184,6 +184,11 @@ _static_dir = Path(__file__).parent / "static"
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
+# Serve uploaded club assets (logos, signatures, generated certs)
+_storage_dir = Path(settings.storage_path).resolve()
+_storage_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/storage", StaticFiles(directory=str(_storage_dir)), name="storage")
+
 
 # ── Health / Root ────────────────────────────────────────────────────────
 

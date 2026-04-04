@@ -160,7 +160,8 @@ function EventsTab({ clubId }) {
       onSuccess: (res) => {
         setIsModalOpen(false)
         reset()
-        navigate(`/club/${clubId}/events/${res.id ?? res._id}`)
+        const event = res?.data ?? res
+        navigate(`/club/${clubId}/events/${event.id ?? event._id}`)
       }
     })
   }
@@ -178,7 +179,6 @@ function EventsTab({ clubId }) {
           className="text-sm font-semibold text-navy hover:underline text-left"
           onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)}
         >
-          {v}
           {v}
         </button>
       ) },

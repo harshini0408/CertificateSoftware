@@ -32,8 +32,8 @@ function certLabel(ct) {
   return ct.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())
 }
 function imgSrc(url) {
-  if (!url) return null
-  if (url.startsWith('http')) return url
+  if (!url || url.trim() === '') return null
+  if (url.startsWith('http') || url.startsWith('blob:')) return url
   return BACKEND_URL + url
 }
 
@@ -219,9 +219,31 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
         <div className="flex-1 overflow-auto bg-gray-100 flex items-start justify-center p-4">
           <div className="relative inline-block shadow-2xl rounded-sm"
             style={{ cursor: activeField ? 'crosshair' : 'default' }} onClick={handleClick}>
-            <img ref={imgRef} src={imgSrc(template.preview_url)} alt={template.display_name}
-              onLoad={() => { if (imgRef.current) setImgW(imgRef.current.getBoundingClientRect().width) }}
-              className="block max-w-full" style={{ userSelect:'none', maxHeight:'70vh' }} draggable={false} />
+            {imgSrc(template.preview_url) ? (
+              <img
+                ref={imgRef}
+                src={imgSrc(template.preview_url)}
+                alt={template.display_name}
+                onLoad={() => { if (imgRef.current) setImgW(imgRef.current.getBoundingClientRect().width) }}
+                onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
+                className="block max-w-full"
+                style={{ userSelect:'none', maxHeight:'70vh' }}
+                draggable={false}
+              />
+            ) : null}
+            <div
+              className="flex flex-col items-center justify-center bg-gray-100 rounded text-gray-400 gap-2"
+              style={{ display: imgSrc(template.preview_url) ? 'none' : 'flex', width: 400, height: 566 }}
+            >
+              <svg className="h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p className="text-sm font-medium">Template image not found</p>
+              <p className="text-xs text-gray-400 text-center px-4">
+                Make sure PNG files exist in<br/>
+                <code className="bg-gray-200 px-1 rounded text-gray-600">backend/app/static/certificate_templates/</code>
+              </p>
+            </div>
             {Object.entries(positions).map(([col, pos]) => (
               <MarkerPin key={col} col={col} pos={pos} color={colorMap[col] ?? '#6b7280'}
                 isActive={activeField === col} onClick={c => setActiveField(p => p === c ? null : c)} />
@@ -340,8 +362,25 @@ function PlaceAssetsStep({ certType, template, eventAssets, existingAssetPositio
           <div className="flex-1 overflow-auto bg-gray-100 flex items-start justify-center p-4">
             <div className="relative inline-block shadow-2xl rounded-sm"
               style={{ cursor: active ? 'crosshair' : 'default' }} onClick={handleClick}>
-              <img src={imgSrc(template.preview_url)} alt={template.display_name}
-                className="block max-w-full" style={{ userSelect:'none', maxHeight:'70vh' }} draggable={false} />
+              {imgSrc(template.preview_url) ? (
+                <img
+                  src={imgSrc(template.preview_url)}
+                  alt={template.display_name}
+                  onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
+                  className="block max-w-full"
+                  style={{ userSelect:'none', maxHeight:'70vh' }}
+                  draggable={false}
+                />
+              ) : null}
+              <div
+                className="flex flex-col items-center justify-center bg-gray-100 rounded text-gray-400 gap-2"
+                style={{ display: imgSrc(template.preview_url) ? 'none' : 'flex', width: 400, height: 566 }}
+              >
+                <svg className="h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <p className="text-sm font-medium">Template image not found</p>
+              </div>
               {Object.entries(positions).map(([key, pos]) => (
                 <div key={key} onClick={() => setActive(p => p === key ? null : key)}
                   style={{ position:'absolute', left:`${pos.x_percent}%`, top:`${pos.y_percent}%`, transform:'translate(-50%,-50%)', cursor:'pointer', zIndex:10 }}>
@@ -419,8 +458,27 @@ export default function TemplateSelector({ isModal=false, onClose, clubId: propC
   const columns = (() => {
     if (!participants?.length) return []
     const keys = new Set()
-    participants.forEach(p => { if (p.fields) Object.keys(p.fields).forEach(k => keys.add(k)) })
-    return Array.from(keys).filter(k => !k.startsWith('_'))
+    const SKIP = new Set(['_id', 'id', 'event_id', 'club_id', 'cert_type', 'email',
+      'registration_number', 'name', 'created_at', 'is_verified', 'source',
+      'registered_at', 'custom_data', 'fields', 'certificate_issued'])
+
+    participants.forEach(p => {
+      // Primary: use the fields map (Excel-imported participants)
+      if (p.fields && typeof p.fields === 'object') {
+        Object.keys(p.fields).forEach(k => { if (!k.startsWith('_')) keys.add(k) })
+      }
+    })
+
+    // Fallback: derive map-able columns from top-level keys for manually added records.
+    if (keys.size === 0) {
+      participants.forEach(p => {
+        Object.keys(p || {}).forEach(k => {
+          if (!k.startsWith('_') && !SKIP.has(k)) keys.add(k)
+        })
+      })
+    }
+
+    return Array.from(keys)
   })()
 
   const [activeCertType, setActiveCertType] = useState(null)

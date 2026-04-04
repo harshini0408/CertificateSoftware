@@ -14,6 +14,7 @@ from ..models.event import Event, EventStatus, EventAssets, QRConfig
 from ..models.template import Template
 from ..models.certificate import Certificate
 from ..models.participant import Participant
+from ..models.field_position import FieldPosition
 from ..schemas.event import EventCreate, EventUpdate, EventResponse, QRGenerateRequest, QRGenerateResponse
 from ..services.qr_service import create_event_qr_token, generate_qr_base64
 from ..services.signature_service import process_signature, save_logo
@@ -59,9 +60,23 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
 
     # Sync participant count on read
     actual_count = await Participant.find(Participant.event_id == event_id).count()
+    # Sync mapping_confirmed based on any confirmed field-position record
+    mapping_confirmed = (
+        await FieldPosition.find(
+            FieldPosition.event_id == event_id,
+            FieldPosition.confirmed == True,
+        ).count()
+    ) > 0
+
+    updates = {}
     if actual_count != event.participant_count:
-        event.participant_count = actual_count
-        await event.set({"participant_count": actual_count})
+        updates["participant_count"] = actual_count
+    if mapping_confirmed != event.mapping_confirmed:
+        updates["mapping_confirmed"] = mapping_confirmed
+
+    if updates:
+        await event.set(updates)
+        event = await Event.get(event_id)
 
     return _event_response(event)
 

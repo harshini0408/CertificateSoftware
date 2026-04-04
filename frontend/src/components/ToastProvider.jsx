@@ -70,7 +70,13 @@ function Toast({ id, type = 'info', message, duration = 4000 }) {
       {/* Content */}
       <div className="flex flex-1 items-start gap-3 px-4 py-3 pl-5">
         {cfg.icon}
-        <p className="flex-1 text-sm text-foreground leading-snug">{message}</p>
+        <p className="flex-1 text-sm text-foreground leading-snug">
+          {typeof message === 'string'
+            ? message
+            : Array.isArray(message)
+              ? message.map((m) => m?.msg ?? JSON.stringify(m)).join(' | ')
+              : JSON.stringify(message)}
+        </p>
       </div>
 
       {/* Close button */}

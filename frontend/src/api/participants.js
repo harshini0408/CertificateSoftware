@@ -2,6 +2,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosInstance from '../utils/axiosInstance'
 import { useToastStore } from '../store/uiStore'
 
+function safeDetail(err, fallback) {
+  const detail = err?.response?.data?.detail
+  if (!detail) return fallback
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map(d => d?.msg ?? d?.message ?? JSON.stringify(d)).join(' | ')
+  }
+  return fallback
+}
+
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const participantKeys = {
   list:    (clubId, eventId)          => ['participants', clubId, eventId],
@@ -61,7 +71,7 @@ export function useUploadExcel(clubId, eventId) {
     onError: (err) => {
       addToast({
         type: 'error',
-        message: err?.response?.data?.detail || 'Excel upload failed.',
+        message: safeDetail(err, 'Excel upload failed.'),
       })
     },
   })
@@ -89,7 +99,7 @@ export function useAddParticipant(clubId, eventId) {
     onError: (err) => {
       addToast({
         type: 'error',
-        message: err?.response?.data?.detail || 'Failed to add participant.',
+        message: safeDetail(err, 'Failed to add participant.'),
       })
     },
   })
@@ -178,7 +188,7 @@ export function useConfirmMapping(clubId, eventId) {
     onError: (err) => {
       addToast({
         type: 'error',
-        message: err?.response?.data?.detail || 'Failed to confirm mapping.',
+        message: safeDetail(err, 'Failed to confirm mapping.'),
       })
     },
   })

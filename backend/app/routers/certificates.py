@@ -18,8 +18,8 @@ from ..schemas.certificate import CertificateResponse, GenerateResponse
 from ..services.cert_number import generate_cert_number
 from ..services.qr_service import generate_qr_base64
 from ..services.template_renderer import render_certificate
-from ..services.png_generator import generate_png
-from ..services.storage_service import save_cert_png
+from ..services.png_generator import generate_png, generate_certificate_pillow
+from ..services.storage_service import save_cert_png, storage_url_to_path, storage_path_to_url
 from ..services.email_service import send_certificate_email, get_daily_sent_count
 from ..services.credit_service import award_credits
 
@@ -29,38 +29,53 @@ router = APIRouter(
 settings = get_settings()
 
 
-# ── Background task: generate single certificate + email ─────────────────
+# ── Background task: generate single certificate (review-first flow) ───────
 
-async def _generate_and_email_one(cert_id: PydanticObjectId) -> None:
+async def _generate_one(cert_id: PydanticObjectId) -> None:
     cert = await Certificate.get(cert_id)
     if not cert:
         return
 
     try:
         participant = await Participant.get(cert.participant_id)
-        template = await Template.get(cert.template_id)
         club = await Club.get(cert.club_id)
-        if not participant or not template or not club:
+        event = await Event.get(cert.event_id)
+        if not participant or not club or not event:
             await cert.set({"status": CertStatus.FAILED})
             return
 
-        event = await Event.get(cert.event_id)
         qr_url = f"{settings.base_url}/verify/{cert.cert_number}"
         qr_b64 = generate_qr_base64(qr_url)
-
-        html = render_certificate(
-            participant=participant,
-            template=template,
-            cert_number=cert.cert_number,
-            qr_base64=qr_b64,
-            logo_path=event.assets.logo_path if event else None,
-            signature_path=event.assets.signature_path if event else None,
-        )
 
         year = datetime.utcnow().year
         tmp_path = str(Path(settings.storage_path) / "tmp" / f"{cert.cert_number}.png")
         Path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
-        generate_png(html, tmp_path)
+
+        # New image-template flow (Pillow) — used when template_filename exists.
+        if event.template_filename:
+            await generate_certificate_pillow(
+                event=event,
+                participant=participant,
+                qr_b64=qr_b64,
+                output_path=tmp_path,
+                club_slug=club.slug,
+            )
+        else:
+            # Legacy HTML-template flow.
+            template = await Template.get(cert.template_id)
+            if not template:
+                await cert.set({"status": CertStatus.FAILED})
+                return
+
+            html = render_certificate(
+                participant=participant,
+                template=template,
+                cert_number=cert.cert_number,
+                qr_base64=qr_b64,
+                logo_path=event.assets.logo_path,
+                signature_path=event.assets.signature_path,
+            )
+            generate_png(html, tmp_path)
 
         png_bytes = Path(tmp_path).read_bytes()
         png_url = save_cert_png(png_bytes, club.slug, year, cert.cert_number)
@@ -73,12 +88,51 @@ async def _generate_and_email_one(cert_id: PydanticObjectId) -> None:
             "issued_at": datetime.utcnow(),
         })
 
-        # Attempt email
+    except Exception as exc:
+        await cert.set({"status": CertStatus.FAILED})
+        await EmailLog(
+            certificate_id=cert.id, recipient_email=cert.snapshot.email,
+            status=EmailStatus.FAILED, error_msg=str(exc)[:500], attempt_count=1,
+        ).insert()
+
+
+async def _send_email_for_generated(cert_id: PydanticObjectId) -> None:
+    """Send email for an already-generated certificate after coordinator approval."""
+    cert = await Certificate.get(cert_id)
+    if not cert or cert.status not in [CertStatus.GENERATED, CertStatus.FAILED]:
+        return
+
+    if not cert.png_url:
+        await cert.set({"status": CertStatus.FAILED})
+        await EmailLog(
+            certificate_id=cert.id,
+            recipient_email=cert.snapshot.email,
+            status=EmailStatus.FAILED,
+            error_msg="PNG not generated for certificate",
+            attempt_count=1,
+        ).insert()
+        return
+
+    local_png_path = storage_url_to_path(cert.png_url)
+    if not Path(local_png_path).exists():
+        await cert.set({"status": CertStatus.FAILED})
+        await EmailLog(
+            certificate_id=cert.id,
+            recipient_email=cert.snapshot.email,
+            status=EmailStatus.FAILED,
+            error_msg="Certificate file not found on disk",
+            attempt_count=1,
+        ).insert()
+        return
+
+    try:
         daily_count = get_daily_sent_count()
         if daily_count >= settings.email_daily_limit:
             await EmailLog(
-                certificate_id=cert.id, recipient_email=cert.snapshot.email,
-                status=EmailStatus.QUEUED, scheduled_for=datetime.utcnow(),
+                certificate_id=cert.id,
+                recipient_email=cert.snapshot.email,
+                status=EmailStatus.QUEUED,
+                scheduled_for=datetime.utcnow(),
             ).insert()
             return
 
@@ -88,27 +142,35 @@ async def _generate_and_email_one(cert_id: PydanticObjectId) -> None:
             cert_number=cert.cert_number,
             event_name=cert.snapshot.event_name,
             club_name=cert.snapshot.club_name,
-            png_path=png_url,
+            png_path=local_png_path,
         )
 
         if sent:
             await cert.set({"status": CertStatus.EMAILED})
             await EmailLog(
-                certificate_id=cert.id, recipient_email=cert.snapshot.email,
-                status=EmailStatus.SENT, sent_at=datetime.utcnow(), attempt_count=1,
+                certificate_id=cert.id,
+                recipient_email=cert.snapshot.email,
+                status=EmailStatus.SENT,
+                sent_at=datetime.utcnow(),
+                attempt_count=1,
             ).insert()
             await award_credits(cert)
         else:
             await EmailLog(
-                certificate_id=cert.id, recipient_email=cert.snapshot.email,
-                status=EmailStatus.QUEUED, attempt_count=1,
+                certificate_id=cert.id,
+                recipient_email=cert.snapshot.email,
+                status=EmailStatus.QUEUED,
+                attempt_count=1,
             ).insert()
 
     except Exception as exc:
         await cert.set({"status": CertStatus.FAILED})
         await EmailLog(
-            certificate_id=cert.id, recipient_email=cert.snapshot.email,
-            status=EmailStatus.FAILED, error_msg=str(exc)[:500], attempt_count=1,
+            certificate_id=cert.id,
+            recipient_email=cert.snapshot.email,
+            status=EmailStatus.FAILED,
+            error_msg=str(exc)[:500],
+            attempt_count=1,
         ).insert()
 
 
@@ -129,7 +191,7 @@ async def generate_certificates(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
 
     participants = await Participant.find(
-        Participant.event_id == event_id, Participant.verified == True
+        Participant.event_id == event_id
     ).to_list()
 
     existing_pids = set()
@@ -138,18 +200,29 @@ async def generate_certificates(
         existing_pids.add(c.participant_id)
 
     queued = 0
+    skipped_existing = 0
+    skipped_no_template = 0
     year = datetime.utcnow().year
 
     for p in participants:
         if p.id in existing_pids:
+            skipped_existing += 1
             continue
 
         cert_type = p.cert_type
-        template_id = event.template_map.get(cert_type)
-        if not template_id:
-            template_id = event.template_map.get("participant")
-        if not template_id:
+        mapped_template = event.template_map.get(cert_type)
+        if not mapped_template:
+            mapped_template = event.template_map.get("participant")
+        if not mapped_template:
+            skipped_no_template += 1
             continue
+
+        # Certificates model still requires template_id as ObjectId.
+        # For image-template mappings (filename strings), use event.id as a stable placeholder.
+        try:
+            template_oid = PydanticObjectId(mapped_template)
+        except Exception:
+            template_oid = event.id
 
         cert_number = await generate_cert_number(club.slug, year)
 
@@ -166,14 +239,24 @@ async def generate_certificates(
 
         cert = Certificate(
             cert_number=cert_number, participant_id=p.id,
-            event_id=event_id, template_id=template_id, club_id=club_id,
+            event_id=event_id, template_id=template_oid, club_id=club_id,
             snapshot=snapshot, status=CertStatus.PENDING,
         )
         await cert.insert()
-        background_tasks.add_task(_generate_and_email_one, cert.id)
+        background_tasks.add_task(_generate_one, cert.id)
         queued += 1
 
-    return GenerateResponse(queued_count=queued)
+    total = len(participants)
+    message = (
+        f"Queued {queued} of {total} participant(s). "
+        f"Skipped existing: {skipped_existing}. "
+        f"Skipped missing template: {skipped_no_template}."
+    )
+    return GenerateResponse(
+        queued_count=queued,
+        total=total,
+        message=message,
+    )
 
 
 @router.get("", response_model=List[CertificateResponse])
@@ -189,7 +272,12 @@ async def list_certificates(
             id=str(c.id), cert_number=c.cert_number,
             participant_id=str(c.participant_id), event_id=str(c.event_id),
             template_id=str(c.template_id), club_id=str(c.club_id),
+            participant_name=c.snapshot.name,
+            participant_email=c.snapshot.email,
+            cert_type=c.snapshot.cert_type,
             snapshot=c.snapshot.model_dump(), status=c.status.value,
+            pdf_url=storage_path_to_url(c.png_url) if c.png_url else None,
+            generated_at=c.issued_at,
             issued_at=c.issued_at,
         ) for c in certs
     ]
@@ -213,7 +301,26 @@ async def send_remaining(
             EmailLog.status.in_([EmailStatus.QUEUED, EmailStatus.PENDING]),
         )
         if log or cert.status == CertStatus.GENERATED:
-            background_tasks.add_task(_generate_and_email_one, cert.id)
+            background_tasks.add_task(_send_email_for_generated, cert.id)
             queued += 1
 
-    return {"message": f"{queued} emails queued for sending"}
+    return {"queued": queued, "message": f"{queued} emails queued for sending"}
+
+
+@router.post("/{cert_id}/resend")
+async def resend_one_certificate_email(
+    club_id: PydanticObjectId,
+    event_id: PydanticObjectId,
+    cert_id: PydanticObjectId,
+    background_tasks: BackgroundTasks,
+    _user: User = Depends(require_event_access),
+):
+    cert = await Certificate.get(cert_id)
+    if not cert or cert.club_id != club_id or cert.event_id != event_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+
+    if cert.status not in [CertStatus.GENERATED, CertStatus.FAILED]:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only generated/failed certificates can be resent")
+
+    background_tasks.add_task(_send_email_for_generated, cert.id)
+    return {"message": "Email re-queued", "queued": 1}

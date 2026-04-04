@@ -9,6 +9,8 @@ import {
   useSendRemaining,
   useResendCert,
 } from '../api/certificates'
+import { BACKEND_URL } from '../utils/axiosInstance'
+import { useParticipants } from '../api/participants'
 
 // ── Pre-flight checklist ──────────────────────────────────────────────────────
 function PreflightItem({ ok, label }) {
@@ -119,6 +121,7 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
   } = useCertificates(clubId, eventId, {
     refetchInterval: polling ? 4000 : false,
   })
+  const { data: participants, isLoading: participantsLoading } = useParticipants(clubId, eventId)
 
   const generateMutation = useGenerateCerts(clubId, eventId)
   const sendMutation      = useSendRemaining(clubId, eventId)
@@ -151,6 +154,15 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
   }
 
   // ── Table columns ─────────────────────────────────────────────────────────
+  const participantColumns = [
+    { key: 'name', header: 'Name', searchKey: true, render: (_, row) => row.fields?.Name || '—' },
+    { key: 'email', header: 'Email', searchKey: true },
+    { key: 'registration_number', header: 'Reg No.', searchKey: true, render: (v) => v || '—' },
+    { key: 'cert_type', header: 'Type', render: (v) => (v ?? 'participant').replace(/_/g, ' ') },
+    { key: 'source', header: 'Source' },
+    { key: 'verified', header: 'Verified', align: 'center', render: (v) => (v ? 'Yes' : 'No') },
+  ]
+
   const certColumns = [
     {
       key: 'cert_number',
@@ -205,18 +217,19 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
       align: 'center',
       render: (id, row) => (
         <div className="flex items-center justify-center gap-2">
-          {/* Download cert PDF */}
+          {/* Preview certificate */}
           {['generated', 'emailed'].includes(row.status) && row.pdf_url && (
             <a
-              href={row.pdf_url}
+              href={`${BACKEND_URL}${row.pdf_url}`}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded p-1 text-navy hover:bg-navy/10 transition-colors"
-              title="Download PDF"
+              title="Preview certificate"
               onClick={(e) => e.stopPropagation()}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7c-1.274 4.057-5.065 7-9.542 7s-8.268-2.943-9.542-7z" />
               </svg>
             </a>
           )}
@@ -243,6 +256,26 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
 
   return (
     <div className="space-y-6">
+      {/* ── Participant review list ─────────────────────────────────────── */}
+      <div className="card p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-semibold text-foreground">Participant Review Before Generation</p>
+          <span className="text-xs text-gray-500">
+            {(participants ?? []).length} participant{(participants ?? []).length !== 1 ? 's' : ''}
+          </span>
+        </div>
+
+        <DataTable
+          columns={participantColumns}
+          data={participants ?? []}
+          isLoading={participantsLoading}
+          emptyMessage="No participants found for this event."
+          searchable
+          searchPlaceholder="Search participants by name, email, reg no..."
+          rowKey="id"
+        />
+      </div>
+
       {/* ── Pre-flight checklist ───────────────────────────────────────── */}
       <div className="card p-5">
         <div className="flex items-start justify-between gap-4">
@@ -294,7 +327,7 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
-                    Send {pendingEmailCount} Pending Email{pendingEmailCount !== 1 ? 's' : ''}
+                    Approve & Send {pendingEmailCount} Pending Email{pendingEmailCount !== 1 ? 's' : ''}
                   </>
                 )}
               </button>

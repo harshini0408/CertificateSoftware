@@ -141,9 +141,17 @@ async def save_field_positions(
         )
         await fp.insert()
 
-    # Record the chosen template_filename on the event so the generation
-    # engine always knows the latest active template for this event.
-    await event.set({"template_filename": body.template_filename})
+    # Record the chosen template and keep mapping_confirmed in sync.
+    confirmed_exists = (
+        await FieldPosition.find(
+            FieldPosition.event_id == event_id,
+            FieldPosition.confirmed == True,
+        ).count()
+    ) > 0
+    await event.set({
+        "template_filename": body.template_filename,
+        "mapping_confirmed": confirmed_exists,
+    })
 
     return _fp_dict(fp)
 

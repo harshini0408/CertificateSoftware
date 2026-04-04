@@ -39,7 +39,7 @@ const EXPIRY_OPTIONS = [
 // ─────────────────────────────────────────────────────────────────────────────
 // Overview Tab
 // ─────────────────────────────────────────────────────────────────────────────
-function OverviewTab({ event, clubId, eventId }) {
+function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
@@ -79,9 +79,10 @@ function OverviewTab({ event, clubId, eventId }) {
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
       qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
-      addToast({ type: 'success', message: 'Assets uploaded successfully.' })
+      addToast({ type: 'success', message: 'Assets uploaded. Now add participants.' })
       setLogoFile(null)
       setSigFile(null)
+      if (onNextStep) onNextStep()
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Asset upload failed.'
       addToast({ type: 'error', message: msg })
@@ -531,6 +532,7 @@ function QrTab({ clubId, eventId }) {
       )
       return data
     },
+    enabled: !!clubId && !!eventId,
   })
 
   const addCustomField = () => {
@@ -967,6 +969,7 @@ export default function EventDetail() {
                 event={event}
                 clubId={club_id}
                 eventId={event_id}
+                onNextStep={() => setActiveTab('participants')}
               />
             )}
             {activeTab === 'participants' && (

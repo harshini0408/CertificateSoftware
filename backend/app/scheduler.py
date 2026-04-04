@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .models.email_log import EmailLog, EmailStatus
 from .models.certificate import Certificate, CertStatus
 from .services.email_service import send_certificate_email, get_daily_sent_count
+from .services.storage_service import storage_url_to_path
 from .services.credit_service import award_credits
 from .config import get_settings
 
@@ -40,7 +41,7 @@ async def _resume_queued_emails() -> None:
             cert_number=cert.cert_number,
             event_name=cert.snapshot.event_name,
             club_name=cert.snapshot.club_name,
-            png_path=cert.png_url or "",
+            png_path=storage_url_to_path(cert.png_url or ""),
         )
 
         if sent:

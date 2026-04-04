@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosInstance from '../utils/axiosInstance'
 import { useToastStore } from '../store/uiStore'
 
+<<<<<<< HEAD
 // ── Helper ────────────────────────────────────────────────────────────────────
 function extractErrorMsg(err, fallback = 'An error occurred.') {
   const detail = err?.response?.data?.detail
@@ -10,6 +11,19 @@ function extractErrorMsg(err, fallback = 'An error occurred.') {
     return detail.map(d => d.msg || JSON.stringify(d)).join(' | ')
   }
   return typeof detail === 'string' ? detail : fallback
+=======
+function extractErrorMsg(err, fallback) {
+  const detail = err?.response?.data?.detail
+  if (Array.isArray(detail)) {
+    return detail.map(d => {
+      if (typeof d === 'string') return d
+      return d?.msg ?? d?.message ?? JSON.stringify(d)
+    }).join(' | ')
+  }
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object') return detail?.msg ?? detail?.message ?? JSON.stringify(detail)
+  return fallback
+>>>>>>> 560fffe (Working)
 }
 
 // ── Query keys ────────────────────────────────────────────────────────────────

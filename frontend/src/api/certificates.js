@@ -52,7 +52,9 @@ export function useGenerateCerts(clubId, eventId) {
       qc.invalidateQueries({ queryKey: certKeys.list(clubId, eventId) })
       addToast({
         type: 'success',
-        message: `Generation started — ${data.total ?? 0} certificate(s) queued.`,
+        message:
+          data?.message ||
+          `Generation started — ${data.queued_count ?? 0} of ${data.total ?? 0} certificate(s) queued.`,
       })
     },
     onError: (err) => {
