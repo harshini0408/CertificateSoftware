@@ -167,8 +167,15 @@ function ClubDetailPanel({ clubId, onClose, onEdit }) {
 // NEW CLUB MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 function NewClubModal({ isOpen, onClose }) {
-  const [form, setForm] = useState({ name: '', slug: '', contact_email: '' })
+  const [form, setForm] = useState({
+    name: '',
+    slug: '',
+    contact_email: '',
+    coordinator_username: '',
+    coordinator_password: '',
+  })
   const [errors, setErrors] = useState({})
+  const [showPassword, setShowPassword] = useState(false)
   const createClub = useCreateClub()
 
   const handleChange = (field, value) => {
@@ -184,14 +191,29 @@ function NewClubModal({ isOpen, onClose }) {
     if (!form.slug.trim()) errs.slug = 'Slug is required'
     if (!/^[A-Z0-9]+$/.test(form.slug)) errs.slug = 'Uppercase letters and digits only'
     if (!form.contact_email.trim()) errs.contact_email = 'Email is required'
+    if (!form.coordinator_username.trim()) errs.coordinator_username = 'Coordinator username is required'
+    if (!form.coordinator_password.trim()) errs.coordinator_password = 'Coordinator password is required'
+    if (form.coordinator_password && form.coordinator_password.length < 6) {
+      errs.coordinator_password = 'Password must be at least 6 characters'
+    }
     if (Object.keys(errs).length) { setErrors(errs); return }
 
     createClub.mutate(form, {
-      onSuccess: () => { onClose(); setForm({ name: '', slug: '', contact_email: '' }) },
+      onSuccess: () => {
+        onClose()
+        setForm({
+          name: '',
+          slug: '',
+          contact_email: '',
+          coordinator_username: '',
+          coordinator_password: '',
+        })
+      },
       onError: (err) => {
         const detail = err?.response?.data?.detail || ''
         if (detail.toLowerCase().includes('slug')) setErrors({ slug: detail })
         else if (detail.toLowerCase().includes('email')) setErrors({ contact_email: detail })
+        else if (detail.toLowerCase().includes('username')) setErrors({ coordinator_username: detail })
       },
     })
   }
@@ -214,6 +236,32 @@ function NewClubModal({ isOpen, onClose }) {
           <label className="form-label">Contact Email *</label>
           <input type="email" className={`form-input ${errors.contact_email ? 'form-input-error' : ''}`} value={form.contact_email} onChange={(e) => handleChange('contact_email', e.target.value)} />
           {errors.contact_email && <p className="form-error">{errors.contact_email}</p>}
+        </div>
+        <div>
+          <label className="form-label">Coordinator Username *</label>
+          <input className={`form-input ${errors.coordinator_username ? 'form-input-error' : ''}`} value={form.coordinator_username} onChange={(e) => handleChange('coordinator_username', e.target.value)} placeholder="ecoclub_coordinator" />
+          {errors.coordinator_username && <p className="form-error">{errors.coordinator_username}</p>}
+        </div>
+        <div>
+          <label className="form-label">Coordinator Password *</label>
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              className={`form-input pr-10 ${errors.coordinator_password ? 'form-input-error' : ''}`}
+              value={form.coordinator_password}
+              onChange={(e) => handleChange('coordinator_password', e.target.value)}
+              placeholder="Minimum 6 characters"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-navy"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          {errors.coordinator_password && <p className="form-error">{errors.coordinator_password}</p>}
         </div>
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
