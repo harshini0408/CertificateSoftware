@@ -1,9 +1,9 @@
 import axios from 'axios'
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+export const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const axiosInstance = axios.create({
-  baseURL: BASE_URL,
+  baseURL: BACKEND_URL,
   withCredentials: true,          // send httpOnly cookies automatically
   headers: {
     'Content-Type': 'application/json',

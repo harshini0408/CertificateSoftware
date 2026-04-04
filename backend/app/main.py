@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -129,13 +130,34 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ─────────────────────────────────────────────────────────────────
+_ALLOWED_ORIGINS = list({
+    settings.frontend_url,       # from .env / config
+    "http://localhost:5173",      # Vite default
+    "http://localhost:3000",      # CRA fallback
+    "http://127.0.0.1:5173",
+})
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Global exception handler — ensures CORS headers survive 500 errors ────
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    """Return a JSON 500 with CORS headers so the browser isn't blocked."""
+    origin = request.headers.get("origin", "")
+    cors_origin = origin if origin in _ALLOWED_ORIGINS else _ALLOWED_ORIGINS[0]
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {exc}"},
+        headers={
+            "Access-Control-Allow-Origin": cors_origin,
+            "Access-Control-Allow-Credentials": "true",
+        },
+    )
 
 # ── Routers ──────────────────────────────────────────────────────────────
 from .routers import auth, admin, clubs, events, participants, templates

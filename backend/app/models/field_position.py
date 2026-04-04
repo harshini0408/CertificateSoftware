@@ -9,12 +9,18 @@ column_positions structure:
         "Registration Number": {"x_percent": 60.0, "y_percent": 55.0},
     }
 
+asset_positions structure (optional — only set if coordinator placed the assets):
+    {
+        "logo":      {"x_percent": 10.0, "y_percent": 5.0, "width_percent": 12.0},
+        "signature": {"x_percent": 15.0, "y_percent": 80.0, "width_percent": 18.0},
+    }
+
 x_percent / y_percent are percentages of the rendered image dimensions,
 allowing the Pillow generator to scale correctly to any image resolution.
 """
 
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 
 from beanie import Document, PydanticObjectId
 from pydantic import Field
@@ -26,7 +32,9 @@ class FieldPosition(Document):
     template_filename: str          # e.g. "template_01.png"
     # { "column_header_name": { "x_percent": float, "y_percent": float } }
     column_positions: Dict[str, Dict[str, float]] = Field(default_factory=dict)
-    display_width: float            # CSS pixel width when coordinator clicked
+    # { "logo": {...}, "signature": {...} }  — optional, set after asset placement
+    asset_positions: Optional[Dict[str, Dict[str, float]]] = None
+    display_width: float = 580.0    # CSS pixel width when coordinator clicked
     confirmed: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

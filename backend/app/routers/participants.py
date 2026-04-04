@@ -7,7 +7,6 @@ from ..core.dependencies import require_event_access
 from ..models.user import User
 from ..models.event import Event
 from ..models.participant import Participant, ParticipantSource
-from ..models.template import Template
 from ..schemas.participant import (
     FieldMappingRequest, ParticipantCreate, ParticipantResponse, UploadResponse,
 )
@@ -56,7 +55,8 @@ async def create_participant(
     p = Participant(
         event_id=event_id, club_id=club_id, email=body.email,
         registration_number=body.registration_number, cert_type=body.cert_type,
-        fields=body.fields, source=ParticipantSource.MANUAL, verified=True,
+        fields={**body.fields, **({"Name": body.name} if body.name else {})},
+        source=ParticipantSource.MANUAL, verified=True,
     )
     await p.insert()
     return _resp(p)
@@ -98,36 +98,32 @@ async def upload_participants(
     if not event:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
-    # Get field_slots from first mapped template
-    all_slots = []
-    for cert_type, tid in event.template_map.items():
-        if tid:
-            tpl = await Template.get(tid)
-            if tpl:
-                all_slots = tpl.field_slots
-                break
-
     content = await file.read()
-    rows, errors = parse_participants_excel(content, all_slots)
+    rows, errors = parse_participants_excel(content)
 
     created = 0
+    skipped = 0
     for row in rows:
         email = row.get("Email", "")
+        # Pop the internal cert_type key (not a real column)
+        cert_type = row.pop("_cert_type", "participant")
+
         existing = await Participant.find_one(
             Participant.event_id == event_id, Participant.email == email)
         if existing:
+            skipped += 1
             errors.append(f"Duplicate: {email}")
             continue
         p = Participant(
             event_id=event_id, club_id=club_id, email=email,
             registration_number=row.get("Registration Number", row.get("Reg No", "")),
-            cert_type="participant", fields=row,
+            cert_type=cert_type, fields=row,
             source=ParticipantSource.EXCEL, verified=True,
         )
         await p.insert()
         created += 1
 
-    return UploadResponse(created_count=created, errors=errors)
+    return UploadResponse(created=created, skipped=skipped, errors=errors)
 
 
 @router.post("/mapping")

@@ -47,11 +47,18 @@ class ColumnPosition(BaseModel):
     y_percent: float
 
 
+class AssetPosition(BaseModel):
+    x_percent: float
+    y_percent: float
+    width_percent: float = 15.0   # default rendered width as % of certificate width
+
+
 class FieldPositionRequest(BaseModel):
     cert_type: str                              # e.g. 'volunteer', 'winner_1st'
     template_filename: str                       # e.g. 'template_01.png'
     column_positions: Dict[str, ColumnPosition]  # column header → {x_percent, y_percent}
-    display_width: float
+    asset_positions: Optional[Dict[str, AssetPosition]] = None  # 'logo' / 'signature'
+    display_width: float = 580.0
     confirmed: bool = False
 
 
@@ -73,6 +80,7 @@ def _fp_dict(fp: FieldPosition) -> dict:
         "cert_type": fp.cert_type,
         "template_filename": fp.template_filename,
         "column_positions": fp.column_positions,
+        "asset_positions": fp.asset_positions,
         "display_width": fp.display_width,
         "confirmed": fp.confirmed,
         "created_at": fp.created_at,
@@ -100,6 +108,10 @@ async def save_field_positions(
         col: {"x_percent": pos.x_percent, "y_percent": pos.y_percent}
         for col, pos in body.column_positions.items()
     }
+    asset_pos_dict = {
+        key: {"x_percent": p.x_percent, "y_percent": p.y_percent, "width_percent": p.width_percent}
+        for key, p in (body.asset_positions or {}).items()
+    } or None
 
     # Upsert FieldPosition by (event_id, cert_type)
     existing = await FieldPosition.find_one(
@@ -111,6 +123,7 @@ async def save_field_positions(
         await existing.set({
             "template_filename": body.template_filename,
             "column_positions": col_positions_dict,
+            "asset_positions": asset_pos_dict,
             "display_width": body.display_width,
             "confirmed": body.confirmed,
         })
@@ -121,17 +134,16 @@ async def save_field_positions(
             cert_type=body.cert_type,
             template_filename=body.template_filename,
             column_positions=col_positions_dict,
+            asset_positions=asset_pos_dict,
             display_width=body.display_width,
             confirmed=body.confirmed,
             created_at=datetime.utcnow(),
         )
         await fp.insert()
 
-    # Persist template_filename into event.template_map[cert_type]
-    # We store it as a string (not ObjectId) by extending the dict
-    current_map = dict(event.template_map or {})
-    current_map[body.cert_type] = body.template_filename   # type: ignore[assignment]
-    await event.set({"template_map": current_map, "template_filename": body.template_filename})
+    # Record the chosen template_filename on the event so the generation
+    # engine always knows the latest active template for this event.
+    await event.set({"template_filename": body.template_filename})
 
     return _fp_dict(fp)
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
@@ -203,7 +203,7 @@ function OverviewTab({ event, clubId, eventId }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Excel Upload Sub-tab
 // ─────────────────────────────────────────────────────────────────────────────
-function ExcelUploadTab({ clubId, eventId, onMappingNeeded }) {
+function ExcelUploadTab({ clubId, eventId, onGoToTemplates }) {
   const addToast = useToastStore((s) => s.addToast)
   const [file, setFile] = useState(null)
   const [result, setResult] = useState(null)
@@ -251,7 +251,7 @@ function ExcelUploadTab({ clubId, eventId, onMappingNeeded }) {
         message: `${data.created ?? 0} participant(s) imported successfully.`,
       })
       if ((data.created ?? 0) > 0) {
-        onMappingNeeded()
+        onGoToTemplates()
       }
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Upload failed.'
@@ -365,9 +365,9 @@ function ExcelUploadTab({ clubId, eventId, onMappingNeeded }) {
           {(result.created ?? 0) > 0 && (
             <button
               className="btn-primary mt-4 text-sm"
-              onClick={onMappingNeeded}
+              onClick={onGoToTemplates}
             >
-              Proceed to Field Mapping →
+              Configure Templates →
             </button>
           )}
         </div>
@@ -379,11 +379,9 @@ function ExcelUploadTab({ clubId, eventId, onMappingNeeded }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Manual Entry Sub-tab
 // ─────────────────────────────────────────────────────────────────────────────
-function ManualEntryTab({ clubId, eventId, event, onMappingNeeded }) {
+function ManualEntryTab({ clubId, eventId, event, onGoToTemplates }) {
   const addToast = useToastStore((s) => s.addToast)
-
-  // Derive field slots from the assigned template (if any)
-  const templateSlots = event?.template_slots ?? []
+  const qc = useQueryClient()
 
   const {
     register,
@@ -392,6 +390,7 @@ function ManualEntryTab({ clubId, eventId, event, onMappingNeeded }) {
     formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
+      name: '',
       email: '',
       registration_number: '',
       cert_type: 'participant',
@@ -402,8 +401,19 @@ function ManualEntryTab({ clubId, eventId, event, onMappingNeeded }) {
     try {
       await axiosInstance.post(
         `/clubs/${clubId}/events/${eventId}/participants`,
-        values,
+        {
+          name: values.name,
+          email: values.email,
+          registration_number: values.registration_number,
+          cert_type: values.cert_type,
+          fields: {
+            Name: values.name,
+            Email: values.email,
+            'Registration Number': values.registration_number,
+          },
+        },
       )
+      qc.invalidateQueries({ queryKey: ['participants', clubId, eventId] })
       addToast({ type: 'success', message: 'Participant added.' })
       reset()
     } catch (err) {
@@ -415,22 +425,19 @@ function ManualEntryTab({ clubId, eventId, event, onMappingNeeded }) {
   return (
     <div className="max-w-lg space-y-4">
       <form onSubmit={handleSubmit(onSubmit)} className="card p-6 space-y-4">
-        {/* Email */}
+        {/* Name */}
         <div>
-          <label className="form-label" htmlFor="manual-email">
-            Email <span className="text-red-500">*</span>
+          <label className="form-label" htmlFor="manual-name">
+            Full Name <span className="text-red-500">*</span>
           </label>
           <input
-            id="manual-email"
-            type="email"
-            className={`form-input ${errors.email ? 'form-input-error' : ''}`}
-            placeholder="participant@example.com"
-            {...register('email', {
-              required: 'Email is required.',
-              pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email.' },
-            })}
+            id="manual-name"
+            type="text"
+            className={`form-input ${errors.name ? 'form-input-error' : ''}`}
+            placeholder="John Doe"
+            {...register('name', { required: 'Name is required.' })}
           />
-          {errors.email && <p className="form-error">{errors.email.message}</p>}
+          {errors.name && <p className="form-error">{errors.name.message}</p>}
         </div>
 
         {/* Registration Number */}
@@ -450,10 +457,28 @@ function ManualEntryTab({ clubId, eventId, event, onMappingNeeded }) {
           )}
         </div>
 
-        {/* Cert Type */}
+        {/* Email */}
+        <div>
+          <label className="form-label" htmlFor="manual-email">
+            Email <span className="text-red-500">*</span>
+          </label>
+          <input
+            id="manual-email"
+            type="email"
+            className={`form-input ${errors.email ? 'form-input-error' : ''}`}
+            placeholder="participant@example.com"
+            {...register('email', {
+              required: 'Email is required.',
+              pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email.' },
+            })}
+          />
+          {errors.email && <p className="form-error">{errors.email.message}</p>}
+        </div>
+
+        {/* Role / Cert Type */}
         <div>
           <label className="form-label" htmlFor="manual-cert-type">
-            Certificate Type
+            Role (Certificate Type)
           </label>
           <select
             id="manual-cert-type"
@@ -466,32 +491,10 @@ function ManualEntryTab({ clubId, eventId, event, onMappingNeeded }) {
               </option>
             ))}
           </select>
+          <p className="mt-1 text-xs text-gray-400">This determines which certificate template is used.</p>
         </div>
 
-        {/* Dynamic template field slots */}
-        {templateSlots.map((slot) => (
-          <div key={slot.name}>
-            <label className="form-label" htmlFor={`slot-${slot.name}`}>
-              {slot.label ?? slot.name}
-            </label>
-            <input
-              id={`slot-${slot.name}`}
-              type="text"
-              className="form-input"
-              placeholder={slot.label ?? slot.name}
-              {...register(slot.name)}
-            />
-          </div>
-        ))}
-
-        <div className="flex justify-between items-center pt-2">
-          <button
-            type="button"
-            className="btn-ghost text-sm"
-            onClick={onMappingNeeded}
-          >
-            Open Field Mapping
-          </button>
+        <div className="flex justify-end pt-2">
           <button
             type="submit"
             className="btn-primary"
@@ -812,7 +815,7 @@ const PARTICIPANT_SUBTABS = [
   { id: 'qr',     label: 'QR Registrations' },
 ]
 
-function ParticipantsTab({ clubId, eventId, event, onGoToMapping }) {
+function ParticipantsTab({ clubId, eventId, event, onGoToTemplates }) {
   const [subTab, setSubTab] = useState('excel')
 
   return (
@@ -842,7 +845,7 @@ function ParticipantsTab({ clubId, eventId, event, onGoToMapping }) {
         <ExcelUploadTab
           clubId={clubId}
           eventId={eventId}
-          onMappingNeeded={onGoToMapping}
+          onGoToTemplates={onGoToTemplates}
         />
       )}
       {subTab === 'manual' && (
@@ -850,7 +853,7 @@ function ParticipantsTab({ clubId, eventId, event, onGoToMapping }) {
           clubId={clubId}
           eventId={eventId}
           event={event}
-          onMappingNeeded={onGoToMapping}
+          onGoToTemplates={onGoToTemplates}
         />
       )}
       {subTab === 'qr' && (
@@ -860,10 +863,6 @@ function ParticipantsTab({ clubId, eventId, event, onGoToMapping }) {
   )
 }
 
-// CertificateIssue is the real certificates tab — defined in pages/CertificateIssue.jsx
-
-// FieldMappingCanvas is rendered inline inside the Field Mapping tab.
-// The full canvas component lives in pages/FieldMappingCanvas.jsx.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EventDetail (main export)
@@ -872,9 +871,11 @@ export default function EventDetail() {
   const { club_id, event_id } = useParams()
   const [activeTab, setActiveTab] = useState('overview')
 
+  const navigate = useNavigate()
   const { data: event, isLoading } = useEvent(club_id, event_id)
 
-  const goToMapping = () => setActiveTab('field-mapping')
+  const goToTemplates = () =>
+    navigate(`/club/${club_id}/events/${event_id}/templates/select`)
 
   if (isLoading) {
     return (
@@ -973,13 +974,8 @@ export default function EventDetail() {
                 clubId={club_id}
                 eventId={event_id}
                 event={event}
-                onGoToMapping={goToMapping}
+                onGoToTemplates={goToTemplates}
               />
-            )}
-            {activeTab === 'field-mapping' && (
-              <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mb-6">
-                <FieldMappingCanvas embedded />
-              </div>
             )}
             {activeTab === 'certificates' && (
               <CertificateIssue

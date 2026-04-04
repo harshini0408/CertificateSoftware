@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class ParticipantCreate(BaseModel):
+    name: str = ""
     email: str
     registration_number: Optional[str] = None
     cert_type: str = "participant"
@@ -33,7 +34,8 @@ class FieldMappingRequest(BaseModel):
 
 
 class UploadResponse(BaseModel):
-    created_count: int = 0
+    created: int = 0          # number of participants successfully imported
+    skipped: int = 0          # number skipped (duplicates)
     errors: List[str] = Field(default_factory=list)
 
 
