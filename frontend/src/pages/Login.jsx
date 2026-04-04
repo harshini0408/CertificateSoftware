@@ -232,8 +232,8 @@ export default function Login() {
         </div>
 
         {/* Below-card footnote */}
-        <p className="mt-4 text-center text-xs text-gray-400">
-          PSG College of Technology &nbsp;·&nbsp; Coimbatore
+        <p className="mt-4 text-center text-xs text-black">
+          PSG Institute of Technology and Applied Research
         </p>
       </div>
     </div>
