@@ -226,10 +226,10 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
           : '—',
     },
     {
-      key: '_id',
+      key: 'id',
       header: 'Actions',
       align: 'center',
-      render: (id, row) => (
+      render: (certId, row) => (
         <div className="flex items-center justify-center gap-2">
           {/* Preview certificate */}
           {['generated', 'emailed'].includes(row.status) && row.pdf_url && (
@@ -252,7 +252,7 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                resendMutation.mutate(id)
+                resendMutation.mutate(certId)
               }}
               disabled={resendMutation.isPending}
               className="rounded p-1 text-amber-500 hover:bg-amber-50 transition-colors"
@@ -409,7 +409,7 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
           }
           searchable
           searchPlaceholder="Search by cert no., email, or name…"
-          rowKey="_id"
+          rowKey="id"
         />
       </div>
     </div>
