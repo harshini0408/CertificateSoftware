@@ -11,6 +11,7 @@ from ..models.user import User
 from ..models.club import Club
 from ..models.event import Event
 from ..models.participant import Participant
+from ..models.field_position import FieldPosition
 from ..models.certificate import Certificate, CertStatus, CertSnapshot
 from ..models.email_log import EmailLog, EmailStatus
 from ..schemas.certificate import CertificateResponse, GenerateResponse
@@ -186,25 +187,24 @@ async def generate_certificates(
     skipped_no_template = 0
     year = datetime.utcnow().year
 
+    # Field positions are the source of truth for image-template generation.
+    fp_docs = await FieldPosition.find(FieldPosition.event_id == event_id).to_list()
+    fp_types = {fp.cert_type for fp in fp_docs if fp.template_filename}
+    has_participant_fallback = "participant" in fp_types
+
     for p in participants:
         if p.id in existing_pids:
             skipped_existing += 1
             continue
 
         cert_type = p.cert_type
-        mapped_template = event.template_map.get(cert_type)
-        if not mapped_template:
-            mapped_template = event.template_map.get("participant")
-        if not mapped_template:
+        if cert_type not in fp_types and not has_participant_fallback:
             skipped_no_template += 1
             continue
 
         # Certificates model still requires template_id as ObjectId.
-        # For image-template mappings (filename strings), use event.id as a stable placeholder.
-        try:
-            template_oid = PydanticObjectId(mapped_template)
-        except Exception:
-            template_oid = event.id
+        # For image-template mode we use event.id as stable placeholder.
+        template_oid = event.id
 
         cert_number = await generate_cert_number(club.slug, year)
 
