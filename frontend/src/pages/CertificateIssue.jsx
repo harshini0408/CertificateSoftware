@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import DataTable from '../components/DataTable'
 import StatusBadge from '../components/StatusBadge'
@@ -10,6 +11,7 @@ import {
   useResendCert,
 } from '../api/certificates'
 import { BACKEND_URL } from '../utils/axiosInstance'
+import axiosInstance from '../utils/axiosInstance'
 import { useParticipants } from '../api/participants'
 
 // ── Pre-flight checklist ──────────────────────────────────────────────────────
@@ -122,6 +124,16 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
     refetchInterval: polling ? 4000 : false,
   })
   const { data: participants, isLoading: participantsLoading } = useParticipants(clubId, eventId)
+  const { data: fieldPositions } = useQuery({
+    queryKey: ['field-positions', clubId, eventId],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(
+        `/clubs/${clubId}/events/${eventId}/field-positions`,
+      )
+      return data
+    },
+    enabled: !!clubId && !!eventId,
+  })
 
   const generateMutation = useGenerateCerts(clubId, eventId)
   const sendMutation      = useSendRemaining(clubId, eventId)
@@ -130,7 +142,9 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
   // Preflight checks (derived from event prop or certs meta)
   const hasParticipants = (certs?.length ?? 0) > 0 || (event?.participant_count ?? 0) > 0
   const hasAssets       = !!(event?.assets?.logo_url)
-  const hasTemplates    = !!(event?.template_map && Object.keys(event.template_map).length > 0)
+  const hasTemplates = Array.isArray(fieldPositions)
+    ? fieldPositions.some((fp) => !!fp.template_filename)
+    : !!(event?.template_map && Object.keys(event.template_map).length > 0)
   const hasMapping      = !!(event?.mapping_confirmed)
   const allReady        = hasParticipants && hasAssets && hasTemplates && hasMapping
 
