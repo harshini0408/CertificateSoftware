@@ -39,9 +39,59 @@ async def _seed_superadmin() -> None:
 
 
 async def _seed_templates() -> None:
-    """Seed preset certificate templates from static HTML files."""
-    from .seed_templates import seed_preset_templates
-    await seed_preset_templates()
+    """Seed preset HTML certificate templates (legacy — kept for backward compat).
+
+    NOTE: HTML/Jinja2 preset seeding is now DISABLED since image-based PNG
+    templates are used instead. This call is kept so events created before
+    the switch are not broken. The new image template seeder runs separately.
+    """
+    # HTML preset seeding disabled — image-based templates now used instead.
+    # Uncomment below if you need to re-seed legacy HTML templates:
+    # from .seed_templates import seed_preset_templates
+    # await seed_preset_templates()
+    pass
+
+
+async def _seed_image_templates() -> None:
+    """Seed ImageTemplate documents from PNG files in static/certificate_templates/.
+
+    Scans for *.png files and upserts one ImageTemplate document per file,
+    using the filename as the unique key. Display name defaults to the
+    filename stem, title-cased (e.g. "template_01" → "Template 01").
+    """
+    from pathlib import Path
+    from .models.image_template import ImageTemplate
+
+    cert_templates_dir = Path(__file__).parent / "static" / "certificate_templates"
+    if not cert_templates_dir.exists():
+        print("[SEED] certificate_templates/ directory not found — skipping image template seeding")
+        return
+
+    png_files = list(cert_templates_dir.glob("*.png"))
+    if not png_files:
+        print("[SEED] No PNG files found in certificate_templates/ — skipping image template seeding")
+        return
+
+    created = 0
+    for png_path in sorted(png_files):
+        filename = png_path.name
+        existing = await ImageTemplate.find_one(ImageTemplate.filename == filename)
+        if existing:
+            continue
+        display_name = png_path.stem.replace("_", " ").title()
+        preview_url = f"/static/certificate_templates/{filename}"
+        await ImageTemplate(
+            filename=filename,
+            display_name=display_name,
+            preview_url=preview_url,
+        ).insert()
+        created += 1
+        print(f"[SEED] Image template registered: {filename} → '{display_name}'")
+
+    if created == 0:
+        print("[SEED] All image templates already registered")
+    else:
+        print(f"[SEED] Image templates: {created} registered")
 
 
 @asynccontextmanager
@@ -52,6 +102,7 @@ async def lifespan(app: FastAPI):
     await connect_db()
     await _seed_superadmin()
     await _seed_templates()
+    await _seed_image_templates()
 
     from .scheduler import start_scheduler
     start_scheduler()
@@ -89,6 +140,7 @@ app.add_middleware(
 # ── Routers ──────────────────────────────────────────────────────────────
 from .routers import auth, admin, clubs, events, participants, templates
 from .routers import certificates, verify, register, student, dept
+from .routers import image_templates
 
 app.include_router(auth.router)
 app.include_router(admin.router)
@@ -101,6 +153,14 @@ app.include_router(verify.router)
 app.include_router(register.router)
 app.include_router(student.router)
 app.include_router(dept.router)
+app.include_router(image_templates.router)
+
+# ── Static files (PNG templates, fonts, etc.) ────────────────────────────────
+from pathlib import Path
+
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 # ── Health / Root ────────────────────────────────────────────────────────

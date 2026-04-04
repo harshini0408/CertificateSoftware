@@ -14,6 +14,7 @@ class FieldSlotSchema(BaseModel):
     font_size: int = 24
     font_weight: str = "normal"
     text_align: str = "center"
+    color: Optional[str] = None           # per-slot text colour override
 
 
 class StaticElementSchema(BaseModel):

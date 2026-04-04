@@ -131,3 +131,97 @@ export function useDeleteEvent(clubId) {
     },
   })
 }
+
+// ── useImageTemplates ─────────────────────────────────────────────────────────
+/**
+ * GET /image-templates  (public, no auth)
+ * Returns the list of all active pre-built PNG certificate templates.
+ * { id, filename, display_name, preview_url, is_active, created_at }[]
+ */
+export function useImageTemplates() {
+  return useQuery({
+    queryKey: ['image-templates'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/image-templates')
+      return data
+    },
+  })
+}
+
+// ── useAllFieldPositions ──────────────────────────────────────────────────────
+/**
+ * GET /clubs/:clubId/events/:eventId/field-positions
+ * Returns ALL FieldPosition documents for this event (one per cert_type).
+ * Returns [] if none saved yet.
+ */
+export function useAllFieldPositions(clubId, eventId) {
+  return useQuery({
+    queryKey: ['field-positions', clubId, eventId],
+    queryFn: async () => {
+      try {
+        const { data } = await axiosInstance.get(
+          `/clubs/${clubId}/events/${eventId}/field-positions`,
+        )
+        return data   // array of { cert_type, template_filename, column_positions, ... }
+      } catch (err) {
+        if (err?.response?.status === 404) return []
+        throw err
+      }
+    },
+    enabled: !!clubId && !!eventId,
+  })
+}
+
+// ── useFieldPositionsForCertType ──────────────────────────────────────────────
+/**
+ * GET /clubs/:clubId/events/:eventId/field-positions/:certType
+ * Returns FieldPosition for one cert_type, or null if not found.
+ */
+export function useFieldPositionsForCertType(clubId, eventId, certType) {
+  return useQuery({
+    queryKey: ['field-positions', clubId, eventId, certType],
+    queryFn: async () => {
+      try {
+        const { data } = await axiosInstance.get(
+          `/clubs/${clubId}/events/${eventId}/field-positions/${certType}`,
+        )
+        return data
+      } catch (err) {
+        if (err?.response?.status === 404) return null
+        throw err
+      }
+    },
+    enabled: !!clubId && !!eventId && !!certType,
+  })
+}
+
+// ── useSaveFieldPositions ─────────────────────────────────────────────────────
+/**
+ * POST /clubs/:clubId/events/:eventId/field-positions
+ * Upserts the FieldPosition document for this event + cert_type.
+ * Payload: { cert_type, template_filename, column_positions, display_width, confirmed }
+ */
+export function useSaveFieldPositions(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (payload) =>
+      axiosInstance.post(
+        `/clubs/${clubId}/events/${eventId}/field-positions`,
+        payload,
+      ),
+    onSuccess: (_data, payload) => {
+      qc.invalidateQueries({ queryKey: ['field-positions', clubId, eventId] })
+      if (payload?.cert_type) {
+        qc.invalidateQueries({ queryKey: ['field-positions', clubId, eventId, payload.cert_type] })
+      }
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      addToast({ type: 'success', message: 'Field positions saved.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to save field positions.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}

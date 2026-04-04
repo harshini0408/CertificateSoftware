@@ -12,12 +12,10 @@ import { useEvent } from '../api/events'
 import { useToastStore } from '../store/uiStore'
 import axiosInstance from '../utils/axiosInstance'
 import { eventKeys } from '../api/events'
-import FieldMappingCanvas from './FieldMappingCanvas'
 import CertificateIssue from './CertificateIssue'
-import PresetSlotEditor from '../components/PresetSlotEditor'
 
 // ─── Tab ids ──────────────────────────────────────────────────────────────────
-const TABS = ['overview', 'participants', 'field-mapping', 'certificates']
+const TABS = ['overview', 'participants', 'certificates']
 
 const CERT_TYPES = [
   'participant',
@@ -42,6 +40,7 @@ const EXPIRY_OPTIONS = [
 // Overview Tab
 // ─────────────────────────────────────────────────────────────────────────────
 function OverviewTab({ event, clubId, eventId }) {
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
 
@@ -51,27 +50,6 @@ function OverviewTab({ event, clubId, eventId }) {
   const [sigFile, setSigFile]           = useState(null)
   const [sigPreview, setSigPreview]     = useState(event?.assets?.signature_url ?? null)
   const [uploadingAssets, setUploadingAssets] = useState(false)
-
-  // ── Template map state ─────────────────────────────────────────────────
-  const [templateMap, setTemplateMap] = useState(event?.template_map ?? {})
-
-  // Fetch available templates for this club
-  const { data: templates } = useQuery({
-    queryKey: ['templates', clubId],
-    queryFn: async () => {
-      const { data } = await axiosInstance.get(`/clubs/${clubId}/templates`)
-      return data
-    },
-    enabled: !!clubId,
-  })
-
-  // ── Slot Editor state ─────────────────────────────────────────────────
-  const [slotEditorType, setSlotEditorType] = useState(null)
-  
-  const selectedTemplateDetails = (type) => {
-     const tId = templateMap[type]
-     return (templates ?? []).find(t => t.id === tId)
-  }
 
   // ── Asset handlers ─────────────────────────────────────────────────────
   const handleLogoChange = (file) => {
@@ -111,21 +89,6 @@ function OverviewTab({ event, clubId, eventId }) {
       setUploadingAssets(false)
     }
   }
-
-  // ── Template map save ──────────────────────────────────────────────────
-  const saveTemplateMutation = useMutation({
-    mutationFn: () =>
-      axiosInstance.patch(`/clubs/${clubId}/events/${eventId}`, {
-        template_map: templateMap,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
-      addToast({ type: 'success', message: 'Template assignments saved.' })
-    },
-    onError: (err) => {
-      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to save.' })
-    },
-  })
 
   return (
     <div className="space-y-8 max-w-3xl">
@@ -219,74 +182,20 @@ function OverviewTab({ event, clubId, eventId }) {
         </div>
       </section>
 
-      {/* ── Template assignment ────────────────────────────────────────── */}
+      {/* ── Certificate Templates section ──────────────────────────────── */}
       <section className="card p-6">
         <h2 className="section-title mb-1">Certificate Templates</h2>
         <p className="mb-5 text-sm text-gray-500">
-          Assign a template to each certificate type for this event.
+          Select a pre-built template for each certificate type and click on it to place your Excel columns.
         </p>
-
-        <div className="space-y-3">
-          {CERT_TYPES.map((certType) => {
-            const mappedTpl = selectedTemplateDetails(certType)
-            return (
-            <div
-              key={certType}
-              className="flex items-center gap-4 rounded-lg bg-gray-50 px-4 py-3"
-            >
-              <span className="w-36 text-sm font-medium text-foreground capitalize">
-                {certType.replace(/_/g, ' ')}
-              </span>
-              <select
-                id={`template-${certType}`}
-                value={templateMap[certType] ?? ''}
-                onChange={(e) =>
-                  setTemplateMap((prev) => ({
-                    ...prev,
-                    [certType]: e.target.value || undefined,
-                  }))
-                }
-                className="form-input flex-1"
-              >
-                <option value="">— Select template —</option>
-                {(templates ?? []).map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              {mappedTpl?.is_preset && (
-                <button
-                  onClick={() => setSlotEditorType(certType)}
-                  className="btn-secondary text-xs px-3 py-1.5 whitespace-nowrap"
-                >
-                  Edit Slots
-                </button>
-              )}
-            </div>
-          )})}
-        </div>
-
-        <div className="mt-5 flex justify-end">
-          <button
-            id="save-template-map-btn"
-            className="btn-primary"
-            onClick={() => saveTemplateMutation.mutate()}
-            disabled={saveTemplateMutation.isPending}
-          >
-            {saveTemplateMutation.isPending ? 'Saving…' : 'Save Assignments'}
-          </button>
-        </div>
+        <button
+          id="configure-templates-btn"
+          className="btn-primary"
+          onClick={() => navigate(`/club/${clubId}/events/${eventId}/templates/select`)}
+        >
+          🖼 Configure Templates & Field Positions
+        </button>
       </section>
-
-      <PresetSlotEditor
-         isOpen={!!slotEditorType}
-         onClose={() => setSlotEditorType(null)}
-         clubId={clubId}
-         eventId={eventId}
-         certType={slotEditorType}
-         template={selectedTemplateDetails(slotEditorType)}
-      />
     </div>
   )
 }

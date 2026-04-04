@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page {
+      margin: 0;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 2480px;
+      height: 3508px;
+      position: relative;
+      overflow: hidden;
+      background-color: #FFFDF7;
+      font-family: 'Georgia', serif;
+    }
+
+    /* ── Decorative borders ── */
+    .border-outer {
+      position: absolute;
+      top: 40px;
+      left: 40px;
+      right: 40px;
+      bottom: 40px;
+      border: 10px solid #1B4D3E;
+      border-radius: 16px;
+    }
+
+    .border-inner {
+      position: absolute;
+      top: 65px;
+      left: 65px;
+      right: 65px;
+      bottom: 65px;
+      border: 3px solid #C9A84C;
+    }
+
+    /* ── Corner ornaments ── */
+    .corner {
+      position: absolute;
+      width: 120px;
+      height: 120px;
+      border-color: #C9A84C;
+    }
+
+    .corner-tl {
+      top: 80px;
+      left: 80px;
+      border-top: 4px solid;
+      border-left: 4px solid;
+    }
+
+    .corner-tr {
+      top: 80px;
+      right: 80px;
+      border-top: 4px solid;
+      border-right: 4px solid;
+    }
+
+    .corner-bl {
+      bottom: 80px;
+      left: 80px;
+      border-bottom: 4px solid;
+      border-left: 4px solid;
+    }
+
+    .corner-br {
+      bottom: 80px;
+      right: 80px;
+      border-bottom: 4px solid;
+      border-right: 4px solid;
+    }
+
+    /* ── Header ── */
+    .header {
+      position: absolute;
+      top: 300px;
+      width: 100%;
+      text-align: center;
+      color: #1B4D3E;
+    }
+
+    .header h1 {
+      font-size: 120px;
+      letter-spacing: 10px;
+      text-transform: uppercase;
+    }
+
+    .header h2 {
+      font-size: 56px;
+      color: #C9A84C;
+      margin-top: 20px;
+      letter-spacing: 14px;
+      text-transform: uppercase;
+    }
+
+    .divider {
+      position: absolute;
+      top: 620px;
+      left: 300px;
+      right: 300px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #C9A84C, transparent);
+    }
+
+    .subtext {
+      position: absolute;
+      top: 680px;
+      width: 100%;
+      text-align: center;
+      font-size: 42px;
+      color: #555;
+      font-style: italic;
+    }
+
+    /* ── Dynamic field slots ── */
+    .field-slot {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      /* Debug border – remove in production */
+      border: 1px dashed rgba(255, 0, 0, 0.3);
+    }
+
+    /* ── Signature block ── */
+    .signature-block {
+      position: absolute;
+      bottom: 420px;
+      left: 200px;
+      right: 200px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .sig-item {
+      text-align: center;
+      width: 500px;
+    }
+
+    .sig-line {
+      width: 100%;
+      height: 2px;
+      background: #1B4D3E;
+      margin-top: 10px;
+    }
+
+    .sig-label {
+      font-size: 28px;
+      color: #555;
+      margin-top: 12px;
+    }
+
+    /* ── QR placeholder ── */
+    .qr-box {
+      position: absolute;
+      bottom: 180px;
+      right: 200px;
+      width: 200px;
+      height: 200px;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ccc;
+      font-size: 24px;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      position: absolute;
+      bottom: 80px;
+      width: 100%;
+      text-align: center;
+      font-size: 22px;
+      color: #aaa;
+      letter-spacing: 2px;
+    }
+
+    /* ── Cert number ── */
+    .cert-number {
+      position: absolute;
+      bottom: 440px;
+      width: 100%;
+      text-align: center;
+      font-size: 28px;
+      color: #888;
+      letter-spacing: 3px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="border-outer"></div>
+  <div class="border-inner"></div>
+  <div class="corner corner-tl"></div>
+  <div class="corner corner-tr"></div>
+  <div class="corner corner-bl"></div>
+  <div class="corner corner-br"></div>
+
+  <div class="header">
+    <h1>Certificate</h1>
+    <h2>of Participation</h2>
+  </div>
+
+  <div class="divider"></div>
+  <div class="subtext">This is to certify that</div>
+
+  <!-- Dynamic field slots injected from mock_data -->
+  {% for slot in slots %}
+  <div class="field-slot" style="
+      left: {{ slot.x }}px;
+      top: {{ slot.y }}px;
+      width: {{ slot.width }}px;
+      height: {{ slot.height }}px;
+      font-size: {{ slot.font_size }}px;
+      font-weight: {{ slot.font_weight }};
+      text-align: {{ slot.text_align }};
+      justify-content: {{ slot.text_align }};
+      color: {{ slot.color | default('#1B4D3E') }};">
+    {{ slot.value }}
+  </div>
+  {% endfor %}
+
+  <div class="signature-block">
+    <div class="sig-item">
+      <div class="sig-line"></div>
+      <div class="sig-label">Coordinator</div>
+    </div>
+    <div class="sig-item">
+      <div class="sig-line"></div>
+      <div class="sig-label">Faculty Advisor</div>
+    </div>
+  </div>
+
+  <div class="cert-number">Certificate No: TEST-2025-000001</div>
+  <div class="qr-box">QR CODE</div>
+  <div class="footer">Verify at PSG iTech Certificate Platform</div>
+</body>
+
+</html>

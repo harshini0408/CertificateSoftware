@@ -1,8 +1,17 @@
 """Seed preset certificate templates into MongoDB on application startup.
 
-Reads the 6 HTML template files from app/static/templates/ and inserts
-them as Template documents with is_preset=True if they don't already exist.
-If they do exist, updates their field_slots and html_content.
+.. deprecated::
+    HTML/Jinja2 preset seeding is now **DISABLED** in favour of the new
+    image-based PNG template system (see ``static/certificate_templates/``).
+
+    This file is kept for backward compatibility so that events created
+    before the PNG migration continue to function. The ``seed_preset_templates``
+    function is no longer called from ``main.py`` during startup.
+
+    To re-enable HTML preset seeding, uncomment the call in ``main.py``:
+        async def _seed_templates() -> None:
+            from .seed_templates import seed_preset_templates
+            await seed_preset_templates()
 """
 
 import logging

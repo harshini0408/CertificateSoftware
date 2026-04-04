@@ -14,6 +14,7 @@ import VerifyPage from './pages/VerifyPage'
 import VenueRegister from './pages/VenueRegister'
 import TemplateBuilder from './pages/TemplateBuilder'
 import TemplateSelector from './pages/TemplateSelector'
+import HtmlTemplateEditor from './pages/HtmlTemplateEditor'
 
 // ── Role constants ─────────────────────────────────────────────────────────────
 const ROLES = {
@@ -78,6 +79,14 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN]}>
               <TemplateBuilder />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/club/:club_id/templates/:template_id/edit"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN]}>
+              <HtmlTemplateEditor />
             </ProtectedRoute>
           }
         />

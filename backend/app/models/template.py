@@ -26,6 +26,7 @@ class FieldSlot(BaseModel):
     font_size: int = 24
     font_weight: str = "normal"
     text_align: str = "center"
+    color: Optional[str] = None           # e.g. "#1B4D3E"; None = inherit from template
 
 
 class StaticElement(BaseModel):

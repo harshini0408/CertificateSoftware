@@ -53,8 +53,12 @@ class Event(Document):
     event_date: Optional[datetime] = None
     status: EventStatus = EventStatus.DRAFT
 
-    # Maps cert_type label → template ObjectId
+    # Maps cert_type label → template ObjectId (legacy HTML template system)
     template_map: Dict[str, Optional[PydanticObjectId]] = Field(default_factory=dict)
+
+    # PNG image template filename (new image-based system)
+    # e.g. "template_01.png" — if set, Pillow overlay pipeline is used instead of imgkit
+    template_filename: Optional[str] = None
 
     qr_config: QRConfig = Field(default_factory=QRConfig)
     assets: EventAssets = Field(default_factory=EventAssets)

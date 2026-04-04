@@ -10,6 +10,8 @@ from .email_log import EmailLog, EmailStatus
 from .scan_log import ScanLog
 from .credit_rule import CreditRule
 from .student_credit import StudentCredit, CreditHistoryEntry
+from .image_template import ImageTemplate
+from .field_position import FieldPosition
 
 ALL_MODELS = [
     Club,
@@ -24,6 +26,8 @@ ALL_MODELS = [
     ScanLog,
     CreditRule,
     StudentCredit,
+    ImageTemplate,
+    FieldPosition,
 ]
 
 __all__ = [
@@ -39,5 +43,7 @@ __all__ = [
     "ScanLog",
     "CreditRule",
     "StudentCredit", "CreditHistoryEntry",
+    "ImageTemplate",
+    "FieldPosition",
     "ALL_MODELS",
 ]

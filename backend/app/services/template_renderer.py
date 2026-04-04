@@ -43,11 +43,14 @@ def render_certificate(
     field_html_parts = []
     for slot in template.field_slots:
         value = slot_values.get(slot.slot_id, "")
+        # Per-slot colour > template-level colour > black
+        colour = slot.color or template.font_color or "#000000"
         style = (
             f"position:absolute; left:{slot.x}px; top:{slot.y}px; "
             f"width:{slot.width}px; height:{slot.height}px; "
             f"font-size:{slot.font_size}px; font-weight:{slot.font_weight}; "
-            f"text-align:{slot.text_align}; display:flex; align-items:center; "
+            f"text-align:{slot.text_align}; color:{colour}; "
+            f"display:flex; align-items:center; "
             f"justify-content:{slot.text_align};"
         )
         field_html_parts.append(
