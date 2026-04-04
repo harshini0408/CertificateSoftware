@@ -177,10 +177,17 @@ async def generate_certificates(
         Participant.event_id == event_id
     ).to_list()
 
-    existing_pids = set()
     existing_certs = await Certificate.find(Certificate.event_id == event_id).to_list()
+
+    # Index existing certificates by participant with active/retry buckets.
+    active_by_pid = {}
+    retry_by_pid = {}
     for c in existing_certs:
-        existing_pids.add(c.participant_id)
+        pid = c.participant_id
+        if c.status in {CertStatus.PENDING, CertStatus.GENERATED, CertStatus.EMAILED}:
+            active_by_pid[pid] = c
+        elif c.status in {CertStatus.FAILED, CertStatus.REVOKED} and pid not in retry_by_pid:
+            retry_by_pid[pid] = c
 
     queued = 0
     skipped_existing = 0
@@ -193,13 +200,24 @@ async def generate_certificates(
     has_participant_fallback = "participant" in fp_types
 
     for p in participants:
-        if p.id in existing_pids:
+        if p.id in active_by_pid:
             skipped_existing += 1
             continue
 
         cert_type = p.cert_type
         if cert_type not in fp_types and not has_participant_fallback:
             skipped_no_template += 1
+            continue
+
+        retry_cert = retry_by_pid.get(p.id)
+        if retry_cert:
+            await retry_cert.set({
+                "status": CertStatus.PENDING,
+                "issued_at": None,
+                "png_url": None,
+            })
+            background_tasks.add_task(_generate_one, retry_cert.id)
+            queued += 1
             continue
 
         # Certificates model still requires template_id as ObjectId.
