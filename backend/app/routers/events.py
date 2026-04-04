@@ -44,9 +44,24 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
 
 @router.post("", response_model=EventResponse, status_code=201)
 async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User = Depends(require_club_access)):
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
     tmap = {k: v for k, v in body.template_map.items()}
+
+    # New events inherit club-level default assets automatically.
+    inherited_assets = EventAssets()
+    if getattr(club, "assets", None):
+        inherited_assets.logo_path = club.assets.logo_path
+        inherited_assets.logo_hash = club.assets.logo_hash
+        inherited_assets.logo_url = club.assets.logo_url
+        inherited_assets.signature_path = club.assets.signature_path
+        inherited_assets.signature_hash = club.assets.signature_hash
+        inherited_assets.signature_url = club.assets.signature_url
+
     event = Event(club_id=club_id, name=body.name, description=body.description,
-                  event_date=body.event_date, template_map=tmap)
+                  event_date=body.event_date, template_map=tmap, assets=inherited_assets)
     await event.insert()
     return _event_response(event)
 
@@ -125,6 +140,7 @@ async def upload_assets(club_id: PydanticObjectId, event_id: PydanticObjectId,
     club = await Club.get(club_id)
     club_slug = club.slug if club else "unknown"
     assets = event.assets
+    club_assets = club.assets if (club and getattr(club, "assets", None)) else None
 
     if logo:
         logo_bytes = await logo.read()
@@ -132,13 +148,29 @@ async def upload_assets(club_id: PydanticObjectId, event_id: PydanticObjectId,
         assets.logo_path = save_logo(logo_bytes, club_slug)
         assets.logo_url = f"/storage/assets/{club_slug}/logo.png"
 
+        # First-time default: if club has no default logo, save this as club default.
+        if club_assets and not club_assets.logo_path:
+            club_assets.logo_hash = assets.logo_hash
+            club_assets.logo_path = assets.logo_path
+            club_assets.logo_url = assets.logo_url
+
     if signature:
         sig_bytes = await signature.read()
         assets.signature_hash = hashlib.md5(sig_bytes).hexdigest()
         assets.signature_path = process_signature(sig_bytes, club_slug)
         assets.signature_url = f"/storage/assets/{club_slug}/signature.png"
 
+        # First-time default: if club has no default signature, save this as club default.
+        if club_assets and not club_assets.signature_path:
+            club_assets.signature_hash = assets.signature_hash
+            club_assets.signature_path = assets.signature_path
+            club_assets.signature_url = assets.signature_url
+
     await event.set({"assets": assets.model_dump()})
+
+    if club and club_assets:
+        await club.set({"assets": club_assets.model_dump()})
+
     return {"message": "Assets uploaded", "assets": assets.model_dump()}
 
 
