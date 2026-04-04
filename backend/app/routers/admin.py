@@ -287,6 +287,11 @@ async def update_user(
 
     updates = body.model_dump(exclude_none=True)
 
+    # Username uniqueness check
+    if "username" in updates and updates["username"] != target.username:
+        if await User.find_one(User.username == updates["username"]):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Username already taken")
+
     # Email uniqueness check
     if "email" in updates and updates["email"] != target.email:
         if await User.find_one(User.email == updates["email"]):

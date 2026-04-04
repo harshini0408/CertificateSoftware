@@ -65,6 +65,12 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    username: Optional[str] = Field(
+        None,
+        min_length=3,
+        max_length=50,
+        pattern=r"^[a-zA-Z0-9_]+$",
+    )
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = None

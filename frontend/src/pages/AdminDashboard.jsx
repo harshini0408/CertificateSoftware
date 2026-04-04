@@ -278,13 +278,34 @@ function NewClubModal({ isOpen, onClose }) {
 // EDIT CLUB MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 function EditClubModal({ isOpen, onClose, club }) {
-  const [form, setForm] = useState({ name: '', contact_email: '', is_active: true })
+  const [form, setForm] = useState({ name: '', contact_email: '', is_active: true, coordinator_username: '' })
   const [showConfirm, setShowConfirm] = useState(false)
   const updateClub = useUpdateClub()
+  const updateUser = useUpdateUser()
+  const { data: clubUsers } = useClubUsers(club?.id)
+
+  const coordinator = useMemo(
+    () => (clubUsers || []).find((u) => u.role === 'club_coordinator') || null,
+    [clubUsers],
+  )
 
   useEffect(() => {
-    if (club) setForm({ name: club.name, contact_email: club.contact_email || '', is_active: club.is_active })
+    if (club) {
+      setForm((prev) => ({
+        ...prev,
+        name: club.name,
+        contact_email: club.contact_email || '',
+        is_active: club.is_active,
+      }))
+    }
   }, [club])
+
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      coordinator_username: coordinator?.username || '',
+    }))
+  }, [coordinator])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -292,9 +313,27 @@ function EditClubModal({ isOpen, onClose, club }) {
     doSave()
   }
 
-  const doSave = () => {
+  const doSave = async () => {
     setShowConfirm(false)
-    updateClub.mutate({ clubId: club.id, ...form }, { onSuccess: onClose })
+    try {
+      await updateClub.mutateAsync({
+        clubId: club.id,
+        name: form.name,
+        contact_email: form.contact_email,
+        is_active: form.is_active,
+      })
+
+      if (coordinator && form.coordinator_username && form.coordinator_username !== coordinator.username) {
+        await updateUser.mutateAsync({
+          userId: coordinator.id,
+          username: form.coordinator_username,
+        })
+      }
+
+      onClose()
+    } catch {
+      // Toasts are handled by mutation hooks
+    }
   }
 
   if (!club) return null
@@ -314,6 +353,21 @@ function EditClubModal({ isOpen, onClose, club }) {
             <label className="form-label">Contact Email</label>
             <input type="email" className="form-input" value={form.contact_email} onChange={(e) => setForm((f) => ({ ...f, contact_email: e.target.value }))} />
           </div>
+          <div>
+            <label className="form-label">Coordinator Username</label>
+            <input
+              className="form-input font-mono"
+              value={form.coordinator_username}
+              onChange={(e) => setForm((f) => ({ ...f, coordinator_username: e.target.value }))}
+              placeholder="club_coordinator_username"
+              disabled={!coordinator}
+            />
+            {!coordinator && (
+              <p className="mt-1 text-xs text-gray-500">
+                No club coordinator user found for this club.
+              </p>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             <label className="form-label mb-0">Active</label>
             <button type="button" onClick={() => setForm((f) => ({ ...f, is_active: !f.is_active }))}
@@ -323,8 +377,8 @@ function EditClubModal({ isOpen, onClose, club }) {
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary min-w-[120px]" disabled={updateClub.isPending}>
-              {updateClub.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
+            <button type="submit" className="btn-primary min-w-[120px]" disabled={updateClub.isPending || updateUser.isPending}>
+              {(updateClub.isPending || updateUser.isPending) ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
             </button>
           </div>
         </form>
@@ -336,7 +390,7 @@ function EditClubModal({ isOpen, onClose, club }) {
         title="Deactivate Club?"
         message="Deactivating this club will lock out all its coordinators and guests. This action can be reversed. Continue?"
         confirmLabel="Deactivate"
-        isLoading={updateClub.isPending}
+        isLoading={updateClub.isPending || updateUser.isPending}
       />
     </>
   )
