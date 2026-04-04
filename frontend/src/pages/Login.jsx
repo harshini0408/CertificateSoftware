@@ -4,26 +4,19 @@ import { useLogin } from '../api/auth'
 import { useAuthStore } from '../store/authStore'
 import { Navigate } from 'react-router-dom'
 import LoadingSpinner from '../components/LoadingSpinner'
+import collegeBg from '../Images/college bg.jpeg'
+import collegeLogo from '../Images/College logo.png'
 
-// ── PSG Logo (inline SVG — no CDN, no external asset) ─────────────────────
+// ── PSG Logo ───────────────────────────────────────────────────────────────
 function PsgLogo() {
   return (
     <div className="flex flex-col items-center gap-2 select-none">
-      {/* Monogram badge */}
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-navy shadow-md">
-        <svg viewBox="0 0 64 64" className="h-10 w-10" fill="none">
-          {/* Stylised "P" mark */}
-          <text
-            x="10"
-            y="46"
-            fontSize="44"
-            fontFamily="Georgia, serif"
-            fontWeight="700"
-            fill="#C9A84C"
-          >
-            P
-          </text>
-        </svg>
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-md p-2">
+        <img
+          src={collegeLogo}
+          alt="PSG College Logo"
+          className="h-full w-full object-contain"
+        />
       </div>
       <div className="text-center">
         <p className="text-xl font-bold text-navy leading-tight">PSG iTech</p>
@@ -95,17 +88,21 @@ export default function Login() {
   }
 
   const busy = isSubmitting || loginMutation.isPending
+  const adminMail = '24z108@psgitech.ac.in'
 
   return (
-    <div className="min-h-dvh bg-background flex items-center justify-center px-4 py-12">
-      {/* Decorative blobs */}
+    <div className="relative min-h-dvh flex items-center justify-center px-4 py-12 overflow-hidden">
+      {/* Background image */}
       <div
         aria-hidden="true"
-        className="pointer-events-none fixed inset-0 overflow-hidden"
-      >
-        <div className="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-navy/5 blur-3xl" />
-        <div className="absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-gold/10 blur-3xl" />
-      </div>
+        className="absolute inset-0 bg-center bg-cover opacity-60"
+        style={{ backgroundImage: `url(${collegeBg})` }}
+      />
+      {/* Soft overlay for readability */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-white/55"
+      />
 
       {/* Card */}
       <div className="relative z-10 w-full max-w-sm">
@@ -225,7 +222,12 @@ export default function Login() {
           {/* Footer note */}
           <p className="mt-6 text-center text-xs text-gray-400">
             Forgot your password?{' '}
-            <span className="font-medium text-navy/70">Contact your administrator.</span>
+            <a
+              href={`mailto:${adminMail}`}
+              className="font-medium text-navy/70 hover:text-navy underline-offset-2 hover:underline"
+            >
+              Contact your administrator.
+            </a>
           </p>
         </div>
 
