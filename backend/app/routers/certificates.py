@@ -11,14 +11,12 @@ from ..models.user import User
 from ..models.club import Club
 from ..models.event import Event
 from ..models.participant import Participant
-from ..models.template import Template
 from ..models.certificate import Certificate, CertStatus, CertSnapshot
 from ..models.email_log import EmailLog, EmailStatus
 from ..schemas.certificate import CertificateResponse, GenerateResponse
 from ..services.cert_number import generate_cert_number
 from ..services.qr_service import generate_qr_base64
-from ..services.template_renderer import render_certificate
-from ..services.png_generator import generate_png, generate_certificate_pillow
+from ..services.png_generator import generate_certificate_pillow
 from ..services.storage_service import save_cert_png, storage_url_to_path, storage_path_to_url
 from ..services.email_service import send_certificate_email, get_daily_sent_count
 from ..services.credit_service import award_credits
@@ -51,31 +49,14 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         tmp_path = str(Path(settings.storage_path) / "tmp" / f"{cert.cert_number}.png")
         Path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # New image-template flow (Pillow) — used when template_filename exists.
-        if event.template_filename:
-            await generate_certificate_pillow(
-                event=event,
-                participant=participant,
-                qr_b64=qr_b64,
-                output_path=tmp_path,
-                club_slug=club.slug,
-            )
-        else:
-            # Legacy HTML-template flow.
-            template = await Template.get(cert.template_id)
-            if not template:
-                await cert.set({"status": CertStatus.FAILED})
-                return
-
-            html = render_certificate(
-                participant=participant,
-                template=template,
-                cert_number=cert.cert_number,
-                qr_base64=qr_b64,
-                logo_path=event.assets.logo_path,
-                signature_path=event.assets.signature_path,
-            )
-            generate_png(html, tmp_path)
+        # Image-based Pillow pipeline for certificate generation
+        await generate_certificate_pillow(
+            event=event,
+            participant=participant,
+            qr_b64=qr_b64,
+            output_path=tmp_path,
+            club_slug=club.slug,
+        )
 
         png_bytes = Path(tmp_path).read_bytes()
         png_url = save_cert_png(png_bytes, club.slug, year, cert.cert_number)

@@ -43,9 +43,6 @@ class Event(Document):
     event_date: Optional[datetime] = None
     status: EventStatus = EventStatus.DRAFT
 
-<<<<<<< HEAD
-    template_map: Dict[str, Any] = Field(default_factory=dict)
-=======
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
 
     @field_validator("template_map", mode="before")
@@ -54,7 +51,6 @@ class Event(Document):
         if not isinstance(v, dict):
             return {}
         return {key: (str(val) if val is not None else None) for key, val in v.items()}
->>>>>>> 560fffe (Working)
 
     template_filename: Optional[str] = None
     qr_config: QRConfig = Field(default_factory=QRConfig)
