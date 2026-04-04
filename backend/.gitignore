@@ -6,7 +6,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-<<<<<<< HEAD
 *.egg
 
 # ── Virtual Environment ─────────────
@@ -46,6 +45,6 @@ desktop.ini
 .gemini/
 .agent/
 .agents/
-=======
+
+# ── Node ─────────────────────────────
 node_modules/
->>>>>>> 7a2d0e5 (frontend)
