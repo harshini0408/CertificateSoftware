@@ -43,9 +43,7 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
 
 @router.post("", response_model=EventResponse, status_code=201)
 async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User = Depends(require_club_access)):
-    tmap = {}
-    for k, v in body.template_map.items():
-        tmap[k] = PydanticObjectId(v) if v else None
+    tmap = {k: v for k, v in body.template_map.items()}
     event = Event(club_id=club_id, name=body.name, description=body.description,
                   event_date=body.event_date, template_map=tmap)
     await event.insert()
@@ -76,7 +74,7 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
     updates = body.model_dump(exclude_none=True)
     if "template_map" in updates and updates["template_map"]:
-        updates["template_map"] = {k: PydanticObjectId(v) if v else None for k, v in updates["template_map"].items()}
+        updates["template_map"] = {k: v for k, v in updates["template_map"].items()}
     if "status" in updates:
         updates["status"] = EventStatus(updates["status"])
     if updates:
@@ -171,16 +169,8 @@ async def download_excel_template(club_id: PydanticObjectId, event_id: PydanticO
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
-    # Gather field_slots from all mapped templates
-    all_slots = []
-    for cert_type, template_id in event.template_map.items():
-        if template_id:
-            tpl = await Template.get(template_id)
-            if tpl:
-                all_slots.extend(tpl.field_slots)
-                break
-
-    buf = generate_excel_template(all_slots)
+    # Create generic template for image-based system
+    buf = generate_excel_template()
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

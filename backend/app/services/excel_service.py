@@ -40,8 +40,8 @@ def generate_excel_template(field_slots=None) -> BytesIO:
     ws = wb.active
     ws.title = "Participants"
 
-    headers = ["Name", "Email", "Event Name", "Event Date", "Role"]
-    sample   = ["John Doe", "john@example.com", "Hackathon 2024", "2024-04-01", "volunteer"]
+    headers = ["Name", "Registration Number", "Event Date", "Role", "Email"]
+    sample   = ["John Doe", "21CS001", "2024-04-01", "participant", "john@example.com"]
 
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
@@ -98,11 +98,26 @@ def parse_participants_excel(
             if col_idx < len(headers) and headers[col_idx]:
                 record[headers[col_idx]] = str(cell_value).strip() if cell_value is not None else ""
 
-        # Require email
-        email = record.get("Email", "").strip()
+        # Robustly find Email and Reg No regardless of exact column casing
+        email = ""
+        reg_no = ""
+        for k, v in record.items():
+            kl = k.lower().replace(" ", "").replace("_", "")
+            if kl in ("email", "emailid", "mail"):
+                email = v
+            elif kl in ("registrationnumber", "regno", "rollno", "rollnumber"):
+                reg_no = v
+
+        # If email is missing but reg no exists, create a placeholder to satisfy the DB constraint
+        if not email and reg_no:
+            email = f"{reg_no.lower()}@psgitech.placeholder.local"
+            
         if not email:
-            errors.append(f"Row {row_idx}: missing Email — skipped")
+            errors.append(f"Row {row_idx}: missing Email and Registration Number — skipped")
             continue
+            
+        record["Email"] = email  # Enforce exact casing for the router
+
 
         # Derive cert_type from Role column (default to "participant")
         if cert_type_col_idx >= 0 and cert_type_col_idx < len(row):

@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 
 from beanie import Document, PydanticObjectId
 from pydantic import BaseModel, Field, field_validator
-
+from typing import Any
 
 # ── Enums ────────────────────────────────────────────────────────────────
 
@@ -53,8 +53,7 @@ class Event(Document):
     event_date: Optional[datetime] = None
     status: EventStatus = EventStatus.DRAFT
 
-    # Maps cert_type label → template ObjectId (legacy HTML template system)
-    template_map: Dict[str, Optional[PydanticObjectId]] = Field(default_factory=dict)
+    template_map: Dict[str, Any] = Field(default_factory=dict)
 
     # PNG image template filename (new image-based system)
     # e.g. "template_01.png" — if set, Pillow overlay pipeline is used instead of imgkit

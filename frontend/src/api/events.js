@@ -2,6 +2,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosInstance from '../utils/axiosInstance'
 import { useToastStore } from '../store/uiStore'
 
+// ── Helper ────────────────────────────────────────────────────────────────────
+function extractErrorMsg(err, fallback = 'An error occurred.') {
+  const detail = err?.response?.data?.detail
+  if (!detail) return fallback
+  if (Array.isArray(detail)) {
+    return detail.map(d => d.msg || JSON.stringify(d)).join(' | ')
+  }
+  return typeof detail === 'string' ? detail : fallback
+}
+
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const eventKeys = {
   all:    ()                  => ['events'],
@@ -66,7 +76,7 @@ export function useCreateEvent(clubId) {
     },
 
     onError: (err) => {
-      const msg = err?.response?.data?.detail || 'Failed to create event.'
+      const msg = extractErrorMsg(err, 'Failed to create event.')
       addToast({ type: 'error', message: msg })
     },
   })
@@ -96,7 +106,7 @@ export function useUpdateEvent(clubId, eventId) {
     },
 
     onError: (err) => {
-      const msg = err?.response?.data?.detail || 'Failed to update event.'
+      const msg = extractErrorMsg(err, 'Failed to update event.')
       addToast({ type: 'error', message: msg })
     },
   })
@@ -126,7 +136,7 @@ export function useDeleteEvent(clubId) {
     },
 
     onError: (err) => {
-      const msg = err?.response?.data?.detail || 'Failed to delete event.'
+      const msg = extractErrorMsg(err, 'Failed to delete event.')
       addToast({ type: 'error', message: msg })
     },
   })
@@ -220,7 +230,7 @@ export function useSaveFieldPositions(clubId, eventId) {
       addToast({ type: 'success', message: 'Field positions saved.' })
     },
     onError: (err) => {
-      const msg = err?.response?.data?.detail || 'Failed to save field positions.'
+      const msg = extractErrorMsg(err, 'Failed to save field positions.')
       addToast({ type: 'error', message: msg })
     },
   })
