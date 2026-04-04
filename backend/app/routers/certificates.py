@@ -56,6 +56,7 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
             qr_b64=qr_b64,
             output_path=tmp_path,
             club_slug=club.slug,
+            cert_type=participant.cert_type or "participant",
         )
 
         png_bytes = Path(tmp_path).read_bytes()

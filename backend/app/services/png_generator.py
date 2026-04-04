@@ -125,6 +125,7 @@ async def generate_certificate_pillow(
     qr_b64: str,
     output_path: str,
     club_slug: str = "default",
+    cert_type: str = "participant",
 ) -> None:
     """Overlay text, logo, signature, and QR on a PNG template using Pillow.
 
@@ -144,26 +145,40 @@ async def generate_certificate_pillow(
     from PIL import Image, ImageDraw
     from ..models.field_position import FieldPosition
 
-    # ── 1. Load template PNG ──────────────────────────────────────────────────
-    template_path = _CERT_TMPL_DIR / event.template_filename
+    # ── 1. Fetch field positions for this specific cert_type ──────────────────
+    fp = await FieldPosition.find_one(
+        FieldPosition.event_id == event.id,
+        FieldPosition.cert_type == cert_type,
+    )
+    if not fp:
+        # Fallback: try "participant" positions if this cert_type has none
+        fp = await FieldPosition.find_one(
+            FieldPosition.event_id == event.id,
+            FieldPosition.cert_type == "participant",
+        )
+    if not fp:
+        raise ValueError(
+            f"No field positions found for event {event.id}, cert_type='{cert_type}'. "
+            "Coordinator must configure field positions in the Template Selector before generating."
+        )
+
+    # ── 2. Load template PNG from FieldPosition (per cert_type) ──────────────
+    template_filename = fp.template_filename
+    if not template_filename:
+        raise ValueError(
+            f"No template_filename in FieldPosition for cert_type='{cert_type}'. "
+            "Go to Template Selector and save field positions."
+        )
+    template_path = _CERT_TMPL_DIR / template_filename
     if not template_path.exists():
         raise FileNotFoundError(
             f"Template PNG not found: {template_path}. "
-            "Place PNG files in backend/app/static/certificate_templates/"
+            f"Expected file: backend/app/static/certificate_templates/{template_filename}"
         )
 
     img = Image.open(str(template_path)).convert("RGBA")
     draw = ImageDraw.Draw(img)
     img_w, img_h = img.size
-
-    # ── 2. Fetch field positions ───────────────────────────────────────────────
-    from beanie import PydanticObjectId
-    fp = await FieldPosition.find_one(FieldPosition.event_id == event.id)
-    if not fp:
-        raise ValueError(
-            f"No field positions found for event {event.id}. "
-            "Coordinator must place fields before generating certificates."
-        )
 
     # ── 3. Draw text for each field ───────────────────────────────────────────
     font_size = int(img_w * 0.022)   # ~55 px on a 2480 px wide image
@@ -220,7 +235,14 @@ async def generate_certificate_pillow(
     # ── 7. Save final PNG ─────────────────────────────────────────────────────
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    # Convert to RGB for PNG without alpha if needed
-    final_img = img.convert("RGB") if img.mode == "RGBA" else img
+    if img.mode == "RGBA":
+        # Preserve transparent templates by compositing onto white.
+        background = Image.new("RGB", img.size, "white")
+        background.paste(img, mask=img.split()[3])
+        final_img = background
+    elif img.mode != "RGB":
+        final_img = img.convert("RGB")
+    else:
+        final_img = img
     final_img.save(str(out_path), format="PNG", optimize=False)
     logger.info("Generated certificate PNG (Pillow): %s", output_path)

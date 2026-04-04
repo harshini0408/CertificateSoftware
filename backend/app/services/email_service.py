@@ -6,6 +6,7 @@ Supports multiple providers via configuration:
   - console    : Prints emails to stdout (development)
 """
 
+import asyncio
 import base64
 import logging
 import smtplib
@@ -166,7 +167,7 @@ def _build_certificate_email(
     )
     msg.attach(MIMEText(body, "plain"))
 
-    # Attach PNG
+    # Attach PNG certificate image
     png = Path(png_path)
     if png.exists():
         with open(png, "rb") as f:
@@ -177,7 +178,15 @@ def _build_certificate_email(
                 "Content-Disposition",
                 f'attachment; filename="{cert_number}.png"',
             )
+            # Also embed inline so email clients can preview it
+            part.add_header("Content-ID", f"<certificate_{cert_number}>")
             msg.attach(part)
+        logger.info("Attached certificate PNG: %s", png_path)
+    else:
+        logger.error(
+            "Certificate PNG not found for attachment — cert: %s, path: %s",
+            cert_number, png_path,
+        )
 
     return msg
 
@@ -209,7 +218,9 @@ async def send_certificate_email(
             event_name, club_name, png_path,
         )
         provider = get_email_provider()
-        success = provider.send(msg)
+        # Run blocking SMTP in a thread so it doesn't block the event loop
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(None, provider.send, msg)
 
         if success:
             _increment_counter()
