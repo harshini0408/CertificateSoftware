@@ -24,6 +24,18 @@ router = APIRouter(prefix="/clubs/{club_id}/events", tags=["Events"])
 settings = get_settings()
 
 
+def _assets_complete(assets: EventAssets) -> bool:
+    return bool(assets.logo_path and assets.signature_path)
+
+
+async def _get_latest_event_with_assets(club_id: PydanticObjectId) -> Optional[Event]:
+    events = await Event.find(Event.club_id == club_id).sort(-Event.created_at).to_list()
+    for ev in events:
+        if _assets_complete(ev.assets):
+            return ev
+    return None
+
+
 def _event_response(e: Event) -> EventResponse:
     return EventResponse(
         id=str(e.id), club_id=str(e.club_id), name=e.name,
@@ -60,6 +72,13 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
         inherited_assets.signature_hash = club.assets.signature_hash
         inherited_assets.signature_url = club.assets.signature_url
 
+    # Backfill club defaults from latest configured event if defaults are empty.
+    if not _assets_complete(inherited_assets):
+        latest_with_assets = await _get_latest_event_with_assets(club_id)
+        if latest_with_assets:
+            inherited_assets = latest_with_assets.assets
+            await club.set({"assets": inherited_assets.model_dump()})
+
     event = Event(club_id=club_id, name=body.name, description=body.description,
                   event_date=body.event_date, template_map=tmap, assets=inherited_assets)
     await event.insert()
@@ -73,6 +92,21 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
+    club = await Club.get(club_id)
+    updates = {}
+
+    # If event assets are missing, auto-apply club defaults.
+    if club and getattr(club, "assets", None) and not _assets_complete(event.assets):
+        club_assets = EventAssets(**club.assets.model_dump())
+        if _assets_complete(club_assets):
+            updates["assets"] = club_assets.model_dump()
+
+    # If club defaults are empty but this event has assets, backfill defaults.
+    if club and getattr(club, "assets", None):
+        club_assets = EventAssets(**club.assets.model_dump())
+        if not _assets_complete(club_assets) and _assets_complete(event.assets):
+            await club.set({"assets": event.assets.model_dump()})
+
     # Sync participant count on read
     actual_count = await Participant.find(Participant.event_id == event_id).count()
     # Sync mapping_confirmed based on any confirmed field-position record
@@ -83,7 +117,6 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         ).count()
     ) > 0
 
-    updates = {}
     if actual_count != event.participant_count:
         updates["participant_count"] = actual_count
     if mapping_confirmed != event.mapping_confirmed:
