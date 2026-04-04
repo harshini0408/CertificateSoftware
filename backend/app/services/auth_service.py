@@ -1,4 +1,5 @@
 from typing import Optional
+import re
 
 from beanie import PydanticObjectId
 
@@ -16,8 +17,19 @@ from ..models.user import User, UserRole
 
 
 async def authenticate_user(username: str, password: str) -> Optional[User]:
-    """Look up user by username and verify password. Returns User or None."""
-    user = await User.find_one(User.username == username)
+    """Look up user by username/email and verify password. Returns User or None."""
+    identifier = (username or "").strip()
+    if not identifier or not password:
+        return None
+    escaped = re.escape(identifier)
+
+    # Allow login via username or email (case-insensitive) for better UX.
+    user = await User.find_one({
+        "$or": [
+            {"username": {"$regex": f"^{escaped}$", "$options": "i"}},
+            {"email": {"$regex": f"^{escaped}$", "$options": "i"}},
+        ]
+    })
     if not user or not user.is_active:
         return None
     if not verify_password(password, user.password_hash):

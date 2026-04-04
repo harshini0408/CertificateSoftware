@@ -38,7 +38,7 @@ export function useLogin() {
 
   return useMutation({
     mutationFn: ({ username, password }) =>
-      axiosInstance.post('/auth/login', { username, password }),
+      axiosInstance.post('/auth/login', { username: username?.trim(), password }),
 
     onSuccess: ({ data }) => {
       setAuth(data)
@@ -48,7 +48,7 @@ export function useLogin() {
     onError: (err) => {
       const status = err?.response?.status
       if (status === 401) {
-        addToast({ type: 'error', message: 'Invalid username or password.' })
+        addToast({ type: 'error', message: 'Invalid username/email or password.' })
       } else if (status === 403) {
         addToast({ type: 'error', message: 'Your account has been deactivated. Contact admin.' })
       } else {
