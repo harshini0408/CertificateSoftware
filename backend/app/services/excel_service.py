@@ -1,7 +1,7 @@
 """Excel parsing utilities for participant import.
 
 Expected Excel columns (case-insensitive, spaces/underscores normalised):
-  - Email          (required — rows without email are skipped)
+    - Email          (required — rows without email are skipped)
   - Role / Certificate Type / Type / cert_type
                    (optional — defaults to "participant" if missing)
   - Any other columns are preserved verbatim in the participant's ``fields`` dict.
@@ -108,12 +108,8 @@ def parse_participants_excel(
             elif kl in ("registrationnumber", "regno", "rollno", "rollnumber"):
                 reg_no = v
 
-        # If email is missing but reg no exists, create a placeholder to satisfy the DB constraint
-        if not email and reg_no:
-            email = f"{reg_no.lower()}@psgitech.placeholder.local"
-            
         if not email:
-            errors.append(f"Row {row_idx}: missing Email and Registration Number — skipped")
+            errors.append(f"Row {row_idx}: missing Email — skipped")
             continue
             
         record["Email"] = email  # Enforce exact casing for the router

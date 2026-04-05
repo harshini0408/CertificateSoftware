@@ -34,7 +34,6 @@ class Certificate(Document):
 
     snapshot: CertSnapshot = Field(default_factory=CertSnapshot)
     png_url: Optional[str] = None
-    qr_data: Optional[str] = None
 
     status: CertStatus = CertStatus.PENDING
     issued_at: Optional[datetime] = None

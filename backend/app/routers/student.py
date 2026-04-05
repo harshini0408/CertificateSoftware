@@ -43,7 +43,7 @@ async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT
         if ct not in breakdown:
             breakdown[ct] = {"cert_type": ct, "count": 0, "credits": 0}
         breakdown[ct]["count"] += 1
-        breakdown[ct]["credits"] += entry.points
+        breakdown[ct]["credits"] += entry.points_awarded
 
     return {
         "total_credits": credit_doc.total_credits,
@@ -97,10 +97,14 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
 
 @router.get("/students/{student_id}/credits")
 async def get_student_credits(student_id: str):
-    """Fetch credits for a specific student by ID (admin/coordinator use)."""
+    """Fetch credits for a specific student by email (preferred) or registration number."""
     credit_doc = await StudentCredit.find_one(
-        StudentCredit.registration_number == student_id
+        StudentCredit.student_email == student_id
     )
+    if not credit_doc:
+        credit_doc = await StudentCredit.find_one(
+            StudentCredit.registration_number == student_id
+        )
     if not credit_doc:
         return {"total_credits": 0, "breakdown": [], "credit_history": []}
 
@@ -110,7 +114,7 @@ async def get_student_credits(student_id: str):
         if ct not in breakdown:
             breakdown[ct] = {"cert_type": ct, "count": 0, "credits": 0}
         breakdown[ct]["count"] += 1
-        breakdown[ct]["credits"] += entry.points
+        breakdown[ct]["credits"] += entry.points_awarded
 
     return {
         "total_credits": credit_doc.total_credits,

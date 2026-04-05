@@ -39,20 +39,6 @@ async def _seed_superadmin() -> None:
         print(f"[SEED] Super-admin '{settings.superadmin_username}' created")
 
 
-async def _seed_templates() -> None:
-    """Seed preset HTML certificate templates (legacy — kept for backward compat).
-
-    NOTE: HTML/Jinja2 preset seeding is now DISABLED since image-based PNG
-    templates are used instead. This call is kept so events created before
-    the switch are not broken. The new image template seeder runs separately.
-    """
-    # HTML preset seeding disabled — image-based templates now used instead.
-    # Uncomment below if you need to re-seed legacy HTML templates:
-    # from .seed_templates import seed_preset_templates
-    # await seed_preset_templates()
-    pass
-
-
 async def _seed_image_templates() -> None:
     """Seed ImageTemplate documents from PNG files in static/certificate_templates/.
 
@@ -102,7 +88,6 @@ async def lifespan(app: FastAPI):
     settings.ensure_storage_dirs()
     await connect_db()
     await _seed_superadmin()
-    await _seed_templates()
     await _seed_image_templates()
 
     from .scheduler import start_scheduler
@@ -161,7 +146,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
 
 # ── Routers ──────────────────────────────────────────────────────────────
 from .routers import auth, admin, clubs, events, participants, templates
-from .routers import certificates, verify, register, student, dept
+from .routers import certificates, verify, student, dept
 from .routers import image_templates
 
 app.include_router(auth.router)
@@ -172,7 +157,6 @@ app.include_router(participants.router)
 app.include_router(templates.router)
 app.include_router(certificates.router)
 app.include_router(verify.router)
-app.include_router(register.router)
 app.include_router(student.router)
 app.include_router(dept.router)
 app.include_router(image_templates.router)

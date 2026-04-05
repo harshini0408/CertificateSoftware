@@ -13,20 +13,6 @@ class EventStatus(str, Enum):
     COMPLETED = "completed"
 
 
-class QRConfig(BaseModel):
-    custom_fields: List[str] = Field(default_factory=list)
-    expires_at: Optional[datetime] = None
-    token: Optional[str] = None
-    is_active: bool = False
-
-    @field_validator("custom_fields")
-    @classmethod
-    def validate_custom_fields(cls, v):
-        if len(v) > 5:
-            raise ValueError("QR custom fields limited to 5")
-        return v
-
-
 class EventAssets(BaseModel):
     logo_path: Optional[str] = None
     logo_hash: Optional[str] = None
@@ -53,7 +39,6 @@ class Event(Document):
         return {key: (str(val) if val is not None else None) for key, val in v.items()}
 
     template_filename: Optional[str] = None
-    qr_config: QRConfig = Field(default_factory=QRConfig)
     assets: EventAssets = Field(default_factory=EventAssets)
     mapping_confirmed: bool = False
     participant_count: int = 0

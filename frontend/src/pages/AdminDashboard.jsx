@@ -448,8 +448,30 @@ function NewUserModal({ isOpen, onClose }) {
     e.preventDefault()
     const errs = validateStep2()
     if (Object.keys(errs).length) { setErrors(errs); return }
-    const payload = { ...form, role: selectedRole }
-    Object.keys(payload).forEach((k) => { if (payload[k] === '') delete payload[k] })
+    const payload = {
+      username: form.username.trim(),
+      name: form.name.trim(),
+      email: form.email.trim().toLowerCase(),
+      password: form.password,
+      role: selectedRole,
+      is_active: form.is_active,
+    }
+
+    if (selectedRole === 'club_coordinator' || selectedRole === 'guest') {
+      payload.club_id = form.club_id
+    }
+    if (selectedRole === 'guest') {
+      payload.event_id = form.event_id
+    }
+    if (selectedRole === 'dept_coordinator' || selectedRole === 'student') {
+      payload.department = form.department.trim()
+    }
+    if (selectedRole === 'student') {
+      payload.registration_number = form.registration_number.trim()
+      payload.batch = form.batch.trim()
+      payload.section = form.section.trim()
+    }
+
     createUser.mutate(payload, {
       onSuccess: handleClose,
       onError: (err) => {

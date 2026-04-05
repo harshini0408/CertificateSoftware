@@ -11,7 +11,6 @@ import EventDetail from './pages/EventDetail'
 import DeptCoordinatorDashboard from './pages/DeptCoordinatorDashboard'
 import StudentDashboard from './pages/StudentDashboard'
 import VerifyPage from './pages/VerifyPage'
-import VenueRegister from './pages/VenueRegister'
 import TemplateSelector from './pages/TemplateSelector'
 
 // ── Role constants ─────────────────────────────────────────────────────────────
@@ -33,7 +32,6 @@ export default function App() {
         {/* ── Public routes ──────────────────────────────────────────────── */}
         <Route path="/login" element={<Login />} />
         <Route path="/verify/:cert_number" element={<VerifyPage />} />
-        <Route path="/register/:token" element={<VenueRegister />} />
 
         {/* ── Super admin ────────────────────────────────────────────────── */}
         <Route

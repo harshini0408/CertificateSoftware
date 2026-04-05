@@ -195,21 +195,6 @@ function CertificateCanvas({ slots, mapping, sampleRow,canvasWidth }) {
         </span>
       </div>
 
-      {/* QR zone */}
-      <div
-        className="absolute border border-dashed border-purple-200 rounded bg-purple-50/40
-                   flex items-center justify-center"
-        style={{
-          right: 40 * scale, bottom: 40 * scale,
-          width: 80 * scale, height: 80 * scale,
-        }}
-      >
-        <span className="text-purple-300 text-center leading-tight select-none"
-              style={{ fontSize: 9 * scale }}>
-          QR
-        </span>
-      </div>
-
       {/* Signature zone */}
       <div
         className="absolute border border-dashed border-orange-200 rounded bg-orange-50/40

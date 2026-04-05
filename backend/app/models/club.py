@@ -12,6 +12,9 @@ class ClubAssets(BaseModel):
     signature_path: Optional[str] = None
     signature_hash: Optional[str] = None
     signature_url: Optional[str] = None
+    signature2_path: Optional[str] = None
+    signature2_hash: Optional[str] = None
+    signature2_url: Optional[str] = None
 
 
 class Club(Document):

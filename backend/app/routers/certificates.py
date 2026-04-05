@@ -18,7 +18,6 @@ from ..models.certificate import Certificate, CertStatus, CertSnapshot
 from ..models.email_log import EmailLog, EmailStatus
 from ..schemas.certificate import CertificateResponse, GenerateResponse
 from ..services.cert_number import generate_cert_number
-from ..services.qr_service import generate_qr_base64
 from ..services.png_generator import generate_certificate_pillow
 from ..services.storage_service import save_cert_png, storage_url_to_path, storage_path_to_url
 from ..services.email_service import send_certificate_email, get_daily_sent_count
@@ -59,9 +58,6 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
             await cert.set({"status": CertStatus.FAILED})
             return
 
-        qr_url = f"{settings.base_url}/verify/{cert.cert_number}"
-        qr_b64 = generate_qr_base64(qr_url)
-
         year = datetime.utcnow().year
         tmp_path = str(settings.storage_root / "tmp" / f"{cert.cert_number}.png")
         Path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +66,6 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         await generate_certificate_pillow(
             event=event,
             participant=participant,
-            qr_b64=qr_b64,
             output_path=tmp_path,
             club_slug=club.slug,
             cert_number=cert.cert_number,
@@ -83,7 +78,6 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
 
         await cert.set({
             "png_url": png_url,
-            "qr_data": qr_url,
             "status": CertStatus.GENERATED,
             "issued_at": datetime.utcnow(),
         })

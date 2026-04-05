@@ -1,7 +1,7 @@
 from .club import Club
 from .user import User, UserRole
 from .token_blacklist import TokenBlacklist
-from .event import Event, EventStatus, QRConfig, EventAssets
+from .event import Event, EventStatus, EventAssets
 from .template import Template, TemplateType, FieldSlot, StaticElement, TemplateBackground
 from .participant import Participant, ParticipantSource
 from .certificate import Certificate, CertStatus, CertSnapshot
@@ -12,6 +12,8 @@ from .credit_rule import CreditRule
 from .student_credit import StudentCredit, CreditHistoryEntry
 from .image_template import ImageTemplate
 from .field_position import FieldPosition
+from .dept_asset import DeptAsset
+from .dept_certificate import DeptCertificate
 
 ALL_MODELS = [
     Club,
@@ -28,13 +30,15 @@ ALL_MODELS = [
     StudentCredit,
     ImageTemplate,
     FieldPosition,
+    DeptAsset,
+    DeptCertificate,
 ]
 
 __all__ = [
     "Club",
     "User", "UserRole",
     "TokenBlacklist",
-    "Event", "EventStatus", "QRConfig", "EventAssets",
+    "Event", "EventStatus", "EventAssets",
     "Template", "TemplateType", "FieldSlot", "StaticElement", "TemplateBackground",
     "Participant", "ParticipantSource",
     "Certificate", "CertStatus", "CertSnapshot",
@@ -45,5 +49,7 @@ __all__ = [
     "StudentCredit", "CreditHistoryEntry",
     "ImageTemplate",
     "FieldPosition",
+    "DeptAsset",
+    "DeptCertificate",
     "ALL_MODELS",
 ]

@@ -10,9 +10,6 @@ python-multipart==0.0.9
 openpyxl==3.1.2
 Pillow==10.3.0
 rembg==2.0.56
-imgkit==1.2.3
-Jinja2==3.1.4
-qrcode[pil]==7.4.2
 slowapi==0.1.9
 apscheduler==3.10.4
 pydantic-settings==2.2.1

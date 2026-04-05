@@ -251,7 +251,6 @@ function A4Canvas({ template, slots, selectedId, onSelect, onDragEnd, canvasWidt
 
         {/* ── Fixed zone hints ── */}
         <ZoneHint label="LOGO" x={140} y={140} w={200} h={200} color="#3B82F6" scale={scale} />
-        <ZoneHint label="QR CODE" x={REF_W - 400} y={REF_H - 420} w={200} h={200} color="#8B5CF6" scale={scale} />
         <ZoneHint label="SIGNATURE" x={140} y={REF_H - 580} w={500} h={160} color="#F59E0B" scale={scale} />
 
         {/* ── Centre watermark ── */}

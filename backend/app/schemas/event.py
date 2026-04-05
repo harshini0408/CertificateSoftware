@@ -20,24 +20,6 @@ class EventUpdate(BaseModel):
     mapping_confirmed: Optional[bool] = None
 
 
-class QRGenerateRequest(BaseModel):
-    custom_fields: List[str] = Field(default_factory=list)
-    duration_hours: int = Field(default=24, ge=1, le=168)
-
-    @field_validator("custom_fields")
-    @classmethod
-    def validate_max_fields(cls, v):
-        if len(v) > 5:
-            raise ValueError("Maximum 5 custom fields allowed")
-        return v
-
-
-class QRGenerateResponse(BaseModel):
-    token: str
-    qr_image_base64: str
-    expires_at: datetime
-
-
 class EventResponse(BaseModel):
     id: str
     club_id: str
@@ -46,7 +28,6 @@ class EventResponse(BaseModel):
     event_date: Optional[datetime] = None
     status: str
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
-    qr_config: dict = Field(default_factory=dict)
     assets: dict = Field(default_factory=dict)
     mapping_confirmed: bool = False
     participant_count: int = 0

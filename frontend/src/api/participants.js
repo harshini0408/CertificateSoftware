@@ -22,7 +22,7 @@ export const participantKeys = {
 // ── useParticipants ───────────────────────────────────────────────────────────
 /**
  * GET /clubs/:club_id/events/:event_id/participants
- * Optional query param: source=qr|excel|manual
+ * Optional query param: source=excel|manual
  */
 export function useParticipants(clubId, eventId, source) {
   return useQuery({

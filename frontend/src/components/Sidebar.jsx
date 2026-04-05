@@ -105,7 +105,7 @@ function useNavItems() {
 
     case 'dept_coordinator':
       return [
-        { to: '/dept', icon: icons.student, label: 'Students', end: true },
+        { to: '/dept', icon: icons.student, label: 'Department', end: true },
       ]
 
     case 'student':

@@ -1,27 +1,16 @@
 """
 PNG / Image generation service.
 
-Two generation pipelines are supported:
-
-1. **Pillow overlay pipeline** (new, image-based templates):
-   Triggered when ``event.template_filename`` is set.
-   Loads a pre-built PNG from ``static/certificate_templates/``, then uses
-   Pillow to overlay text, logo, signature, and QR code at positions saved
-   in the ``field_positions`` collection.
-
-2. **imgkit / wkhtmltoimage pipeline** (legacy, HTML templates):
-   Triggered when ``event.template_filename`` is None or empty.
-   Converts a rendered HTML string into a 2480 × 3508 px PNG (A4 at 300 DPI).
-   Kept so events created before the image-template switch are not broken.
+This module uses the Pillow overlay pipeline for image-based templates.
+It loads a pre-built PNG from ``static/certificate_templates/`` and overlays
+text, logo, and signature at positions saved in the ``field_positions``
+collection.
 
 Requirements
 ------------
 * Pillow ≥ 9 (pip install Pillow)
-* For legacy pipeline: imgkit + wkhtmltoimage on the host PATH.
 """
 
-import base64
-import io
 import logging
 import asyncio
 from pathlib import Path
@@ -34,64 +23,6 @@ _STATIC_DIR    = Path(__file__).parent.parent / "static"
 _CERT_TMPL_DIR = _STATIC_DIR / "certificate_templates"
 _FONTS_DIR     = _STATIC_DIR / "fonts"
 _DEFAULT_FONT  = _FONTS_DIR / "Montserrat-Bold.ttf"
-
-# ── A4 @ 300 DPI ──────────────────────────────────────────────────────────────
-_A4_W_PX = "2480"
-_A4_H_PX = "3508"
-
-# ── imgkit (legacy) ───────────────────────────────────────────────────────────
-try:
-    import imgkit
-    _IMGKIT_AVAILABLE = True
-except ImportError:
-    _IMGKIT_AVAILABLE = False
-
-_IMGKIT_OPTIONS: dict[str, str] = {
-    "format":              "png",
-    "width":               _A4_W_PX,
-    "height":              _A4_H_PX,
-    "disable-smart-width": "",
-    "zoom":                "1.0",
-    "quality":             "100",
-    "enable-local-file-access": "",
-    "quiet":               "",
-}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LEGACY PIPELINE — imgkit / wkhtmltoimage
-# ══════════════════════════════════════════════════════════════════════════════
-
-def generate_png(html: str, output_path: str) -> None:
-    """Convert an HTML string to a 2480 × 3508 px PNG (A4 at 300 DPI).
-
-    Parameters
-    ----------
-    html:
-        Fully-rendered HTML string (all assets should be embedded as Base64
-        data-URIs, or referenced via absolute ``file://`` paths while the
-        ``enable-local-file-access`` option is set).
-    output_path:
-        Destination file path for the PNG (e.g. ``/storage/certs/abc123.png``).
-    """
-    if not _IMGKIT_AVAILABLE:
-        raise RuntimeError("imgkit is not installed. Run: pip install imgkit")
-
-    try:
-        imgkit.from_string(html, output_path, options=_IMGKIT_OPTIONS)
-        logger.info("Generated PNG: %s", output_path)
-    except Exception as exc:
-        logger.error("PNG generation failed for %s: %s", output_path, exc)
-        raise
-
-
-def generate_png_from_file(html_path: str, output_path: str) -> None:
-    """Convenience wrapper – convert an HTML *file* to PNG."""
-    if not _IMGKIT_AVAILABLE:
-        raise RuntimeError("imgkit is not installed. Run: pip install imgkit")
-    html_content = Path(html_path).read_text(encoding="utf-8")
-    generate_png(html_content, output_path)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PILLOW OVERLAY PIPELINE — PNG image templates
@@ -123,13 +54,12 @@ def _paste_with_alpha(base_img, overlay_img, xy):
 async def generate_certificate_pillow(
     event,
     participant,
-    qr_b64: str,
     output_path: str,
     club_slug: str = "default",
     cert_number: str = "",
     cert_type: str = "participant",
 ) -> None:
-    """Overlay text, logo, signature, and QR on a PNG template using Pillow.
+    """Overlay text, logo, and signature on a PNG template using Pillow.
 
     Parameters
     ----------
@@ -137,8 +67,6 @@ async def generate_certificate_pillow(
         The ``Event`` document (must have ``template_filename`` set).
     participant:
         The ``Participant`` document (``fields`` dict contains column data).
-    qr_b64:
-        Base64-encoded PNG of the QR code.
     output_path:
         Absolute path where the final certificate PNG should be saved.
     club_slug:
@@ -198,7 +126,6 @@ async def generate_certificate_pillow(
         participant.fields or {},
         fp.column_positions,
         fp.asset_positions or {},
-        qr_b64,
         logo_path,
         sig_path,
         output_path,
@@ -211,7 +138,6 @@ def _render_certificate_pillow(
     fields: dict,
     column_positions: dict,
     asset_positions: dict,
-    qr_b64: str,
     logo_path: Optional[str],
     sig_path: Optional[str],
     output_path: str,
@@ -242,17 +168,6 @@ def _render_certificate_pillow(
         cert_x = int(img_w * 0.83)
         cert_y = int(img_h * 0.048)
         draw.text((cert_x, cert_y), cert_number, font=cert_font, fill=(44, 61, 127, 255), anchor="lm")
-
-    # ── QR code ───────────────────────────────────────────────────────────
-    try:
-        qr_bytes = base64.b64decode(qr_b64)
-        qr_img = Image.open(io.BytesIO(qr_bytes)).convert("RGBA")
-        qr_img = qr_img.resize((200, 200), Image.LANCZOS)
-        qr_x = int(img_w * 0.80)
-        qr_y = int(img_h * 0.88)
-        _paste_with_alpha(img, qr_img, (qr_x, qr_y))
-    except Exception as exc:
-        logger.warning("Could not overlay QR code: %s", exc)
 
     # ── Assets (placed positions if present) ─────────────────────────────
     def _place_asset(path: str, key: str, fallback_wh: tuple[int, int], fallback_xy: tuple[float, float]):

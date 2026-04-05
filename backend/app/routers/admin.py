@@ -158,10 +158,18 @@ async def get_club_users(club_id: PydanticObjectId, _user: User = _admin):
 
 @router.post("/users", response_model=UserResponse, status_code=201)
 async def create_user(body: UserCreate, _user: User = _admin):
+    username = body.username.strip()
+    email = body.email.strip().lower()
+    name = body.name.strip()
+    password_input = body.password.strip()
+
+    if len(password_input) < 8:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Password must be at least 8 characters")
+
     # Uniqueness checks
-    if await User.find_one(User.username == body.username):
+    if await User.find_one(User.username == username):
         raise HTTPException(status.HTTP_409_CONFLICT, "Username already taken")
-    if await User.find_one(User.email == body.email):
+    if await User.find_one(User.email == email):
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
 
     # Club validation
@@ -199,35 +207,34 @@ async def create_user(body: UserCreate, _user: User = _admin):
             )
 
     new_user = User(
-        username=body.username,
-        name=body.name,
-        email=body.email,
-        password_hash=hash_password(body.password),
+        username=username,
+        name=name,
+        email=email,
+        password_hash=hash_password(password_input),
         role=UserRole(body.role),
         is_active=body.is_active,
         club_id=club_oid,
         event_id=event_oid,
-        department=body.department,
-        registration_number=body.registration_number,
-        batch=body.batch,
-        section=body.section,
+        department=body.department.strip() if body.department else None,
+        registration_number=body.registration_number.strip() if body.registration_number else None,
+        batch=body.batch.strip() if body.batch else None,
+        section=body.section.strip() if body.section else None,
     )
     await new_user.insert()
 
     # Auto-create student_credits doc for students
     if new_user.role == UserRole.STUDENT and body.registration_number:
         existing_credit = await StudentCredit.find_one(
-            StudentCredit.student_email == body.email,
-            StudentCredit.registration_number == body.registration_number,
+            StudentCredit.student_email == email,
         )
         if not existing_credit:
             await StudentCredit(
-                student_email=body.email,
-                registration_number=body.registration_number,
-                student_name=body.name,
-                department=body.department,
-                batch=body.batch,
-                section=body.section,
+                student_email=email,
+                registration_number=body.registration_number.strip() if body.registration_number else body.registration_number,
+                student_name=name,
+                department=body.department.strip() if body.department else body.department,
+                batch=body.batch.strip() if body.batch else body.batch,
+                section=body.section.strip() if body.section else body.section,
                 total_credits=0,
                 credit_history=[],
                 last_updated=datetime.utcnow(),

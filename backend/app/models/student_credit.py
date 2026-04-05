@@ -17,7 +17,7 @@ class CreditHistoryEntry(BaseModel):
 
 class StudentCredit(Document):
     student_email: str
-    registration_number: str
+    registration_number: Optional[str] = None
     student_name: str = ""
     department: Optional[str] = None
     batch: Optional[str] = None
@@ -30,10 +30,6 @@ class StudentCredit(Document):
     class Settings:
         name = "student_credits"
         indexes = [
-            IndexModel([("student_email", ASCENDING)]),
+            IndexModel([("student_email", ASCENDING)], unique=True),
             IndexModel([("registration_number", ASCENDING)]),
-            IndexModel(
-                [("student_email", ASCENDING), ("registration_number", ASCENDING)],
-                unique=True,
-            ),
         ]

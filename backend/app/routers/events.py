@@ -11,13 +11,12 @@ from ..config import get_settings
 from ..core.dependencies import require_club_access, require_event_access
 from ..models.user import User
 from ..models.club import Club
-from ..models.event import Event, EventStatus, EventAssets, QRConfig
+from ..models.event import Event, EventStatus, EventAssets
 from ..models.template import Template
 from ..models.certificate import Certificate
 from ..models.participant import Participant
 from ..models.field_position import FieldPosition
-from ..schemas.event import EventCreate, EventUpdate, EventResponse, QRGenerateRequest, QRGenerateResponse
-from ..services.qr_service import create_event_qr_token, generate_qr_base64
+from ..schemas.event import EventCreate, EventUpdate, EventResponse
 from ..services.signature_service import process_signature, save_logo
 from ..services.storage_service import storage_path_to_url
 from ..services.excel_service import generate_excel_template
@@ -52,7 +51,7 @@ def _event_response(e: Event) -> EventResponse:
         id=str(e.id), club_id=str(e.club_id), name=e.name,
         description=e.description, event_date=e.event_date,
         status=e.status.value, template_map={k: str(v) if v else None for k, v in e.template_map.items()},
-        qr_config=e.qr_config.model_dump(), assets=e.assets.model_dump(),
+        assets=e.assets.model_dump(),
         mapping_confirmed=e.mapping_confirmed,
         participant_count=e.participant_count,
         created_at=e.created_at,
@@ -245,39 +244,6 @@ async def upload_assets(club_id: PydanticObjectId, event_id: PydanticObjectId,
         await club.set({"assets": club_assets.model_dump()})
 
     return {"message": "Assets uploaded", "assets": assets.model_dump()}
-
-
-# ═══ QR ══════════════════════════════════════════════════════════════════
-
-@router.post("/{event_id}/qr/generate", response_model=QRGenerateResponse)
-async def generate_qr(club_id: PydanticObjectId, event_id: PydanticObjectId,
-                      body: QRGenerateRequest, _user: User = Depends(require_event_access)):
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
-
-    token = create_event_qr_token(str(event_id), body.custom_fields, body.duration_hours)
-    from datetime import timedelta
-    expires_at = datetime.utcnow() + timedelta(hours=body.duration_hours)
-    url = f"{settings.base_url}/register/{token}"
-    qr_b64 = generate_qr_base64(url)
-
-    qr_config = QRConfig(custom_fields=body.custom_fields, expires_at=expires_at,
-                         token=token, is_active=True)
-    await event.set({"qr_config": qr_config.model_dump()})
-
-    return QRGenerateResponse(token=token, qr_image_base64=qr_b64, expires_at=expires_at)
-
-
-@router.delete("/{event_id}/qr/expire")
-async def expire_qr(club_id: PydanticObjectId, event_id: PydanticObjectId,
-                     _user: User = Depends(require_event_access)):
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
-    event.qr_config.is_active = False
-    await event.set({"qr_config": event.qr_config.model_dump()})
-    return {"message": "QR code expired"}
 
 
 # ═══ EXCEL TEMPLATE ═════════════════════════════════════════════════════

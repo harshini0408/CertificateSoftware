@@ -220,7 +220,7 @@ export default function StudentDashboard() {
                 </p>
               </div>
 
-              {/* Verify QR shortcut */}
+              {/* Verify certificate shortcut */}
               <a
                 href="/verify"
                 className="btn-secondary text-sm self-start sm:self-center"

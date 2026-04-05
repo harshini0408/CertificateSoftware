@@ -106,12 +106,6 @@ function A4Preview({ name, certType, background, typography, elements, previewWi
         <span className="text-blue-300 select-none" style={{ fontSize: 9 * scale }}>LOGO</span>
       </div>
 
-      {/* QR */}
-      <div className="absolute border-2 border-dashed border-purple-300/60 rounded flex items-center justify-center"
-           style={{ right: 40 * scale, bottom: 40 * scale, width: 72 * scale, height: 72 * scale }}>
-        <span className="text-purple-300 select-none" style={{ fontSize: 9 * scale }}>QR</span>
-      </div>
-
       {/* Signature */}
       <div className="absolute border-2 border-dashed border-orange-300/60 rounded flex items-center justify-center"
            style={{ left: 40 * scale, bottom: 40 * scale, width: 150 * scale, height: 50 * scale }}>
@@ -514,7 +508,7 @@ export default function TemplateBuilder() {
               <div className="rounded-lg bg-blue-50 border border-blue-100 p-3">
                 <p className="text-xs font-semibold text-blue-700 mb-1">Fixed Zones</p>
                 <p className="text-xs text-blue-600 leading-relaxed">
-                  Logo, Signature, and QR code zones are always present on the certificate.
+                  Logo and Signature zones are always present on the certificate.
                   Their positions are shown on the preview.
                 </p>
               </div>

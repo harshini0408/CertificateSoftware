@@ -18,11 +18,8 @@ async def award_credits(certificate: Certificate) -> None:
         return
 
     email = certificate.snapshot.email
-    reg_no = certificate.snapshot.registration_number or ""
-
     credit_doc = await StudentCredit.find_one(
         StudentCredit.student_email == email,
-        StudentCredit.registration_number == reg_no,
     )
 
     entry = CreditHistoryEntry(
@@ -42,7 +39,7 @@ async def award_credits(certificate: Certificate) -> None:
     else:
         await StudentCredit(
             student_email=email,
-            registration_number=reg_no,
+            registration_number=certificate.snapshot.registration_number or None,
             student_name=certificate.snapshot.name,
             department=None,
             batch=None,

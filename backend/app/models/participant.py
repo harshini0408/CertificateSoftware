@@ -10,7 +10,6 @@ from pymongo import IndexModel, ASCENDING
 class ParticipantSource(str, Enum):
     EXCEL = "excel"
     MANUAL = "manual"
-    QR = "qr"
 
 
 class Participant(Document):

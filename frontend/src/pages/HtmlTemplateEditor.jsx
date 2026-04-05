@@ -233,7 +233,6 @@ function A4Canvas({ elements, selectedId, onSelect, onDragEnd, canvasWidth }) {
 
         {/* Fixed-zone hints */}
         <ZoneHint label="LOGO" x={140} y={160} w={200} h={200} color="#3B82F6" scale={scale} />
-        <ZoneHint label="QR" x={REF_W - 400} y={REF_H - 400} w={200} h={200} color="#8B5CF6" scale={scale} />
         <ZoneHint label="SIGN" x={140} y={REF_H - 560} w={500} h={160} color="#F59E0B" scale={scale} />
 
         {/* Centre watermark */}

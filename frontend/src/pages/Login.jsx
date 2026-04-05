@@ -88,7 +88,7 @@ export default function Login() {
   }
 
   const busy = isSubmitting || loginMutation.isPending
-  const adminMail = '24z108@psgitech.ac.in'
+  const adminMail = '24z108@psgitech.ac.in,24z158@psgitech.ac.in'
 
   return (
     <div className="relative min-h-dvh flex items-center justify-center px-4 py-12 overflow-hidden">

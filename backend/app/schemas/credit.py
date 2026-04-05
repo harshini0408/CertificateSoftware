@@ -36,7 +36,7 @@ class CreditHistoryEntrySchema(BaseModel):
 class StudentCreditResponse(BaseModel):
     id: str
     student_email: str
-    registration_number: str
+    registration_number: Optional[str] = None
     student_name: str
     department: Optional[str] = None
     batch: Optional[str] = None

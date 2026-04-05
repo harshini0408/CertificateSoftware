@@ -116,22 +116,6 @@ function CanvasPreview({ slots, certType, bgColor }) {
           <span style={{ fontSize: `${Math.max(9 * scale, 6)}px`, color: `${accent}60` }}>LOGO</span>
         </div>
 
-        {/* QR placeholder */}
-        <div
-          className="absolute flex items-center justify-center"
-          style={{
-            bottom: `${180 * scale}px`,
-            right: `${200 * scale}px`,
-            width: `${200 * scale}px`,
-            height: `${200 * scale}px`,
-            border: `1.5px dashed #8b5cf640`,
-            borderRadius: `${4 * scale}px`,
-            background: '#8b5cf608',
-          }}
-        >
-          <span style={{ fontSize: `${Math.max(9 * scale, 6)}px`, color: '#8b5cf680' }}>QR</span>
-        </div>
-
         {/* Signature placeholder */}
         <div
           className="absolute flex items-center justify-center"
