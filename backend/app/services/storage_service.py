@@ -16,8 +16,29 @@ def storage_path_to_url(path_or_url: str) -> str:
     if path_or_url.startswith("/storage/"):
         return path_or_url
 
+    # Normalize Windows paths and recover URL from legacy absolute paths.
+    normalized = path_or_url.replace("\\", "/")
+    lowered = normalized.lower()
+
+    if "/storage/" in lowered:
+        rel = normalized[lowered.index("/storage/") + len("/storage/"):].lstrip("/")
+        return f"/storage/{rel}"
+    if lowered.startswith("storage/"):
+        rel = normalized[len("storage/"):].lstrip("/")
+        return f"/storage/{rel}"
+    if "/assets/" in lowered:
+        rel = normalized[lowered.index("/assets/") + 1:].lstrip("/")
+        return f"/storage/{rel}"
+    if lowered.startswith("assets/"):
+        return f"/storage/{normalized}"
+    if "/certs/" in lowered:
+        rel = normalized[lowered.index("/certs/") + 1:].lstrip("/")
+        return f"/storage/{rel}"
+    if lowered.startswith("certs/"):
+        return f"/storage/{normalized}"
+
     try:
-        rel = Path(path_or_url).resolve().relative_to(Path(settings.storage_path).resolve())
+        rel = Path(path_or_url).resolve().relative_to(settings.storage_root)
         return f"/storage/{rel.as_posix()}"
     except Exception:
         return path_or_url
@@ -32,7 +53,7 @@ def storage_url_to_path(url_or_path: str) -> str:
         return url_or_path
     if url_or_path.startswith("/storage/"):
         rel = url_or_path[len("/storage/"):]
-        return str(Path(settings.storage_path).resolve() / Path(rel))
+        return str(settings.storage_root / Path(rel))
     return url_or_path
 
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
@@ -13,6 +13,7 @@ import { useToastStore } from '../store/uiStore'
 import axiosInstance from '../utils/axiosInstance'
 import { eventKeys } from '../api/events'
 import CertificateIssue from './CertificateIssue'
+import { BACKEND_URL } from '../utils/axiosInstance'
 
 // ─── Tab ids ──────────────────────────────────────────────────────────────────
 const TABS = ['overview', 'participants', 'certificates']
@@ -36,6 +37,47 @@ const EXPIRY_OPTIONS = [
   { label: 'Custom',      value: 'custom' },
 ]
 
+const IST_TIMEZONE = 'Asia/Kolkata'
+const HAS_TZ_RE = /(Z|[+\-]\d{2}:\d{2})$/i
+
+function parseApiDateTime(value) {
+  if (!value) return null
+  const raw = String(value)
+  const parsed = new Date(HAS_TZ_RE.test(raw) ? raw : `${raw}Z`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function formatDateTime(value) {
+  const dt = parseApiDateTime(value)
+  if (!dt) return '—'
+  return dt.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: IST_TIMEZONE,
+  })
+}
+
+function formatDateOnly(value) {
+  if (!value) return '—'
+  const raw = String(value)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split('-').map(Number)
+    return new Date(y, m - 1, d).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    })
+  }
+  const dt = parseApiDateTime(raw)
+  if (!dt) return '—'
+  return dt.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    timeZone: IST_TIMEZONE,
+  })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Overview Tab
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,6 +92,21 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [sigFile, setSigFile]           = useState(null)
   const [sigPreview, setSigPreview]     = useState(event?.assets?.signature_url ?? null)
   const [uploadingAssets, setUploadingAssets] = useState(false)
+
+  const toAssetSrc = (url, hash) => {
+    if (!url) return null
+    const withVersion = hash ? `${url}${url.includes('?') ? '&' : '?'}v=${hash}` : url
+    if (withVersion.startsWith('blob:') || withVersion.startsWith('http')) return withVersion
+    return `${BACKEND_URL}${withVersion}`
+  }
+
+  useEffect(() => {
+    if (!logoFile) setLogoPreview(event?.assets?.logo_url ?? null)
+  }, [event?.assets?.logo_url, logoFile])
+
+  useEffect(() => {
+    if (!sigFile) setSigPreview(event?.assets?.signature_url ?? null)
+  }, [event?.assets?.signature_url, sigFile])
 
   // ── Asset handlers ─────────────────────────────────────────────────────
   const handleLogoChange = (file) => {
@@ -100,7 +157,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
           {[
             ['Name',        event?.name],
             ['Date',        event?.event_date
-                              ? new Date(event.event_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
+                              ? formatDateOnly(event.event_date)
                               : '—'],
             ['Status',      <StatusBadge key="s" status={event?.status ?? 'draft'} />],
             ['Description', event?.description || '—'],
@@ -131,7 +188,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
             <p className="text-sm font-medium text-foreground">Club Logo</p>
             {logoPreview && (
               <img
-                src={logoPreview}
+                src={toAssetSrc(logoPreview, event?.assets?.logo_hash)}
                 alt="Logo preview"
                 className="h-24 w-auto rounded border border-gray-200 object-contain bg-gray-50 p-2"
               />
@@ -151,7 +208,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
             <p className="text-sm font-medium text-foreground">Organiser Signature</p>
             {sigPreview && (
               <img
-                src={sigPreview}
+                src={toAssetSrc(sigPreview, event?.assets?.signature_hash)}
                 alt="Signature preview"
                 className="h-24 w-auto rounded border border-gray-200 object-contain bg-gray-50 p-2"
               />
@@ -631,7 +688,7 @@ function QrTab({ clubId, eventId }) {
       key: 'registered_at',
       header: 'Registered At',
       render: (v) =>
-        v ? new Date(v).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—',
+        formatDateTime(v),
     },
     {
       key: 'is_verified',
@@ -769,7 +826,7 @@ function QrTab({ clubId, eventId }) {
           />
           <p className="text-xs text-gray-500">
             Expires: {qrData.expires_at
-              ? new Date(qrData.expires_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+              ? formatDateTime(qrData.expires_at)
               : 'N/A'}
           </p>
           <button
@@ -926,9 +983,7 @@ export default function EventDetail() {
                   <StatusBadge status={event?.status ?? 'draft'} />
                   {event?.event_date && (
                     <span className="text-xs text-gray-500">
-                      {new Date(event.event_date).toLocaleDateString('en-IN', {
-                        day: '2-digit', month: 'long', year: 'numeric',
-                      })}
+                      {formatDateOnly(event.event_date)}
                     </span>
                   )}
                 </div>

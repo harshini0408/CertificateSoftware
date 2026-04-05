@@ -23,6 +23,7 @@ Requirements
 import base64
 import io
 import logging
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -125,6 +126,7 @@ async def generate_certificate_pillow(
     qr_b64: str,
     output_path: str,
     club_slug: str = "default",
+    cert_number: str = "",
     cert_type: str = "participant",
 ) -> None:
     """Overlay text, logo, signature, and QR on a PNG template using Pillow.
@@ -176,25 +178,72 @@ async def generate_certificate_pillow(
             f"Expected file: backend/app/static/certificate_templates/{template_filename}"
         )
 
+    # Resolve asset paths once and render in a worker thread because Pillow
+    # operations are CPU-bound and block the event loop under load.
+    assets = getattr(event, "assets", None)
+    logo_path = None
+    sig_path = None
+    if assets and getattr(assets, "logo_path", None):
+        lp = Path(assets.logo_path)
+        if lp.exists():
+            logo_path = str(lp)
+    if assets and getattr(assets, "signature_path", None):
+        sp = Path(assets.signature_path)
+        if sp.exists():
+            sig_path = str(sp)
+
+    await asyncio.to_thread(
+        _render_certificate_pillow,
+        template_path,
+        participant.fields or {},
+        fp.column_positions,
+        fp.asset_positions or {},
+        qr_b64,
+        logo_path,
+        sig_path,
+        output_path,
+        cert_number,
+    )
+
+
+def _render_certificate_pillow(
+    template_path: Path,
+    fields: dict,
+    column_positions: dict,
+    asset_positions: dict,
+    qr_b64: str,
+    logo_path: Optional[str],
+    sig_path: Optional[str],
+    output_path: str,
+    cert_number: str,
+) -> None:
+    from PIL import Image, ImageDraw
+
     img = Image.open(str(template_path)).convert("RGBA")
     draw = ImageDraw.Draw(img)
     img_w, img_h = img.size
 
-    # ── 3. Draw text for each field ───────────────────────────────────────────
-    font_size = int(img_w * 0.022)   # ~55 px on a 2480 px wide image
+    # ── Text fields ───────────────────────────────────────────────────────
+    # Keep participant text close to the pre-printed body text size in templates.
+    font_size = int(img_w * 0.025)
     font = _load_font(font_size)
-
-    fields: dict = participant.fields or {}
-
-    for col_header, pos in fp.column_positions.items():
-        value = str(fields.get(col_header, ""))
+    for col_header, pos in (column_positions or {}).items():
+        value = str((fields or {}).get(col_header, ""))
         if not value:
             continue
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h
         draw.text((x, y), value, font=font, fill=(30, 30, 30, 255), anchor="mm")
 
-    # ── 4. Overlay QR code ────────────────────────────────────────────────────
+    # ── Certificate Number (default placement near "CERTIFICATE NO:") ─────
+    # Printed on every image-template certificate, even if not manually mapped.
+    if cert_number:
+        cert_font = _load_font(int(img_w * 0.016))
+        cert_x = int(img_w * 0.83)
+        cert_y = int(img_h * 0.048)
+        draw.text((cert_x, cert_y), cert_number, font=cert_font, fill=(44, 61, 127, 255), anchor="lm")
+
+    # ── QR code ───────────────────────────────────────────────────────────
     try:
         qr_bytes = base64.b64decode(qr_b64)
         qr_img = Image.open(io.BytesIO(qr_bytes)).convert("RGBA")
@@ -205,38 +254,39 @@ async def generate_certificate_pillow(
     except Exception as exc:
         logger.warning("Could not overlay QR code: %s", exc)
 
-    # ── 5. Overlay logo ───────────────────────────────────────────────────────
-    assets = getattr(event, "assets", None)
-    if assets and getattr(assets, "logo_path", None):
-        logo_path = Path(assets.logo_path)
-        if logo_path.exists():
-            try:
-                logo_img = Image.open(str(logo_path)).convert("RGBA")
-                logo_img.thumbnail((180, 180), Image.LANCZOS)
-                logo_x = int(img_w * 0.05)
-                logo_y = int(img_h * 0.04)
-                _paste_with_alpha(img, logo_img, (logo_x, logo_y))
-            except Exception as exc:
-                logger.warning("Could not overlay logo: %s", exc)
+    # ── Assets (placed positions if present) ─────────────────────────────
+    def _place_asset(path: str, key: str, fallback_wh: tuple[int, int], fallback_xy: tuple[float, float]):
+        try:
+            a_img = Image.open(path).convert("RGBA")
+            pos = (asset_positions or {}).get(key)
+            if pos:
+                width_percent = float(pos.get("width_percent", 0) or 0)
+                target_w = int((img_w * width_percent / 100.0)) if width_percent > 0 else fallback_wh[0]
+                target_w = max(16, target_w)
+                ratio = target_w / max(1, a_img.width)
+                target_h = max(16, int(a_img.height * ratio))
+                a_img = a_img.resize((target_w, target_h), Image.LANCZOS)
+                cx = int((float(pos.get("x_percent", 50.0)) / 100.0) * img_w)
+                cy = int((float(pos.get("y_percent", 50.0)) / 100.0) * img_h)
+                x = cx - (a_img.width // 2)
+                y = cy - (a_img.height // 2)
+            else:
+                a_img.thumbnail(fallback_wh, Image.LANCZOS)
+                x = int(img_w * fallback_xy[0])
+                y = int(img_h * fallback_xy[1])
+            _paste_with_alpha(img, a_img, (x, y))
+        except Exception as exc:
+            logger.warning("Could not overlay %s: %s", key, exc)
 
-    # ── 6. Overlay signature ──────────────────────────────────────────────────
-    if assets and getattr(assets, "signature_path", None):
-        sig_path = Path(assets.signature_path)
-        if sig_path.exists():
-            try:
-                sig_img = Image.open(str(sig_path)).convert("RGBA")
-                sig_img.thumbnail((220, 80), Image.LANCZOS)
-                sig_x = int(img_w * 0.08)
-                sig_y = int(img_h * 0.82)
-                _paste_with_alpha(img, sig_img, (sig_x, sig_y))
-            except Exception as exc:
-                logger.warning("Could not overlay signature: %s", exc)
+    if logo_path:
+        _place_asset(logo_path, "logo", (180, 180), (0.05, 0.04))
+    if sig_path:
+        _place_asset(sig_path, "signature", (220, 80), (0.08, 0.82))
 
-    # ── 7. Save final PNG ─────────────────────────────────────────────────────
+    # ── Save ──────────────────────────────────────────────────────────────
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if img.mode == "RGBA":
-        # Preserve transparent templates by compositing onto white.
         background = Image.new("RGB", img.size, "white")
         background.paste(img, mask=img.split()[3])
         final_img = background

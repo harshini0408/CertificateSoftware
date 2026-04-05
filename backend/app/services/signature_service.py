@@ -1,8 +1,10 @@
 import hashlib
 import os
 from pathlib import Path
+import io
 
 from rembg import remove
+from PIL import Image
 
 from ..config import get_settings
 
@@ -21,9 +23,39 @@ def process_signature(file_bytes: bytes, club_slug: str) -> str:
 
     cache_path = out_dir / f"sig_{md5}.png"
     if cache_path.exists():
-        return str(cache_path)
+        try:
+            cached = Image.open(str(cache_path))
+            if cached.mode in ("RGBA", "LA"):
+                alpha = cached.getchannel("A")
+                if alpha.getbbox() is not None:
+                    return str(cache_path)
+            else:
+                return str(cache_path)
+        except Exception:
+            pass
 
-    result_bytes = remove(file_bytes)
+    # If user already uploads a transparent PNG signature, keep as-is.
+    use_original = False
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+        if img.mode in ("RGBA", "LA"):
+            alpha = img.getchannel("A")
+            if alpha.getbbox() is not None:
+                use_original = True
+    except Exception:
+        pass
+
+    result_bytes = file_bytes if use_original else remove(file_bytes)
+
+    # Guard against rembg returning a fully transparent image.
+    try:
+        out_img = Image.open(io.BytesIO(result_bytes))
+        if out_img.mode in ("RGBA", "LA") and out_img.getchannel("A").getbbox() is None:
+            result_bytes = file_bytes
+    except Exception:
+        # If output cannot be parsed, fallback to original upload bytes.
+        result_bytes = file_bytes
+
     cache_path.write_bytes(result_bytes)
     return str(cache_path)
 

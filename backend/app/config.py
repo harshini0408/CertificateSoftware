@@ -53,14 +53,27 @@ class Settings(BaseSettings):
     # ── Derived helpers ──────────────────────────────────────────────────
 
     @property
+    def project_root(self) -> Path:
+        """Workspace root (parent of backend/)."""
+        return Path(__file__).resolve().parents[2]
+
+    @property
+    def storage_root(self) -> Path:
+        """Absolute storage root, stable across different launch directories."""
+        p = Path(self.storage_path)
+        if p.is_absolute():
+            return p.resolve()
+        return (self.project_root / p).resolve()
+
+    @property
     def certs_dir(self) -> Path:
         """Absolute path to certificate PNG storage."""
-        return Path(self.storage_path).resolve() / "certs"
+        return self.storage_root / "certs"
 
     @property
     def assets_dir(self) -> Path:
         """Absolute path to club asset storage (logos, signatures)."""
-        return Path(self.storage_path).resolve() / "assets"
+        return self.storage_root / "assets"
 
     @property
     def is_production(self) -> bool:

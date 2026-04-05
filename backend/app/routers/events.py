@@ -1,5 +1,6 @@
 import hashlib
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from beanie import PydanticObjectId
@@ -18,6 +19,7 @@ from ..models.field_position import FieldPosition
 from ..schemas.event import EventCreate, EventUpdate, EventResponse, QRGenerateRequest, QRGenerateResponse
 from ..services.qr_service import create_event_qr_token, generate_qr_base64
 from ..services.signature_service import process_signature, save_logo
+from ..services.storage_service import storage_path_to_url
 from ..services.excel_service import generate_excel_template
 
 router = APIRouter(prefix="/clubs/{club_id}/events", tags=["Events"])
@@ -28,10 +30,19 @@ def _assets_complete(assets: EventAssets) -> bool:
     return bool(assets.logo_path and assets.signature_path)
 
 
+def _assets_files_exist(assets: EventAssets) -> bool:
+    return bool(
+        assets.logo_path
+        and assets.signature_path
+        and Path(assets.logo_path).exists()
+        and Path(assets.signature_path).exists()
+    )
+
+
 async def _get_latest_event_with_assets(club_id: PydanticObjectId) -> Optional[Event]:
     events = await Event.find(Event.club_id == club_id).sort(-Event.created_at).to_list()
     for ev in events:
-        if _assets_complete(ev.assets):
+        if _assets_complete(ev.assets) and _assets_files_exist(ev.assets):
             return ev
     return None
 
@@ -95,17 +106,46 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
     club = await Club.get(club_id)
     updates = {}
 
-    # If event assets are missing, auto-apply club defaults.
-    if club and getattr(club, "assets", None) and not _assets_complete(event.assets):
+    # Normalize legacy asset URLs from stored paths (e.g. old hardcoded logo.png links).
+    normalized_assets = EventAssets(**event.assets.model_dump())
+    asset_urls_changed = False
+    if normalized_assets.logo_path:
+        normalized_logo_url = storage_path_to_url(normalized_assets.logo_path)
+        if normalized_logo_url != normalized_assets.logo_url:
+            normalized_assets.logo_url = normalized_logo_url
+            asset_urls_changed = True
+    if normalized_assets.signature_path:
+        normalized_sig_url = storage_path_to_url(normalized_assets.signature_path)
+        if normalized_sig_url != normalized_assets.signature_url:
+            normalized_assets.signature_url = normalized_sig_url
+            asset_urls_changed = True
+    if asset_urls_changed:
+        updates["assets"] = normalized_assets.model_dump()
+
+    # If event assets are missing/broken, auto-apply valid club defaults.
+    if club and getattr(club, "assets", None):
         club_assets = EventAssets(**club.assets.model_dump())
-        if _assets_complete(club_assets):
+        event_assets_ready = _assets_complete(normalized_assets) and _assets_files_exist(normalized_assets)
+        club_assets_ready = _assets_complete(club_assets) and _assets_files_exist(club_assets)
+        if club_assets_ready and not event_assets_ready:
             updates["assets"] = club_assets.model_dump()
+
+    # Final fallback: if still missing/broken, use latest valid event assets from this club.
+    candidate_assets = EventAssets(**updates.get("assets", normalized_assets.model_dump()))
+    if not (_assets_complete(candidate_assets) and _assets_files_exist(candidate_assets)):
+        latest_with_assets = await _get_latest_event_with_assets(club_id)
+        if latest_with_assets:
+            updates["assets"] = latest_with_assets.assets.model_dump()
 
     # If club defaults are empty but this event has assets, backfill defaults.
     if club and getattr(club, "assets", None):
         club_assets = EventAssets(**club.assets.model_dump())
-        if not _assets_complete(club_assets) and _assets_complete(event.assets):
-            await club.set({"assets": event.assets.model_dump()})
+        if (
+            not (_assets_complete(club_assets) and _assets_files_exist(club_assets))
+            and _assets_complete(normalized_assets)
+            and _assets_files_exist(normalized_assets)
+        ):
+            await club.set({"assets": normalized_assets.model_dump()})
 
     # Sync participant count on read
     actual_count = await Participant.find(Participant.event_id == event_id).count()
@@ -179,7 +219,7 @@ async def upload_assets(club_id: PydanticObjectId, event_id: PydanticObjectId,
         logo_bytes = await logo.read()
         assets.logo_hash = hashlib.md5(logo_bytes).hexdigest()
         assets.logo_path = save_logo(logo_bytes, club_slug)
-        assets.logo_url = f"/storage/assets/{club_slug}/logo.png"
+        assets.logo_url = storage_path_to_url(assets.logo_path)
 
         # First-time default: if club has no default logo, save this as club default.
         if club_assets and not club_assets.logo_path:
@@ -191,7 +231,7 @@ async def upload_assets(club_id: PydanticObjectId, event_id: PydanticObjectId,
         sig_bytes = await signature.read()
         assets.signature_hash = hashlib.md5(sig_bytes).hexdigest()
         assets.signature_path = process_signature(sig_bytes, club_slug)
-        assets.signature_url = f"/storage/assets/{club_slug}/signature.png"
+        assets.signature_url = storage_path_to_url(assets.signature_path)
 
         # First-time default: if club has no default signature, save this as club default.
         if club_assets and not club_assets.signature_path:

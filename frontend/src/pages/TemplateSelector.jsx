@@ -132,9 +132,9 @@ function MarkerPin({ col, pos, color, isActive, onClick }) {
   return (
     <div onClick={() => onClick(col)} title={col}
       style={{ position:'absolute', left:`${pos.x_percent}%`, top:`${pos.y_percent}%`, transform:'translate(-50%,-50%)', cursor:'pointer', zIndex:10 }}>
-      <div className="flex items-center justify-center rounded-full text-white text-[9px] font-bold shadow-lg transition-transform"
+      <div className="flex items-center justify-center rounded-full text-white text-[11px] font-bold shadow-lg transition-transform"
         style={{ background:color, width:isActive?28:22, height:isActive?28:22, border:isActive?'2.5px solid white':'2px solid white', boxShadow:isActive?`0 0 0 2px ${color}`:undefined }}>●</div>
-      <div className="absolute left-full ml-1.5 top-1/2 -translate-y-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-semibold text-white shadow pointer-events-none"
+      <div className="absolute left-full ml-1.5 top-1/2 -translate-y-1/2 whitespace-nowrap rounded px-2 py-1 text-[11px] font-semibold text-white shadow pointer-events-none"
         style={{ background:color, opacity:isActive?1:0.82 }}>{col}</div>
     </div>
   )
@@ -271,6 +271,14 @@ const ASSET_LABELS = { logo: 'Club Logo', signature: 'Signature' }
 
 function PlaceAssetsStep({ certType, template, eventAssets, existingAssetPositions, clubId, eventId,
   columnPositions, displayWidth, onBack, onDone }) {
+    const assetPreviewSrc = (key) => {
+      const url = key === 'logo' ? eventAssets?.logo_url : eventAssets?.signature_url
+      const hash = key === 'logo' ? eventAssets?.logo_hash : eventAssets?.signature_hash
+      if (!url) return null
+      const withVersion = hash ? `${url}${url.includes('?') ? '&' : '?'}v=${hash}` : url
+      return imgSrc(withVersion)
+    }
+
   const saveMutation = useSaveFieldPositions(clubId, eventId)
   const [positions, setPositions] = useState(existingAssetPositions ?? {})
   const [active, setActive] = useState(null)
@@ -341,7 +349,7 @@ function PlaceAssetsStep({ certType, template, eventAssets, existingAssetPositio
             {availableAssets.map(key => {
               const isPlaced = !!positions[key], isActive = active === key
               const color = ASSET_COLORS[key]
-              const previewUrl = key === 'logo' ? eventAssets.logo_url : eventAssets.signature_url
+              const previewUrl = assetPreviewSrc(key)
               return (
                 <button key={key} onClick={() => setActive(p => p === key ? null : key)}
                   className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-all w-full
@@ -384,8 +392,8 @@ function PlaceAssetsStep({ certType, template, eventAssets, existingAssetPositio
               {Object.entries(positions).map(([key, pos]) => (
                 <div key={key} onClick={() => setActive(p => p === key ? null : key)}
                   style={{ position:'absolute', left:`${pos.x_percent}%`, top:`${pos.y_percent}%`, transform:'translate(-50%,-50%)', cursor:'pointer', zIndex:10 }}>
-                  <div className="flex items-center justify-center rounded border-2 text-white text-[9px] font-bold shadow-lg"
-                    style={{ background: ASSET_COLORS[key], borderColor:'white', padding:'2px 6px', fontSize:'9px' }}>
+                  <div className="flex items-center justify-center rounded border-2 text-white text-[11px] font-bold shadow-lg"
+                    style={{ background: ASSET_COLORS[key], borderColor:'white', padding:'4px 8px', fontSize:'11px' }}>
                     {ASSET_LABELS[key]}
                   </div>
                 </div>

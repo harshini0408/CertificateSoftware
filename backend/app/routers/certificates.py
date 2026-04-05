@@ -1,4 +1,6 @@
 from datetime import datetime
+import asyncio
+import os
 from pathlib import Path
 from typing import List
 
@@ -27,6 +29,20 @@ router = APIRouter(
 )
 settings = get_settings()
 
+# Bounded concurrency to avoid overloading CPU/SMTP while improving throughput.
+_GEN_SEMAPHORE = asyncio.Semaphore(max(4, min(12, (os.cpu_count() or 4) * 2)))
+_EMAIL_SEMAPHORE = asyncio.Semaphore(3)
+
+
+async def _generate_one_limited(cert_id: PydanticObjectId) -> None:
+    async with _GEN_SEMAPHORE:
+        await _generate_one(cert_id)
+
+
+async def _send_email_limited(cert_id: PydanticObjectId) -> None:
+    async with _EMAIL_SEMAPHORE:
+        await _send_email_for_generated(cert_id)
+
 
 # ── Background task: generate single certificate (review-first flow) ───────
 
@@ -47,7 +63,7 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         qr_b64 = generate_qr_base64(qr_url)
 
         year = datetime.utcnow().year
-        tmp_path = str(Path(settings.storage_path) / "tmp" / f"{cert.cert_number}.png")
+        tmp_path = str(settings.storage_root / "tmp" / f"{cert.cert_number}.png")
         Path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
 
         # Image-based Pillow pipeline for certificate generation
@@ -57,6 +73,7 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
             qr_b64=qr_b64,
             output_path=tmp_path,
             club_slug=club.slug,
+            cert_number=cert.cert_number,
             cert_type=participant.cert_type or "participant",
         )
 
@@ -216,7 +233,7 @@ async def generate_certificates(
                 "issued_at": None,
                 "png_url": None,
             })
-            background_tasks.add_task(_generate_one, retry_cert.id)
+            asyncio.create_task(_generate_one_limited(retry_cert.id))
             queued += 1
             continue
 
@@ -243,7 +260,7 @@ async def generate_certificates(
             snapshot=snapshot, status=CertStatus.PENDING,
         )
         await cert.insert()
-        background_tasks.add_task(_generate_one, cert.id)
+        asyncio.create_task(_generate_one_limited(cert.id))
         queued += 1
 
     total = len(participants)
@@ -267,6 +284,18 @@ async def list_certificates(
     certs = await Certificate.find(
         Certificate.event_id == event_id, Certificate.club_id == club_id
     ).to_list()
+
+    cert_ids = [c.id for c in certs]
+    latest_error_by_cert = {}
+    if cert_ids:
+        logs = await EmailLog.find(
+            {"certificate_id": {"$in": cert_ids}}
+        ).sort(-EmailLog.id).to_list()
+        for log in logs:
+            cid = str(log.certificate_id)
+            if cid not in latest_error_by_cert and log.error_msg:
+                latest_error_by_cert[cid] = log.error_msg
+
     return [
         CertificateResponse(
             id=str(c.id), cert_number=c.cert_number,
@@ -276,6 +305,7 @@ async def list_certificates(
             participant_email=c.snapshot.email,
             cert_type=c.snapshot.cert_type,
             snapshot=c.snapshot.model_dump(), status=c.status.value,
+            failure_reason=latest_error_by_cert.get(str(c.id)),
             pdf_url=storage_path_to_url(c.png_url) if c.png_url else None,
             generated_at=c.issued_at,
             issued_at=c.issued_at,
@@ -296,7 +326,7 @@ async def send_remaining(
 
     queued = 0
     for cert in certs:
-        background_tasks.add_task(_send_email_for_generated, cert.id)
+        asyncio.create_task(_send_email_limited(cert.id))
         queued += 1
 
     return {"queued": queued, "message": f"{queued} emails queued for sending"}
@@ -317,5 +347,5 @@ async def resend_one_certificate_email(
     if cert.status not in [CertStatus.GENERATED, CertStatus.FAILED]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only generated/failed certificates can be resent")
 
-    background_tasks.add_task(_send_email_for_generated, cert.id)
+    asyncio.create_task(_send_email_limited(cert.id))
     return {"message": "Email re-queued", "queued": 1}

@@ -14,6 +14,21 @@ import { BACKEND_URL } from '../utils/axiosInstance'
 import axiosInstance from '../utils/axiosInstance'
 import { useParticipants } from '../api/participants'
 
+const IST_TIMEZONE = 'Asia/Kolkata'
+const HAS_TZ_RE = /(Z|[+\-]\d{2}:\d{2})$/i
+
+function formatDateTime(value) {
+  if (!value) return '—'
+  const raw = String(value)
+  const dt = new Date(HAS_TZ_RE.test(raw) ? raw : `${raw}Z`)
+  if (Number.isNaN(dt.getTime())) return '—'
+  return dt.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: IST_TIMEZONE,
+  })
+}
+
 // ── Pre-flight checklist ──────────────────────────────────────────────────────
 function PreflightItem({ ok, label }) {
   return (
@@ -215,15 +230,21 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
     {
       key: 'status',
       header: 'Status',
-      render: (v) => <StatusBadge status={v} />,
+      render: (v, row) => (
+        <div className="flex flex-col gap-0.5">
+          <StatusBadge status={v} />
+          {v === 'failed' && row.failure_reason && (
+            <span className="max-w-[260px] truncate text-[11px] text-red-500" title={row.failure_reason}>
+              {row.failure_reason}
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'generated_at',
       header: 'Generated',
-      render: (v) =>
-        v
-          ? new Date(v).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
-          : '—',
+      render: (v) => formatDateTime(v),
     },
     {
       key: 'id',
