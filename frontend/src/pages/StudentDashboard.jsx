@@ -1,9 +1,13 @@
+import { useState } from 'react'
+
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
 import DataTable from '../components/DataTable'
 import StatusBadge from '../components/StatusBadge'
 import StatCard from '../components/StatCard'
 import LoadingSpinner from '../components/LoadingSpinner'
+import axiosInstance from '../utils/axiosInstance'
+import { useToastStore } from '../store/uiStore'
 import {
   useMyCredits,
   useMyCertificates,
@@ -107,12 +111,44 @@ function CreditsBreakdown({ breakdown, total }) {
 
 // ── StudentDashboard ──────────────────────────────────────────────────────────
 export default function StudentDashboard() {
+  const [downloadingId, setDownloadingId] = useState(null)
+
+  const addToast = useToastStore((s) => s.addToast)
+
   const { data: profile,  isLoading: profileLoading  } = useMyProfile()
   const { data: credits,  isLoading: creditsLoading  } = useMyCredits()
   const { data: certs,    isLoading: certsLoading    } = useMyCertificates()
 
   const totalCerts   = certs?.length ?? 0
   const totalCredits = credits?.total_credits ?? 0
+
+  const handleDownload = async (certNumber, certId) => {
+    setDownloadingId(certId)
+    try {
+      const response = await axiosInstance.get(
+        `/students/me/certificates/${certNumber}/download`,
+        { responseType: 'blob' }
+      )
+      const blob = new Blob([response.data], { type: 'image/png' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${certNumber}.png`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      const status = err?.response?.status
+      const msg =
+        status === 404
+          ? 'Certificate file is not available yet. Try again after generation completes.'
+          : 'Download failed. Please try again.'
+      addToast({ type: 'error', message: msg })
+    } finally {
+      setDownloadingId(null)
+    }
+  }
 
   const certColumns = [
     {
@@ -170,28 +206,48 @@ export default function StudentDashboard() {
       render: (v) => <StatusBadge status={v} />,
     },
     {
-      key: 'pdf_url',
+      key: 'cert_number',
       header: 'Download',
       align: 'center',
-      render: (url, row) =>
-        url ? (
-          <a
-            id={`download-cert-${row._id}`}
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium
-              text-navy border border-navy/30 hover:bg-navy hover:text-white transition-colors"
+      render: (certNumber, row) => {
+        const isDownloading = downloadingId === row._id
+        const canDownload = row.status === 'generated' || row.status === 'emailed'
+
+        if (!canDownload) {
+          return <span className="text-xs text-gray-300">Not ready</span>
+        }
+
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              handleDownload(certNumber, row._id)
+            }}
+            disabled={isDownloading}
+            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium
+              text-navy border border-navy/30 hover:bg-navy hover:text-white
+              transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Download certificate as PNG"
           >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            PDF
-          </a>
-        ) : (
-          <span className="text-xs text-gray-300">—</span>
-        ),
+            {isDownloading ? (
+              <>
+                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                Saving…
+              </>
+            ) : (
+              <>
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                PNG
+              </>
+            )}
+          </button>
+        )
+      },
     },
   ]
 

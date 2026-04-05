@@ -1,10 +1,12 @@
 import secrets
 import string
+import io
 from datetime import datetime
 from typing import List, Optional
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import File, UploadFile
 
 from ..core.dependencies import require_role
 from ..core.security import hash_password
@@ -257,6 +259,136 @@ async def create_user(body: UserCreate, _user: User = _admin):
             ).insert()
 
     return _user_response(new_user)
+
+
+@router.post("/users/bulk-import", status_code=200)
+async def bulk_import_students(
+    file: UploadFile = File(...),
+    _user: User = _admin,
+):
+    """Import multiple students from an .xlsx file.
+
+    Expected columns (case-insensitive, in any order):
+      name, email, username, password, department, registration_number, batch, section
+
+    Returns: { created: int, skipped: int, errors: [ { row: int, reason: str } ] }
+    """
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only .xlsx files are accepted")
+
+    import openpyxl
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not parse the Excel file. Ensure it is a valid .xlsx.")
+
+    # Read headers from row 1, normalize to lowercase
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel file is empty or has no header row")
+    headers = [str(h).strip().lower() if h is not None else "" for h in header_row]
+
+    REQUIRED = {"name", "email", "username", "password", "department", "registration_number", "batch", "section"}
+    missing = REQUIRED - set(headers)
+    if missing:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Missing required columns: {', '.join(sorted(missing))}. Found: {', '.join(h for h in headers if h)}"
+        )
+
+    def col(row_vals, field):
+        try:
+            idx = headers.index(field)
+            v = row_vals[idx]
+            return str(v).strip() if v is not None else ""
+        except (ValueError, IndexError):
+            return ""
+
+    created = 0
+    skipped = 0
+    errors = []
+
+    for row_idx, row_vals in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        # Skip fully empty rows
+        if all(v is None or str(v).strip() == "" for v in row_vals):
+            continue
+
+        name      = col(row_vals, "name")
+        email     = col(row_vals, "email").lower()
+        username  = col(row_vals, "username")
+        password  = col(row_vals, "password")
+        dept      = col(row_vals, "department")
+        reg_no    = col(row_vals, "registration_number")
+        batch     = col(row_vals, "batch")
+        section   = col(row_vals, "section")
+
+        try:
+            # Validate required fields
+            missing_fields = [f for f, v in [
+                ("name", name), ("email", email), ("username", username),
+                ("password", password), ("department", dept),
+                ("registration_number", reg_no), ("batch", batch), ("section", section)
+            ] if not v]
+            if missing_fields:
+                raise ValueError(f"Missing: {', '.join(missing_fields)}")
+
+            if len(password) < 8:
+                raise ValueError("Password must be at least 8 characters")
+
+            # Uniqueness checks
+            if await User.find_one(User.username == username):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Username '{username}' already exists — skipped"})
+                continue
+            if await User.find_one(User.email == email):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Email '{email}' already exists — skipped"})
+                continue
+            if await User.find_one(User.registration_number == reg_no):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Registration number '{reg_no}' already exists — skipped"})
+                continue
+
+            # Create User
+            new_user = User(
+                username=username,
+                name=name,
+                email=email,
+                password_hash=hash_password(password),
+                role=UserRole.STUDENT,
+                is_active=True,
+                department=dept,
+                registration_number=reg_no,
+                batch=batch,
+                section=section,
+            )
+            await new_user.insert()
+
+            # Create StudentCredit doc
+            existing_credit = await StudentCredit.find_one(StudentCredit.student_email == email)
+            if not existing_credit:
+                await StudentCredit(
+                    student_email=email,
+                    registration_number=reg_no,
+                    student_name=name,
+                    department=dept,
+                    batch=batch,
+                    section=section,
+                    total_credits=0,
+                    credit_history=[],
+                    last_updated=datetime.utcnow(),
+                ).insert()
+
+            created += 1
+
+        except ValueError as ve:
+            errors.append({"row": row_idx, "reason": str(ve)})
+        except Exception as exc:
+            errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
+
+    return {"created": created, "skipped": skipped, "errors": errors}
 
 
 @router.get("/users", response_model=List[UserResponse])

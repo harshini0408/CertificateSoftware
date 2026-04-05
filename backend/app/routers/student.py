@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 
 from ..core.dependencies import require_role
 from ..models.user import User, UserRole
@@ -6,6 +9,7 @@ from ..models.student_credit import StudentCredit
 from ..models.certificate import Certificate, CertStatus
 from ..models.event import Event
 from ..models.club import Club
+from ..services.storage_service import storage_url_to_path
 
 router = APIRouter(tags=["Student"])
 
@@ -121,3 +125,48 @@ async def get_student_credits(student_id: str):
         "breakdown": list(breakdown.values()),
         "credit_history": [e.model_dump() for e in credit_doc.credit_history],
     }
+
+
+@router.get("/students/me/certificates/{cert_number}/download")
+async def download_my_certificate(
+    cert_number: str,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Download a certificate PNG that belongs to the currently logged-in student.
+
+    Verifies ownership by matching snapshot.email == current_user.email.
+    Returns the PNG as a file attachment.
+    """
+    # Find certificate by cert_number
+    cert = await Certificate.find_one(Certificate.cert_number == cert_number)
+    if not cert:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+
+    # Ownership check — the certificate must belong to this student
+    if not cert.snapshot or cert.snapshot.email.lower() != current_user.email.lower():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+
+    # Certificate must be in a downloadable state
+    if cert.status.value not in ("generated", "emailed"):
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Certificate has not been generated yet"
+        )
+
+    # Resolve the PNG file path from the stored /storage URL
+    if not cert.png_url:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate file not available")
+
+    file_path = Path(storage_url_to_path(cert.png_url))
+    if not file_path.exists():
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Certificate file not found on disk. Please contact the administrator."
+        )
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="image/png",
+        filename=f"{cert_number}.png",
+        headers={"Content-Disposition": f'attachment; filename="{cert_number}.png"'},
+    )
