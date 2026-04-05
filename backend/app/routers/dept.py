@@ -114,26 +114,50 @@ def _render_dept_certificate(
     logo_path: Optional[str],
     sig1_path: Optional[str],
     sig2_path: Optional[str],
+    field_positions: Optional[dict] = None,
 ) -> bytes:
     img = Image.open(str(template_path)).convert("RGBA")
     draw = ImageDraw.Draw(img)
     w, h = img.size
 
-    name_font = _load_font(max(28, int(w * 0.028)))
-    info_font = _load_font(max(22, int(w * 0.018)))
-    cert_font = _load_font(max(16, int(w * 0.013)))
+    def get_pos(field: str, def_x: float, def_y: float, def_size: int):
+        if not field_positions or field not in field_positions:
+            return def_x, def_y, def_size
+        pos = field_positions[field]
+        return (
+            pos.get("x_percent", def_x * 100) / 100,
+            pos.get("y_percent", def_y * 100) / 100,
+            pos.get("font_size", def_size),
+        )
 
-    draw.text((w * 0.5, h * 0.46), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm")
-    draw.text((w * 0.5, h * 0.56), f"Class: {class_name}", fill=(45, 45, 45, 255), font=info_font, anchor="mm")
-    draw.text((w * 0.5, h * 0.64), f"Contribution: {contribution}", fill=(45, 45, 45, 255), font=info_font, anchor="mm")
-    draw.text((w * 0.82, h * 0.05), cert_number, fill=(44, 61, 127, 255), font=cert_font, anchor="lm")
+    # Resolve positions and sizes
+    nx, ny, ns = get_pos("name", 0.5, 0.46, 56)
+    cx, cy, cs = get_pos("class_name", 0.5, 0.56, 44)
+    tx, ty, ts = get_pos("contribution", 0.5, 0.64, 44)
+    # cert_number is usually fixed at top right but can be made dynamic if needed
+    zx, zy, zs = get_pos("cert_number", 0.82, 0.05, 24)
 
-    def _paste_scaled(path: Optional[str], cx: float, cy: float, max_w_ratio: float, max_h_ratio: float):
+    # Increased font sizes for better visibility
+    name_font = _load_font(max(ns, int(w * (ns / 1000)))) # Roughly scaled
+    class_font = _load_font(max(cs, int(w * (cs / 1000))))
+    contrib_font = _load_font(max(ts, int(w * (ts / 1000))))
+    cert_font = _load_font(max(zs, int(w * (zs / 1000))))
+
+    draw.text((w * nx, h * ny), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm")
+    draw.text((w * cx, h * cy), f"Class: {class_name}", fill=(45, 45, 45, 255), font=class_font, anchor="mm")
+    draw.text((w * tx, h * ty), f"Contribution: {contribution}", fill=(45, 45, 45, 255), font=contrib_font, anchor="mm")
+    draw.text((w * zx, h * zy), cert_number, fill=(44, 61, 127, 255), font=cert_font, anchor="lm")
+
+    def _paste_scaled(path: Optional[str], field_id: str, def_x: float, def_y: float, max_w_ratio: float, max_h_ratio: float):
         if not path:
             return
         p = Path(path)
         if not p.exists():
             return
+        
+        # Resolve position
+        cx, cy, _ = get_pos(field_id, def_x, def_y, 0)
+
         try:
             asset = Image.open(str(p)).convert("RGBA")
             max_w = int(w * max_w_ratio)
@@ -145,9 +169,9 @@ def _render_dept_certificate(
         except Exception:
             return
 
-    _paste_scaled(logo_path, 0.12, 0.12, 0.16, 0.16)
-    _paste_scaled(sig1_path, 0.18, 0.84, 0.2, 0.1)
-    _paste_scaled(sig2_path, 0.78, 0.84, 0.2, 0.1)
+    _paste_scaled(logo_path, "logo", 0.12, 0.12, 0.16, 0.16)
+    _paste_scaled(sig1_path, "signature_primary", 0.18, 0.84, 0.2, 0.1)
+    _paste_scaled(sig2_path, "signature_secondary", 0.78, 0.84, 0.2, 0.1)
 
     out = BytesIO()
     if img.mode == "RGBA":
@@ -182,6 +206,7 @@ async def get_asset_status(
         "has_logo": bool(asset.logo_path),
         "has_signature_primary": bool(asset.signature1_path),
         "has_signature_secondary": bool(asset.signature2_path),
+        "positions_configured": asset.positions_configured,
     }
 
 
@@ -233,6 +258,11 @@ async def generate_department_certificates(
     generated = 0
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
+    # Get current field positions for rendering
+    field_positions = None
+    if asset.field_positions:
+        field_positions = { k: v.model_dump() for k, v in asset.field_positions.items() }
+
     for idx, row in enumerate(rows, start=1):
         cert_number = f"DPT-{dept_slug[:4].upper()}-{timestamp}-{idx:03d}"
         png_bytes = _render_dept_certificate(
@@ -244,6 +274,7 @@ async def generate_department_certificates(
             logo_path=asset.logo_path,
             sig1_path=asset.signature1_path,
             sig2_path=asset.signature2_path,
+            field_positions=field_positions,
         )
         png_url = save_cert_png(png_bytes, dept_slug, year, cert_number)
 
@@ -290,6 +321,61 @@ async def list_department_generated_certificates(
         }
         for c in certs
     ]
+
+
+@router.get("/dept/certificates/field-positions")
+async def get_field_positions(
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    """Retrieve saved field position configurations for the department"""
+    department = _normalize_department(current_user.department)
+    asset = await _get_or_create_dept_asset(department)
+    
+    return {
+        "field_positions": asset.field_positions,
+        "positions_configured": asset.positions_configured,
+    }
+
+
+@router.post("/dept/certificates/field-positions")
+async def configure_field_positions(
+    positions: dict,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    """Save field position configurations for department certificates"""
+    from ..models.dept_asset import DeptFieldPosition
+    
+    department = _normalize_department(current_user.department)
+    asset = await _get_or_create_dept_asset(department)
+    
+    # Validate and convert positions to DeptFieldPosition objects
+    validated_positions = {}
+    for field_name, pos_data in positions.items():
+        try:
+            # Create DeptFieldPosition from the position data
+            field_pos = DeptFieldPosition(
+                field_name=field_name,
+                x_percent=float(pos_data.get("x_percent", 0)),
+                y_percent=float(pos_data.get("y_percent", 0)),
+                font_size=int(pos_data.get("font_size", 24)),
+            )
+            validated_positions[field_name] = field_pos
+        except (ValueError, TypeError) as e:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Invalid position data for field '{field_name}': {str(e)}",
+            )
+    
+    asset.field_positions = validated_positions
+    asset.positions_configured = True
+    asset.updated_at = datetime.utcnow()
+    await asset.save()
+    
+    return {
+        "message": "Field positions configured successfully",
+        "field_positions": asset.field_positions,
+        "positions_configured": asset.positions_configured,
+    }
 
 
 @router.get("/dept/students")

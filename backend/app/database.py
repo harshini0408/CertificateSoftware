@@ -16,7 +16,11 @@ async def connect_db() -> None:
     _client = AsyncIOMotorClient(settings.mongodb_url)
     db = _client[settings.db_name]
 
-    await init_beanie(database=db, document_models=ALL_MODELS)
+    await init_beanie(
+        database=db,
+        document_models=ALL_MODELS,
+        allow_index_dropping=True
+    )
     print(f"[DB] Connected to MongoDB — database: {settings.db_name}")
 
 

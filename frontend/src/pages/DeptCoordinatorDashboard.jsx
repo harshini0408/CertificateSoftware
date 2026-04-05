@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
 import DataTable from '../components/DataTable'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { useDeptAssetStatus, useDeptCertificates, useDeptGenerateCertificates, useDeptStudents } from '../api/dept'
+import DeptFieldConfigurator from './DeptFieldConfigurator'
+import { useDeptAssetStatus, useDeptCertificates, useDeptGenerateCertificates, useDeptStudents, useGetFieldPositions } from '../api/dept'
 
 function FeatureLanding({ onSelect }) {
   return (
@@ -33,12 +34,21 @@ function FeatureLanding({ onSelect }) {
 
 function GenerateCertificatesView() {
   const { data: assetStatus } = useDeptAssetStatus()
+  const { data: savedPositions, isLoading: posLoading } = useGetFieldPositions()
   const [excelFile, setExcelFile] = useState(null)
   const [logoFile, setLogoFile] = useState(null)
   const [sig1File, setSig1File] = useState(null)
   const [sig2File, setSig2File] = useState(null)
   const [localError, setLocalError] = useState('')
   const [lastResult, setLastResult] = useState(null)
+  const [showConfigurator, setShowConfigurator] = useState(false)
+
+  // Check if first-time setup is needed
+  useEffect(() => {
+    if (assetStatus && !assetStatus.positions_configured && !posLoading) {
+      setShowConfigurator(true)
+    }
+  }, [assetStatus, posLoading])
 
   const generateMutation = useDeptGenerateCertificates()
   const { data: certs, isLoading: certsLoading } = useDeptCertificates()
@@ -72,6 +82,16 @@ function GenerateCertificatesView() {
     })
   }
 
+  // If position config needed, show configurator only
+  if (showConfigurator) {
+    return (
+      <DeptFieldConfigurator
+        onComplete={() => {
+          setShowConfigurator(false)
+        }}
+      />
+    )
+  }
   const certColumns = [
     {
       key: 'cert_number',
@@ -86,6 +106,21 @@ function GenerateCertificatesView() {
       header: 'Issued',
       render: (v) => (v ? new Date(v).toLocaleString('en-IN') : '—'),
     },
+    {
+      key: 'png_url',
+      header: 'Action',
+      render: (url) => (
+        <a
+          href={url}
+          download
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 px-3 py-1 text-sm font-medium text-white bg-navy rounded hover:bg-navy/90 transition-colors"
+        >
+          📥 Download
+        </a>
+      ),
+    },
   ]
 
   return (
@@ -95,6 +130,14 @@ function GenerateCertificatesView() {
         <p className="mt-1 text-sm text-gray-500">
           Single template with fields: Name, Class, Contribution. Credits are not awarded in this flow.
         </p>
+        {savedPositions?.positions_configured && (
+          <button
+            onClick={() => setShowConfigurator(true)}
+            className="btn-secondary mt-3"
+          >
+            ⚙️ Edit Position Configuration
+          </button>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="card p-5 space-y-4">

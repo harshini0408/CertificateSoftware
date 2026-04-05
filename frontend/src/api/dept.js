@@ -66,3 +66,56 @@ export function useDeptStudents(filters = {}) {
     },
   })
 }
+
+// Position configuration APIs
+export function useUploadCertificateTemplate() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (templateFile) => {
+      const formData = new FormData()
+      formData.append('template_file', templateFile)
+      const { data } = await axiosInstance.post('/dept/certificates/template/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: deptKeys.assets() })
+      addToast({ type: 'success', message: 'Certificate template uploaded successfully.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to upload template.' })
+    },
+  })
+}
+
+export function useConfigureFieldPositions() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (positions) => {
+      const { data } = await axiosInstance.post('/dept/certificates/field-positions', positions)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: deptKeys.assets() })
+      addToast({ type: 'success', message: 'Field positions configured successfully.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to configure positions.' })
+    },
+  })
+}
+
+export function useGetFieldPositions() {
+  return useQuery({
+    queryKey: ['dept', 'field-positions'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/dept/certificates/field-positions')
+      return data
+    },
+  })
+}

@@ -12,7 +12,7 @@ from .credit_rule import CreditRule
 from .student_credit import StudentCredit, CreditHistoryEntry
 from .image_template import ImageTemplate
 from .field_position import FieldPosition
-from .dept_asset import DeptAsset
+from .dept_asset import DeptAsset, DeptFieldPosition
 from .dept_certificate import DeptCertificate
 
 ALL_MODELS = [
@@ -48,8 +48,7 @@ __all__ = [
     "CreditRule",
     "StudentCredit", "CreditHistoryEntry",
     "ImageTemplate",
-    "FieldPosition",
-    "DeptAsset",
+    "FieldPosition",    "DeptAsset", "DeptFieldPosition",
     "DeptCertificate",
     "ALL_MODELS",
 ]

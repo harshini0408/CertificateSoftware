@@ -118,8 +118,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 _ALLOWED_ORIGINS = list({
     settings.frontend_url,       # from .env / config
     "http://localhost:5173",      # Vite default
+    "http://localhost:5174",      # Alternative Vite port
     "http://localhost:3000",      # CRA fallback
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
 })
 app.add_middleware(
     CORSMiddleware,

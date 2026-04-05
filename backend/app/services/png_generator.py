@@ -147,11 +147,9 @@ def _render_certificate_pillow(
 
     img = Image.open(str(template_path)).convert("RGBA")
     draw = ImageDraw.Draw(img)
-    img_w, img_h = img.size
-
-    # ── Text fields ───────────────────────────────────────────────────────
-    # Keep participant text close to the pre-printed body text size in templates.
-    font_size = int(img_w * 0.025)
+    img_w, img_h = img.size    # ── Text fields ───────────────────────────────────────────────────────
+    # Increased font size for better visibility (1.7x multiplier)
+    font_size = max(28, int(img_w * 0.042))  # Increased from 0.025
     font = _load_font(font_size)
     for col_header, pos in (column_positions or {}).items():
         value = str((fields or {}).get(col_header, ""))
@@ -164,7 +162,7 @@ def _render_certificate_pillow(
     # ── Certificate Number (default placement near "CERTIFICATE NO:") ─────
     # Printed on every image-template certificate, even if not manually mapped.
     if cert_number:
-        cert_font = _load_font(int(img_w * 0.016))
+        cert_font = _load_font(max(20, int(img_w * 0.027)))  # Increased from 0.016
         cert_x = int(img_w * 0.83)
         cert_y = int(img_h * 0.048)
         draw.text((cert_x, cert_y), cert_number, font=cert_font, fill=(44, 61, 127, 255), anchor="lm")
