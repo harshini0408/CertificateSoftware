@@ -83,6 +83,8 @@ class Settings(BaseSettings):
         """Create storage directories if they don't exist."""
         self.certs_dir.mkdir(parents=True, exist_ok=True)
         self.assets_dir.mkdir(parents=True, exist_ok=True)
+        (self.storage_root / "dept_templates").mkdir(parents=True, exist_ok=True)
+        (self.storage_root / "tmp").mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache()

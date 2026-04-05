@@ -100,8 +100,12 @@ def _load_font(size: int):
     try:
         if font_path.exists():
             return ImageFont.truetype(str(font_path), size)
-    except Exception:
-        pass
+        else:
+            import logging
+            logging.getLogger(__name__).warning("Font missing: %s. Using PIL default.", font_path)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Failed to load font %s: %s", font_path, exc)
     return ImageFont.load_default()
 
 
@@ -130,15 +134,15 @@ def _render_dept_certificate(
             pos.get("font_size", def_size),
         )
 
-    # Resolve positions and sizes
-    nx, ny, ns = get_pos("name", 0.5, 0.46, 56)
-    cx, cy, cs = get_pos("class_name", 0.5, 0.56, 44)
-    tx, ty, ts = get_pos("contribution", 0.5, 0.64, 44)
+    # Resolve positions and sizes (doubled base sizes)
+    nx, ny, ns = get_pos("name", 0.5, 0.46, 112)
+    cx, cy, cs = get_pos("class_name", 0.5, 0.56, 88)
+    tx, ty, ts = get_pos("contribution", 0.5, 0.64, 88)
     # cert_number is usually fixed at top right but can be made dynamic if needed
-    zx, zy, zs = get_pos("cert_number", 0.82, 0.05, 24)
+    zx, zy, zs = get_pos("cert_number", 0.82, 0.05, 48)
 
-    # Increased font sizes for better visibility
-    name_font = _load_font(max(ns, int(w * (ns / 1000)))) # Roughly scaled
+    # Scaled font sizes
+    name_font = _load_font(max(ns, int(w * (ns / 1000)))) 
     class_font = _load_font(max(cs, int(w * (cs / 1000))))
     contrib_font = _load_font(max(ts, int(w * (ts / 1000))))
     cert_font = _load_font(max(zs, int(w * (zs / 1000))))
@@ -201,12 +205,84 @@ async def get_asset_status(
     department = _normalize_department(current_user.department)
     asset = await _get_or_create_dept_asset(department)
 
+    template_url = asset.certificate_template_url
+    if not template_url:
+        try:
+            fallback_path = _pick_single_template()
+            template_url = f"/static/certificate_templates/{fallback_path.name}"
+        except Exception:
+            template_url = None
+
     return {
         "department": department,
         "has_logo": bool(asset.logo_path),
         "has_signature_primary": bool(asset.signature1_path),
         "has_signature_secondary": bool(asset.signature2_path),
+        "has_template": bool(asset.certificate_template_path),
+        "template_url": template_url,
         "positions_configured": asset.positions_configured,
+    }
+
+
+@router.post("/dept/certificates/template/upload")
+async def upload_certificate_template(
+    template_file: UploadFile = File(...),
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    """Upload a custom PNG/JPEG certificate template for this department.
+
+    Saves to storage/dept_templates/{dept_slug}/template.png and persists
+    the path on DeptAsset so subsequent generation uses this template instead
+    of the global system template.
+    """
+    # Validate file type
+    content_type = (template_file.content_type or "").lower()
+    filename = (template_file.filename or "").lower()
+    if not (
+        content_type in ("image/png", "image/jpeg", "image/jpg")
+        or filename.endswith((".png", ".jpg", ".jpeg"))
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Only PNG or JPEG files are accepted for certificate templates",
+        )
+
+    department = _normalize_department(current_user.department)
+    dept_slug = _slugify(department)
+
+    # Determine storage path
+    from ..config import get_settings
+    settings = get_settings()
+    template_dir = Path(settings.storage_root) / "dept_templates" / dept_slug
+    template_dir.mkdir(parents=True, exist_ok=True)
+    template_path = template_dir / "template.png"
+
+    # Read, validate it opens as an image, and save
+    file_bytes = await template_file.read()
+    try:
+        img = Image.open(BytesIO(file_bytes))
+        img.verify()  # fast check — raises if not a valid image
+    except Exception:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Uploaded file could not be opened as an image. Ensure it is a valid PNG or JPEG.",
+        )
+
+    # Re-open after verify (verify() exhausts the file pointer)
+    img = Image.open(BytesIO(file_bytes)).convert("RGBA")
+    img.save(str(template_path), format="PNG")
+
+    # Persist path on DeptAsset
+    asset = await _get_or_create_dept_asset(department)
+    asset.certificate_template_path = str(template_path)
+    asset.certificate_template_url = f"/storage/dept_templates/{dept_slug}/template.png"
+    asset.updated_at = datetime.utcnow()
+    await asset.save()
+
+    return {
+        "message": "Certificate template uploaded successfully",
+        "template_url": asset.certificate_template_url,
+        "department": department,
     }
 
 
@@ -253,7 +329,13 @@ async def generate_department_certificates(
 
     excel_bytes = await excel_file.read()
     rows = _parse_dept_excel(excel_bytes)
-    template_path = _pick_single_template()
+
+    # Prefer the department's custom template; fall back to the global system template.
+    if asset.certificate_template_path and Path(asset.certificate_template_path).exists():
+        template_path = Path(asset.certificate_template_path)
+    else:
+        template_path = _pick_single_template()
+
 
     generated = 0
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
@@ -321,6 +403,50 @@ async def list_department_generated_certificates(
         }
         for c in certs
     ]
+
+
+@router.get("/dept/certificates/download-all")
+async def download_all_department_certificates(
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    """Zips all generated certificate PNGs for the user's department."""
+    from zipfile import ZipFile, ZIP_DEFLATED
+    import io
+    from ..services.storage_service import storage_url_to_path
+    
+    department = _normalize_department(current_user.department)
+    
+    certs = await DeptCertificate.find(
+        DeptCertificate.department == department
+    ).to_list()
+    
+    if not certs:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No certificates found in your department to download")
+        
+    buf = io.BytesIO()
+    added_count = 0
+    with ZipFile(buf, "w", ZIP_DEFLATED) as zf:
+        for c in certs:
+            if not c.png_url:
+                continue
+            local_path = storage_url_to_path(c.png_url)
+            if local_path and Path(local_path).exists():
+                zf.write(local_path, f"{c.cert_number}.png")
+                added_count += 1
+                
+    if added_count == 0:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, 
+            "No certificate PNG files found on disk for this department"
+        )
+        
+    buf.seek(0)
+    dept_slug = _slugify(department)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{dept_slug}_certificates.zip"'}
+    )
 
 
 @router.get("/dept/certificates/field-positions")

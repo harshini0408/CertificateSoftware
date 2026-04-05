@@ -19,7 +19,6 @@ import {
   useAdminClubs,
   useAdminCertificates,
   useRevokeCertificate,
-  useAdminScanLogs,
   useCreditRules,
   useUpdateCreditRules
 } from '../api/admin'
@@ -694,7 +693,6 @@ export default function AdminDashboard() {
             {activeTab === 'users' && <UsersTab />}
             {activeTab === 'certificates' && <CertificatesTab />}
             {activeTab === 'credit-rules' && <CreditRulesTab />}
-            {activeTab === 'scan-logs' && <ScanLogsTab />}
           </div>
         </main>
       </div>
@@ -913,77 +911,6 @@ function CreditRulesTab() {
           {updateRules.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save All Changes'}
         </button>
       </div>
-    </div>
-  )
-}
-
-// ── SCAN LOGS TAB ─────────────────────────────────────────────────────────
-function ScanLogsTab() {
-  const [search, setSearch] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [page, setPage] = useState(1)
-
-  const filters = useMemo(() => {
-    const f = {}
-    if (search) f.cert_number = search
-    if (dateFrom) f.date_from = dateFrom
-    if (dateTo) f.date_to = dateTo
-    return f
-  }, [search, dateFrom, dateTo])
-
-  const { data, isLoading } = useAdminScanLogs(filters, page)
-
-  const logs = data?.items ?? []
-  const total = data?.total ?? 0
-  const pages = data?.pages ?? 1
-
-  const columns = [
-    { key: 'cert_number', header: 'Certificate No.', searchKey: true,
-      render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v}</span> },
-    { key: 'scanned_at', header: 'Scanned At',
-      render: (v) => v ? new Date(v).toLocaleString('en-IN', {
-        dateStyle: 'medium', timeStyle: 'short'
-      }) : '—' },
-    { key: 'ip_address', header: 'IP Address',
-      render: (v) => <span className="text-xs text-gray-500 font-mono">{v ?? '—'}</span> },
-    { key: 'user_agent', header: 'Browser',
-      render: (v) => {
-        if (!v) return '—'
-        const short = v.length > 60 ? v.slice(0, 60) + '…' : v
-        return <span className="text-xs text-gray-500" title={v}>{short}</span>
-      }},
-  ]
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Scan Logs</h1>
-        <span className="text-sm text-gray-400">{total} total scans</span>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <input type="search" placeholder="Search by certificate number…" value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="form-input w-64" />
-        <div className="flex items-center gap-2">
-          <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} className="form-input w-36" title="Date From" />
-          <span className="text-gray-400">—</span>
-          <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} className="form-input w-36" title="Date To" />
-        </div>
-      </div>
-      <DataTable columns={columns} data={logs} isLoading={isLoading}
-        emptyMessage="No scans recorded yet." />
-
-      {pages > 0 && (
-        <div className="flex items-center justify-between py-2">
-          <span className="text-sm text-gray-500">
-            Showing {(page - 1) * 50 + (logs.length ? 1 : 0)}–{(page - 1) * 50 + logs.length} of {total} scans
-          </span>
-          <div className="flex gap-2">
-            <button className="btn-secondary text-sm py-1.5" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</button>
-            <button className="btn-secondary text-sm py-1.5" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next</button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

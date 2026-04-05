@@ -4,7 +4,8 @@ import Sidebar from '../components/Sidebar'
 import DataTable from '../components/DataTable'
 import LoadingSpinner from '../components/LoadingSpinner'
 import DeptFieldConfigurator from './DeptFieldConfigurator'
-import { useDeptAssetStatus, useDeptCertificates, useDeptGenerateCertificates, useDeptStudents, useGetFieldPositions } from '../api/dept'
+import { useDeptAssetStatus, useDeptCertificates, useDeptGenerateCertificates, useDeptStudents, useGetFieldPositions, downloadAllDeptCertificates } from '../api/dept'
+import { useToastStore } from '../store/uiStore'
 
 function FeatureLanding({ onSelect }) {
   return (
@@ -42,6 +43,8 @@ function GenerateCertificatesView() {
   const [localError, setLocalError] = useState('')
   const [lastResult, setLastResult] = useState(null)
   const [showConfigurator, setShowConfigurator] = useState(false)
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false)
+  const addToast = useToastStore((s) => s.addToast)
 
   // Check if first-time setup is needed
   useEffect(() => {
@@ -80,6 +83,24 @@ function GenerateCertificatesView() {
         setExcelFile(null)
       },
     })
+  }
+
+  const handleDownloadAll = async () => {
+    setIsDownloadingAll(true)
+    try {
+      const blob = await downloadAllDeptCertificates()
+      const url = window.URL.createObjectURL(new Blob([blob]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', 'certificates.zip')
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode.removeChild(link)
+    } catch (err) {
+      addToast({ type: 'error', message: 'Failed to download certificates ZIP archive.' })
+    } finally {
+      setIsDownloadingAll(false)
+    }
   }
 
   // If position config needed, show configurator only
@@ -187,7 +208,18 @@ function GenerateCertificatesView() {
       )}
 
       <div>
-        <h3 className="section-title mb-3">Recently Generated Department Certificates</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="section-title mb-0">Recently Generated Department Certificates</h3>
+          {certs?.length > 0 && (
+            <button
+              onClick={handleDownloadAll}
+              disabled={isDownloadingAll}
+              className="btn-secondary"
+            >
+              {isDownloadingAll ? <LoadingSpinner size="sm" label="Zipping..." /> : '📦 Download All as ZIP'}
+            </button>
+          )}
+        </div>
         <DataTable
           columns={certColumns}
           data={certs || []}

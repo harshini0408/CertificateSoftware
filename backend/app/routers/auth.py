@@ -6,7 +6,7 @@ from jose import JWTError
 from ..core.dependencies import get_current_user
 from ..core.security import decode_token, verify_password, hash_password
 from ..models.user import User
-from ..schemas.auth import LoginRequest, LoginResponse, PasswordChangeRequest, TokenResponse
+from ..schemas.auth import LoginRequest, LoginResponse, MeResponse, PasswordChangeRequest, TokenResponse
 from ..services.auth_service import (
     authenticate_user,
     blacklist_token,
@@ -101,3 +101,21 @@ async def change_password(
     current_user.password_hash = hash_password(body.new_password)
     await current_user.save()
     return TokenResponse(message="Password updated")
+
+
+@router.get("/me", response_model=MeResponse)
+async def me(current_user: User = Depends(get_current_user)):
+    """Return the currently authenticated user's profile from the access-token cookie.
+
+    Called by the frontend useMe() hook to hydrate the auth store on page reload
+    when sessionStorage has been cleared but the httpOnly cookie is still valid.
+    """
+    from ..services.auth_service import build_redirect
+    return MeResponse(
+        role=current_user.role.value,
+        name=current_user.name,
+        redirect_to=build_redirect(current_user),
+        club_id=str(current_user.club_id) if current_user.club_id else None,
+        event_id=str(current_user.event_id) if current_user.event_id else None,
+        department=current_user.department,
+    )

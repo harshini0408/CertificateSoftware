@@ -1,3 +1,15 @@
+/**
+ * ⚠️  DEPRECATED — NOT ROUTED
+ *
+ * This page component is no longer reachable via the application router (App.jsx).
+ * It was superseded by:
+ *   - TemplateSelector.jsx  — the current image-based template selection flow
+ *
+ * This file is preserved for reference / possible future reuse.
+ * It implements an HTML-based template builder with a live A4 preview panel.
+ * If this file is no longer needed, it can be safely deleted.
+ */
+
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'

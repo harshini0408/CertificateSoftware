@@ -34,9 +34,11 @@ def _load_font(size: int):
         from PIL import ImageFont
         if _DEFAULT_FONT.exists():
             return ImageFont.truetype(str(_DEFAULT_FONT), size)
-        # Try system font search path as last resort
+        else:
+            logger.warning("Font missing: %s. Using default PIL font (very small fallback).", _DEFAULT_FONT)
         return ImageFont.load_default()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Error loading font %s: %s", _DEFAULT_FONT, exc)
         from PIL import ImageFont
         return ImageFont.load_default()
 
@@ -148,8 +150,8 @@ def _render_certificate_pillow(
     img = Image.open(str(template_path)).convert("RGBA")
     draw = ImageDraw.Draw(img)
     img_w, img_h = img.size    # ── Text fields ───────────────────────────────────────────────────────
-    # Increased font size for better visibility (1.7x multiplier)
-    font_size = max(28, int(img_w * 0.042))  # Increased from 0.025
+    # Increased font size for better visibility (doubled multiplier)
+    font_size = max(56, int(img_w * 0.084))
     font = _load_font(font_size)
     for col_header, pos in (column_positions or {}).items():
         value = str((fields or {}).get(col_header, ""))
@@ -162,7 +164,7 @@ def _render_certificate_pillow(
     # ── Certificate Number (default placement near "CERTIFICATE NO:") ─────
     # Printed on every image-template certificate, even if not manually mapped.
     if cert_number:
-        cert_font = _load_font(max(20, int(img_w * 0.027)))  # Increased from 0.016
+        cert_font = _load_font(max(40, int(img_w * 0.054)))
         cert_x = int(img_w * 0.83)
         cert_y = int(img_h * 0.048)
         draw.text((cert_x, cert_y), cert_number, font=cert_font, fill=(44, 61, 127, 255), anchor="lm")

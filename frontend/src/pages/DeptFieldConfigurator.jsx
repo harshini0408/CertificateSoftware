@@ -12,8 +12,14 @@ import { CSS } from '@dnd-kit/utilities'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useDeptAssetStatus, useConfigureFieldPositions, useGetFieldPositions } from '../api/dept'
 import { useToastStore } from '../store/uiStore'
+import { BACKEND_URL } from '../utils/axiosInstance'
 
 // ── Constants ────────────────────────────────────────────────────────────────
+function imgSrc(url) {
+  if (!url || url.trim() === '') return null
+  if (url.startsWith('http') || url.startsWith('blob:')) return url
+  return BACKEND_URL + url
+}
 const CANVAS_W = 2480 // Standard A4 at 300dpi (approximately, for scaling)
 const CANVAS_H = 3508
 
@@ -95,7 +101,7 @@ function DraggableSlot({ id, label, x, y, type, scale, isActive, fontSize }) {
   )
 }
 
-function DropZone({ slots, onMove, containerRef, canvasScale }) {
+function DropZone({ slots, onMove, containerRef, canvasScale, templateUrl }) {
   const handleDragEnd = (event) => {
     const { active, delta } = event
     if (!containerRef.current) return
@@ -130,10 +136,17 @@ function DropZone({ slots, onMove, containerRef, canvasScale }) {
           maxWidth: '600px',
         }}
       >
-        {/* Grid Background */}
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
-             style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }} 
-        />
+        {templateUrl ? (
+          <img 
+            src={imgSrc(templateUrl)} 
+            alt="Certificate Preview" 
+            className="absolute inset-0 w-full h-full object-cover select-none pointer-events-none opacity-80"
+          />
+        ) : (
+          <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
+               style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }} 
+          />
+        )}
 
         {/* Center line */}
         <div className="absolute left-1/2 top-0 bottom-0 w-px bg-navy/5 pointer-events-none" />
@@ -307,6 +320,7 @@ export default function DeptFieldConfigurator({ onComplete }) {
           onMove={handleMove} 
           containerRef={containerRef} 
           canvasScale={canvasScale} 
+          templateUrl={assetStatus?.template_url}
         />
       </div>
     </div>

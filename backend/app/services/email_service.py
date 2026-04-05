@@ -43,6 +43,26 @@ def get_daily_sent_count() -> int:
     return _daily_count
 
 
+async def get_daily_sent_count_db() -> int:
+    """Count emails actually sent today by querying EmailLog.
+
+    This is the authoritative count — it survives server restarts.
+    Use max(in-memory, db) so the cap is never exceeded even after a crash.
+    """
+    from datetime import datetime
+    from ..models.email_log import EmailLog, EmailStatus
+
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    try:
+        db_count = await EmailLog.find(
+            EmailLog.status == EmailStatus.SENT,
+            EmailLog.sent_at >= today_start,
+        ).count()
+        return db_count
+    except Exception:
+        return 0
+
+
 def _increment_counter() -> None:
     global _daily_count
     _reset_counter_if_new_day()
@@ -204,11 +224,21 @@ async def send_certificate_email(
     """Send a certificate email with the PNG attached.
 
     Returns True on success, False on failure.
-    Daily cap is enforced — returns False if limit reached.
+    Daily cap is enforced using the MAX of the in-memory counter and the
+    DB-backed count so the limit holds even after server restarts.
     """
+    global _daily_count
     _reset_counter_if_new_day()
 
-    if _daily_count >= settings.email_daily_limit:
+    # Use the higher of in-memory vs DB count to survive restarts
+    in_mem = _daily_count
+    db_count = await get_daily_sent_count_db()
+    effective_count = max(in_mem, db_count)
+    # Sync in-memory if DB is ahead (post-restart)
+    if db_count > _daily_count:
+        _daily_count = db_count
+
+    if effective_count >= settings.email_daily_limit:
         logger.warning("Daily email limit (%d) reached", settings.email_daily_limit)
         return False
 

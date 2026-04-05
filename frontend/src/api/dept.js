@@ -119,3 +119,10 @@ export function useGetFieldPositions() {
     },
   })
 }
+
+export async function downloadAllDeptCertificates() {
+  const response = await axiosInstance.get('/dept/certificates/download-all', {
+    responseType: 'blob',
+  })
+  return response.data
+}

@@ -157,9 +157,10 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
   // Preflight checks (derived from event prop or certs meta)
   const hasParticipants = (certs?.length ?? 0) > 0 || (event?.participant_count ?? 0) > 0
   const hasAssets       = !!(event?.assets?.logo_url)
-  const hasTemplates = Array.isArray(fieldPositions)
-    ? fieldPositions.some((fp) => !!fp.template_filename)
-    : !!(event?.template_map && Object.keys(event.template_map).length > 0)
+  const certTypesFound = Array.from(new Set((participants ?? []).map((p) => p.cert_type).filter(Boolean)))
+  const hasTemplates = certTypesFound.length > 0 && Array.isArray(fieldPositions)
+    ? certTypesFound.every((ct) => fieldPositions.some((fp) => fp.cert_type === ct && !!fp.template_filename && fp.confirmed))
+    : false
   const hasMapping      = !!(event?.mapping_confirmed)
   const allReady        = hasParticipants && hasAssets && hasTemplates && hasMapping
 

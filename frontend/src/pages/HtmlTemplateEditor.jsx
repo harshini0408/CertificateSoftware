@@ -1,4 +1,20 @@
 /**
+ * ⚠️  DEPRECATED — NOT ROUTED
+ *
+ * This page component is no longer reachable via the application router (App.jsx).
+ * It was superseded by:
+ *   - TemplateSelector.jsx   — browse & select image-based PNG templates
+ *   - TemplateEditorModal    — inline visual editor inside EventDetail
+ *
+ * This file is preserved for reference / possible future reuse.
+ * DO NOT add a <Route> for this page without reviewing whether its
+ * API hooks (useTemplateHtml, useUpdateTemplateHtml, useForkTemplate)
+ * still match the current backend.
+ *
+ * If this file is no longer needed, it can be safely deleted.
+ *
+ * Original docs:
+ * ──────────────────────────────────────────────────────────────────────────────
  * HtmlTemplateEditor.jsx
  *
  * A drag-and-drop HTML certificate editor.
@@ -11,21 +27,6 @@
  *  │ Sidebar  │  A4 Canvas (drag elements freely)    │ Props Panel  │
  *  │          │                                       │              │
  *  └──────────┴──────────────────────────────────────┴──────────────┘
- *
- * How it works
- * ─────────────
- *  • Elements are stored as a JSON array in React state (mirrors the
- *    backend `FieldSlot` / `StaticElement` model).
- *  • Each element is an absolutely-positioned <div> on a scaled-down
- *    A4 canvas (2480 × 3508 reference space → fits the viewport).
- *  • @dnd-kit/core handles drag-and-drop.  `onDragEnd` calculates the
- *    delta and writes back to state.
- *  • Clicking an element selects it (blue ring) and populates the
- *    right-side Properties Panel with live inputs.
- *  • "Add" toolbar adds static text or dynamic field placeholders.
- *  • "Save" serialises state back to `field_slots` and calls
- *    PATCH /templates/{id}/html  via the existing `useUpdateTemplateHtml`
- *    hook (for forked/editable templates) or just stores locally.
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo, useId } from 'react'

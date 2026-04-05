@@ -139,14 +139,16 @@ export function useAllCerts(filters = {}) {
   })
 }
 
-// useRevokeCert — admin use
+// useRevokeCert — admin use (thin wrapper kept for event-detail page compatibility)
+// NOTE: prefer useRevokeCertificate from admin.js for new code.
 export function useRevokeCert() {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: (certId) =>
-      axiosInstance.post(`/admin/certificates/${certId}/revoke`),
+    // Backend: PATCH /admin/certificates/{cert_number}/revoke
+    mutationFn: (certNumber) =>
+      axiosInstance.patch(`/admin/certificates/${certNumber}/revoke`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'certificates'] })
       addToast({ type: 'success', message: 'Certificate revoked.' })

@@ -92,7 +92,6 @@ function useNavItems() {
         { to: '/admin?tab=users',                icon: icons.users,       label: 'Users' },
         { to: '/admin?tab=certificates',         icon: icons.certificate, label: 'Certificates' },
         { to: '/admin?tab=credit-rules',         icon: icons.creditCard,  label: 'Credit Rules' },
-        { to: '/admin?tab=scan-logs',            icon: icons.scan,        label: 'Scan Logs' },
       ]
 
     case 'club_coordinator':
