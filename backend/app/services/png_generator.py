@@ -149,17 +149,19 @@ def _render_certificate_pillow(
 
     img = Image.open(str(template_path)).convert("RGBA")
     draw = ImageDraw.Draw(img)
-    img_w, img_h = img.size    # ── Text fields ───────────────────────────────────────────────────────
-    # Increased font size for better visibility (doubled multiplier)
-    font_size = max(56, int(img_w * 0.084))
-    font = _load_font(font_size)
+    img_w, img_h = img.size
+
+    # ── Text fields ───────────────────────────────────────────────────────
+    # Use per-field font size when configured; default to 36px.
     for col_header, pos in (column_positions or {}).items():
         value = str((fields or {}).get(col_header, ""))
         if not value:
             continue
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h
-        draw.text((x, y), value, font=font, fill=(30, 30, 30, 255), anchor="mm")
+        field_font_size = max(12, int(pos.get("font_size", 36)))
+        field_font = _load_font(field_font_size)
+        draw.text((x, y), value, font=field_font, fill=(30, 30, 30, 255), anchor="mm")
 
     # ── Certificate Number (default placement near "CERTIFICATE NO:") ─────
     # Printed on every image-template certificate, even if not manually mapped.

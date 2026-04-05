@@ -132,6 +132,12 @@ export function useMe() {
       setAuth(data)
       return data
     },
+    onError: () => {
+      // Session cookie expired or server error — silently clear auth.
+      // ProtectedRoute will handle redirect to /login.
+      const { clearAuth } = useAuthStore.getState()
+      clearAuth()
+    },
     enabled: !isAuthenticated,   // only fetch if not already hydrated
     retry: false,
   })

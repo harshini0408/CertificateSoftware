@@ -23,14 +23,15 @@ let isRefreshing = false
 let failedQueue = []
 
 const processQueue = (error) => {
-  failedQueue.forEach((prom) => {
+  const queue = failedQueue
+  failedQueue = []
+  queue.forEach((prom) => {
     if (error) {
       prom.reject(error)
     } else {
       prom.resolve()
     }
   })
-  failedQueue = []
 }
 
 axiosInstance.interceptors.response.use(

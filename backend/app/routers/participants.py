@@ -104,10 +104,9 @@ async def upload_participants(
     created = 0
     skipped = 0
     for row in rows:
-        email = row.get("Email", "").strip().lower()
+        email = row.pop("_email", "").strip().lower()
         # Pop the internal cert_type key (not a real column)
         cert_type = row.pop("_cert_type", "participant")
-        row.pop("Email", None)
 
         existing = await Participant.find_one(
             Participant.event_id == event_id, Participant.email == email)

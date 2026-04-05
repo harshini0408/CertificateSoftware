@@ -59,13 +59,16 @@ const icons = {
 }
 
 // ── Nav item component ────────────────────────────────────────────────────────
-function NavItem({ to, icon, label, end = false }) {
+function NavItem({ to, icon, label, end = false, sidebarOpen }) {
   return (
     <NavLink
       to={to}
       end={end}
+      title={label}
       className={({ isActive }) =>
-        `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-150 ${
+        `flex items-center rounded-lg py-2.5 text-sm font-medium transition-colors duration-150 ${
+          sidebarOpen ? 'justify-start gap-3 px-3' : 'justify-center px-0'
+        } ${
           isActive
             ? 'bg-navy text-white shadow-sm'
             : 'text-gray-600 hover:bg-navy/8 hover:text-navy'
@@ -73,7 +76,7 @@ function NavItem({ to, icon, label, end = false }) {
       }
     >
       {icon}
-      <span className="truncate">{label}</span>
+      {sidebarOpen && <span className="truncate">{label}</span>}
     </NavLink>
   )
 }
@@ -140,10 +143,12 @@ export default function Sidebar() {
           transition-all duration-300 ease-in-out
           lg:sticky lg:shadow-none min-h-0
           ${sidebarOpen ? 'w-60 translate-x-0 border-r' : 'w-0 -translate-x-full border-none px-0'}
+          lg:translate-x-0 lg:border-r
+          ${sidebarOpen ? 'lg:w-60' : 'lg:w-14'}
         `}
       >
         {/* Nav links */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 scrollbar-hide">
+        <nav className={`flex-1 overflow-y-auto py-4 space-y-1 scrollbar-hide ${sidebarOpen ? 'px-3' : 'px-2'}`}>
           {navItems.map((item) => (
             <NavItem
               key={item.to}
@@ -151,18 +156,21 @@ export default function Sidebar() {
               icon={item.icon}
               label={item.label}
               end={item.end}
+              sidebarOpen={sidebarOpen}
             />
           ))}
         </nav>
 
         {/* Footer brand */}
-        <div className="border-t border-gray-100 px-4 py-3">
-          <p className="text-xs text-gray-400 leading-tight">
-            PSG College of Technology
-            <br />
-            <span className="font-medium text-navy/60">iTech Certificate Platform</span>
-          </p>
-        </div>
+        {sidebarOpen && (
+          <div className="border-t border-gray-100 px-4 py-3">
+            <p className="text-xs text-gray-400 leading-tight">
+              PSG iTech
+              <br />
+              <span className="font-medium text-navy/60">Certificate Platform</span>
+            </p>
+          </div>
+        )}
       </aside>
     </>
   )

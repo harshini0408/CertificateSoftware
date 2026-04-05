@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from PIL import Image, ImageDraw, ImageFont
+from pydantic import BaseModel
 
 from ..core.dependencies import require_role
 from ..models.user import User, UserRole
@@ -19,6 +20,10 @@ from ..services.signature_service import process_signature, save_logo
 from ..services.storage_service import save_cert_png
 
 router = APIRouter(tags=["Department"])
+
+
+class DeptBatchDownloadRequest(BaseModel):
+    cert_numbers: list[str]
 
 
 def _slugify(value: str) -> str:
@@ -134,18 +139,17 @@ def _render_dept_certificate(
             pos.get("font_size", def_size),
         )
 
-    # Resolve positions and sizes (doubled base sizes)
-    nx, ny, ns = get_pos("name", 0.5, 0.46, 112)
-    cx, cy, cs = get_pos("class_name", 0.5, 0.56, 88)
-    tx, ty, ts = get_pos("contribution", 0.5, 0.64, 88)
+    # Resolve positions and sizes (pixel-based defaults).
+    nx, ny, ns = get_pos("name", 0.5, 0.46, 56)
+    cx, cy, cs = get_pos("class_name", 0.5, 0.56, 44)
+    tx, ty, ts = get_pos("contribution", 0.5, 0.64, 44)
     # cert_number is usually fixed at top right but can be made dynamic if needed
-    zx, zy, zs = get_pos("cert_number", 0.82, 0.05, 48)
+    zx, zy, zs = get_pos("cert_number", 0.82, 0.05, 24)
 
-    # Scaled font sizes
-    name_font = _load_font(max(ns, int(w * (ns / 1000)))) 
-    class_font = _load_font(max(cs, int(w * (cs / 1000))))
-    contrib_font = _load_font(max(ts, int(w * (ts / 1000))))
-    cert_font = _load_font(max(zs, int(w * (zs / 1000))))
+    name_font = _load_font(max(1, int(ns)))
+    class_font = _load_font(max(1, int(cs)))
+    contrib_font = _load_font(max(1, int(ts)))
+    cert_font = _load_font(max(1, int(zs)))
 
     draw.text((w * nx, h * ny), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm")
     draw.text((w * cx, h * cy), f"Class: {class_name}", fill=(45, 45, 45, 255), font=class_font, anchor="mm")
@@ -338,6 +342,7 @@ async def generate_department_certificates(
 
 
     generated = 0
+    cert_numbers: list[str] = []
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
     # Get current field positions for rendering
@@ -372,12 +377,62 @@ async def generate_department_certificates(
         )
         await doc.insert()
         generated += 1
+        cert_numbers.append(cert_number)
 
     return {
         "generated": generated,
         "total_rows": len(rows),
         "message": f"Generated {generated} department certificate(s)",
+        "cert_numbers": cert_numbers,
     }
+
+
+@router.post("/dept/certificates/download-zip")
+async def download_department_certificates_zip(
+    body: DeptBatchDownloadRequest,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    """Zip selected certificate PNGs for the current generation batch."""
+    if not body.cert_numbers:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "cert_numbers is required")
+
+    from zipfile import ZipFile, ZIP_DEFLATED
+    import io
+    from ..services.storage_service import storage_url_to_path
+
+    department = _normalize_department(current_user.department)
+    certs = await DeptCertificate.find(
+        {
+            "department": department,
+            "cert_number": {"$in": body.cert_numbers},
+        }
+    ).to_list()
+
+    if not certs:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No certificates found for the requested batch")
+
+    cert_map = {c.cert_number: c for c in certs}
+    buf = io.BytesIO()
+    added_count = 0
+    with ZipFile(buf, "w", ZIP_DEFLATED) as zf:
+        for cert_number in body.cert_numbers:
+            cert = cert_map.get(cert_number)
+            if not cert or not cert.png_url:
+                continue
+            local_path = storage_url_to_path(cert.png_url)
+            if local_path and Path(local_path).exists():
+                zf.write(local_path, f"{cert.cert_number}.png")
+                added_count += 1
+
+    if added_count == 0:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No certificate PNG files found for this batch")
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=dept_certs_batch.zip"},
+    )
 
 
 @router.get("/dept/certificates")

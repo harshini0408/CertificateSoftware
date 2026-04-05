@@ -142,10 +142,38 @@ function MarkerPin({ col, pos, color, isActive, onClick }) {
 
 function PlaceFieldsStep({ certType, template, columns, existingPositions, onBack, onNext }) {
   const imgRef = useRef(null)
-  const [positions, setPositions] = useState(existingPositions ?? {})
+  const [positions, setPositions] = useState(() => {
+    const initial = {}
+    Object.entries(existingPositions ?? {}).forEach(([col, pos]) => {
+      const parsedSize = Number(pos?.font_size)
+      initial[col] = {
+        x_percent: pos?.x_percent,
+        y_percent: pos?.y_percent,
+        font_size: Number.isFinite(parsedSize) ? parsedSize : 36,
+      }
+    })
+    return initial
+  })
+  const [fontSizes, setFontSizes] = useState(() => {
+    const initial = {}
+    columns.forEach((col) => {
+      const parsedSize = Number(existingPositions?.[col]?.font_size)
+      initial[col] = Number.isFinite(parsedSize) ? parsedSize : 36
+    })
+    return initial
+  })
   const [activeField, setActiveField] = useState(null)
   const [imgW, setImgW] = useState(0)
   const colorMap = Object.fromEntries(columns.map((c,i) => [c, MARKER_COLORS[i % MARKER_COLORS.length]]))
+
+  const getFontSize = (col) => {
+    const fs = Number(fontSizes[col])
+    return Number.isFinite(fs) ? fs : 36
+  }
+
+  const setFontSize = (col, size) => {
+    setFontSizes((prev) => ({ ...prev, [col]: size }))
+  }
 
   useEffect(() => {
     const upd = () => { if (imgRef.current) setImgW(imgRef.current.getBoundingClientRect().width) }
@@ -157,10 +185,17 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
     const rect = e.currentTarget.getBoundingClientRect()
     const xp = ((e.clientX - rect.left) / rect.width) * 100
     const yp = ((e.clientY - rect.top) / rect.height) * 100
-    setPositions(prev => ({ ...prev, [activeField]: { x_percent: xp, y_percent: yp } }))
+    setPositions(prev => ({
+      ...prev,
+      [activeField]: {
+        x_percent: xp,
+        y_percent: yp,
+        font_size: getFontSize(activeField),
+      },
+    }))
     const next = columns.find(c => c !== activeField && !positions[c])
     setActiveField(next ?? null)
-  }, [activeField, columns, positions])
+  }, [activeField, columns, positions, fontSizes])
 
   const allPlaced = columns.length > 0 && columns.every(c => positions[c])
   const placed = columns.filter(c => positions[c]).length
@@ -197,13 +232,33 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
                 const isPlaced = !!positions[col], isActive = activeField === col
                 const color = colorMap[col] ?? '#6b7280'
                 return (
-                  <button key={col} onClick={() => setActiveField(p => p === col ? null : col)}
-                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-all w-full
-                      ${isActive ? 'border-indigo-400 bg-indigo-50 font-semibold text-indigo-700' : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'}`}>
-                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: isPlaced ? color : '#d1d5db' }} />
-                    <span className="truncate flex-1">{col}</span>
-                    {isPlaced && <svg className="h-3 w-3 shrink-0" style={{ color }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                  </button>
+                  <div
+                    key={col}
+                    className={`rounded-lg border px-2 py-2 transition-all ${
+                      isActive
+                        ? 'border-indigo-400 bg-indigo-50'
+                        : 'border-gray-200 bg-white hover:bg-gray-50'
+                    }`}
+                  >
+                    <button onClick={() => setActiveField(p => p === col ? null : col)}
+                      className={`flex items-center gap-2 text-left text-xs w-full ${isActive ? 'font-semibold text-indigo-700' : 'text-gray-600'}`}>
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: isPlaced ? color : '#d1d5db' }} />
+                      <span className="truncate flex-1">{col}</span>
+                      {isPlaced && <svg className="h-3 w-3 shrink-0" style={{ color }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                    </button>
+                    <div className="mt-2 flex items-center gap-2 px-1">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Size</label>
+                      <input
+                        type="range"
+                        min="12"
+                        max="120"
+                        value={getFontSize(col)}
+                        onChange={(e) => setFontSize(col, Number(e.target.value))}
+                        className="flex-1 accent-indigo-600"
+                      />
+                      <span className="w-7 text-right text-[10px] font-mono text-gray-500">{getFontSize(col)}</span>
+                    </div>
+                  </div>
                 )
               })}
             </div>
@@ -254,7 +309,16 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
       <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 shrink-0">
         <p className="text-xs text-gray-400">{allPlaced ? '✅ All columns placed.' : 'Select a column, then click on the certificate.'}</p>
         <button className="btn-primary" disabled={!allPlaced || columns.length === 0}
-          onClick={() => onNext(positions, imgW)}>
+          onClick={() => {
+            const positionsWithSizes = {}
+            Object.entries(positions).forEach(([col, pos]) => {
+              positionsWithSizes[col] = {
+                ...pos,
+                font_size: getFontSize(col),
+              }
+            })
+            onNext(positionsWithSizes, imgW)
+          }}>
           Next: Place Logo & Signature →
         </button>
       </div>
@@ -467,6 +531,7 @@ export default function TemplateSelector({ isModal=false, onClose, clubId: propC
     if (!participants?.length) return []
     const keys = new Set()
     const SKIP = new Set(['_id', 'id', 'event_id', 'club_id', 'cert_type', 'email',
+      'role', 'certificate type', 'cert type', 'type',
       'registration_number', 'name', 'created_at', 'is_verified', 'source',
       'registered_at', 'custom_data', 'fields', 'certificate_issued'])
 
@@ -481,7 +546,8 @@ export default function TemplateSelector({ isModal=false, onClose, clubId: propC
     if (keys.size === 0) {
       participants.forEach(p => {
         Object.keys(p || {}).forEach(k => {
-          if (!k.startsWith('_') && !SKIP.has(k)) keys.add(k)
+          const nk = k.toLowerCase().trim()
+          if (!k.startsWith('_') && !SKIP.has(nk)) keys.add(k)
         })
       })
     }

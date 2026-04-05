@@ -1,3 +1,5 @@
+import secrets
+import string
 from datetime import datetime
 from typing import List, Optional
 
@@ -140,6 +142,20 @@ async def update_club(
     if update_data:
         await club.set(update_data)
 
+    return _club_response(club)
+
+
+@router.patch("/clubs/{club_id}/toggle-active", response_model=ClubResponse)
+async def toggle_club_active(club_id: PydanticObjectId, _user: User = _admin):
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    club.is_active = not club.is_active
+    if club.is_active is False:
+        await User.find(User.club_id == club_id).update_many({"$set": {"is_active": False}})
+
+    await club.save()
     return _club_response(club)
 
 
@@ -310,6 +326,32 @@ async def update_user(
     return _user_response(target)
 
 
+@router.patch("/users/{user_id}/toggle-active", response_model=UserResponse)
+async def toggle_user_active(user_id: PydanticObjectId, _user: User = _admin):
+    target = await User.get(user_id)
+    if not target:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    if target.role == UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot toggle the super admin account")
+
+    target.is_active = not target.is_active
+    await target.save()
+    return _user_response(target)
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_user_password(user_id: PydanticObjectId, _user: User = _admin):
+    target = await User.get(user_id)
+    if not target:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+
+    tmp_pw = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+    target.password_hash = hash_password(tmp_pw)
+    await target.save()
+
+    return {"message": "Password reset successfully", "temp_password": tmp_pw}
+
+
 @router.delete("/users/{user_id}")
 async def deactivate_user(user_id: PydanticObjectId, _user: User = _admin):
     target = await User.get(user_id)
@@ -408,6 +450,23 @@ async def list_scan_logs(
          "user_agent": l.user_agent, "scanned_at": l.scanned_at}
         for l in logs
     ]}
+
+
+@router.get("/activity")
+async def recent_activity(_user: User = _admin):
+    certs = await Certificate.find_all().sort("-issued_at").limit(20).to_list()
+
+    return [
+        {
+            "action": "Certificate Issued",
+            "actor": cert.snapshot.name if cert.snapshot else "Unknown",
+            "target": cert.snapshot.event_name if cert.snapshot else "",
+            "cert_number": cert.cert_number,
+            "timestamp": cert.issued_at,
+            "club_name": cert.snapshot.club_name if cert.snapshot else "",
+        }
+        for cert in certs
+    ]
 
 
 # ═══ CREDIT RULES ════════════════════════════════════════════════════════════

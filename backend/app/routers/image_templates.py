@@ -45,6 +45,7 @@ async def list_image_templates():
 class ColumnPosition(BaseModel):
     x_percent: float
     y_percent: float
+    font_size: int = 36
 
 
 class AssetPosition(BaseModel):
@@ -56,7 +57,7 @@ class AssetPosition(BaseModel):
 class FieldPositionRequest(BaseModel):
     cert_type: str                              # e.g. 'volunteer', 'winner_1st'
     template_filename: str                       # e.g. 'template_01.png'
-    column_positions: Dict[str, ColumnPosition]  # column header → {x_percent, y_percent}
+    column_positions: Dict[str, ColumnPosition]  # column header → {x_percent, y_percent, font_size}
     asset_positions: Optional[Dict[str, AssetPosition]] = None  # 'logo' / 'signature'
     display_width: float = 580.0
     confirmed: bool = False
@@ -104,8 +105,12 @@ async def save_field_positions(
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
-    col_positions_dict: Dict[str, Dict[str, float]] = {
-        col: {"x_percent": pos.x_percent, "y_percent": pos.y_percent}
+    col_positions_dict: Dict[str, Dict[str, float | int]] = {
+        col: {
+            "x_percent": pos.x_percent,
+            "y_percent": pos.y_percent,
+            "font_size": pos.font_size,
+        }
         for col, pos in body.column_positions.items()
     }
     asset_pos_dict = {

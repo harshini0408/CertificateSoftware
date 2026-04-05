@@ -7,6 +7,7 @@ import { useUiStore } from '../store/uiStore'
 import { useToastStore } from '../store/uiStore'
 import axiosInstance from '../utils/axiosInstance'
 import queryClient from '../utils/queryClient'
+import logoImg from '../Images/logo.png'
 
 // ── Role badge colours ────────────────────────────────────────────────────────
 const roleMeta = {
@@ -158,9 +159,7 @@ export default function Navbar() {
 
       {/* Brand */}
       <div className="flex items-center gap-2 select-none">
-        <div className="flex h-8 w-8 items-center justify-center rounded bg-navy text-white font-bold text-sm">
-          P
-        </div>
+        <img src={logoImg} alt="Logo" className="h-8 w-8 object-contain" />
         <span className="hidden sm:block text-sm font-semibold text-navy leading-tight">
           PSG iTech<br />
           <span className="font-normal text-xs text-gray-500">Certificate Platform</span>

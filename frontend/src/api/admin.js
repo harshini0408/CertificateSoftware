@@ -220,7 +220,7 @@ export function useAdminCertificates(filters = {}, page = 1) {
       const { data } = await axiosInstance.get('/admin/certificates', { params })
       return data
     },
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   })
 }
 
@@ -274,7 +274,7 @@ export function useAdminScanLogs(filters = {}, page = 1) {
       const { data } = await axiosInstance.get('/admin/scan-logs', { params })
       return data
     },
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   })
 }
 

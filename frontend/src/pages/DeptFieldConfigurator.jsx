@@ -133,7 +133,7 @@ function DropZone({ slots, onMove, containerRef, canvasScale, templateUrl }) {
         style={{
           width: '100%',
           aspectRatio: `${CANVAS_W} / ${CANVAS_H}`,
-          maxWidth: '600px',
+          maxWidth: '500px',
         }}
       >
         {templateUrl ? (
@@ -196,7 +196,7 @@ export default function DeptFieldConfigurator({ onComplete }) {
           ...def,
           x: saved ? saved.x_percent : def.defaultX,
           y: saved ? saved.y_percent : def.defaultY,
-          fontSize: saved ? saved.font_size : (def.fontSize || 24)
+          fontSize: def.fontSize || 24,
         }
       })
       setSlots(merged)
@@ -228,10 +228,6 @@ export default function DeptFieldConfigurator({ onComplete }) {
     }))
   }
 
-  const handleFontSizeChange = (id, newSize) => {
-    setSlots(prev => prev.map(s => s.id === id ? { ...s, fontSize: parseInt(newSize) || 12 } : s))
-  }
-
   const handleSave = async () => {
     const payload = {}
     slots.forEach(s => {
@@ -259,7 +255,7 @@ export default function DeptFieldConfigurator({ onComplete }) {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-8 min-h-[600px]">
+    <div className="flex flex-col lg:flex-row gap-8 min-h-0">
       {/* Sidebar Controls */}
       <div className="w-full lg:w-80 shrink-0 space-y-6">
         <div className="card p-5">
@@ -278,20 +274,6 @@ export default function DeptFieldConfigurator({ onComplete }) {
                   {Math.round(slot.x)}%, {Math.round(slot.y)}%
                 </span>
               </div>
-              {slot.type === 'text' && (
-                <div className="flex items-center gap-2 mt-2">
-                  <label className="text-[10px] text-gray-400 uppercase font-bold">Font Size</label>
-                  <input 
-                    type="range" 
-                    min="12" 
-                    max="120" 
-                    value={slot.fontSize} 
-                    onChange={(e) => handleFontSizeChange(slot.id, e.target.value)}
-                    className="flex-1 accent-navy h-1 appearance-none bg-gray-200 rounded-lg cursor-pointer"
-                  />
-                  <span className="font-mono w-6 text-right">{slot.fontSize}</span>
-                </div>
-              )}
             </div>
           ))}
         </div>
@@ -314,7 +296,7 @@ export default function DeptFieldConfigurator({ onComplete }) {
       </div>
 
       {/* Canvas Area */}
-      <div className="flex-1 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200 p-8 flex items-center justify-center overflow-hidden">
+      <div className="flex-1 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200 p-8 flex justify-center overflow-y-auto">
         <DropZone 
           slots={slots} 
           onMove={handleMove} 

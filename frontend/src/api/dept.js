@@ -126,3 +126,12 @@ export async function downloadAllDeptCertificates() {
   })
   return response.data
 }
+
+export async function downloadDeptCertificatesZip(certNumbers) {
+  const response = await axiosInstance.post(
+    '/dept/certificates/download-zip',
+    { cert_numbers: certNumbers },
+    { responseType: 'blob' },
+  )
+  return response.data
+}

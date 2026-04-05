@@ -4,7 +4,15 @@ import Sidebar from '../components/Sidebar'
 import DataTable from '../components/DataTable'
 import LoadingSpinner from '../components/LoadingSpinner'
 import DeptFieldConfigurator from './DeptFieldConfigurator'
-import { useDeptAssetStatus, useDeptCertificates, useDeptGenerateCertificates, useDeptStudents, useGetFieldPositions, downloadAllDeptCertificates } from '../api/dept'
+import {
+  useDeptAssetStatus,
+  useDeptCertificates,
+  useDeptGenerateCertificates,
+  useDeptStudents,
+  useGetFieldPositions,
+  downloadAllDeptCertificates,
+  downloadDeptCertificatesZip,
+} from '../api/dept'
 import { useToastStore } from '../store/uiStore'
 
 function FeatureLanding({ onSelect }) {
@@ -44,6 +52,7 @@ function GenerateCertificatesView() {
   const [lastResult, setLastResult] = useState(null)
   const [showConfigurator, setShowConfigurator] = useState(false)
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
+  const [isDownloadingBatch, setIsDownloadingBatch] = useState(false)
   const addToast = useToastStore((s) => s.addToast)
 
   // Check if first-time setup is needed
@@ -100,6 +109,30 @@ function GenerateCertificatesView() {
       addToast({ type: 'error', message: 'Failed to download certificates ZIP archive.' })
     } finally {
       setIsDownloadingAll(false)
+    }
+  }
+
+  const handleDownloadBatch = async () => {
+    const certNumbers = lastResult?.cert_numbers || []
+    if (!certNumbers.length) {
+      addToast({ type: 'error', message: 'No certificates found in the latest batch.' })
+      return
+    }
+
+    setIsDownloadingBatch(true)
+    try {
+      const blob = await downloadDeptCertificatesZip(certNumbers)
+      const url = window.URL.createObjectURL(new Blob([blob]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', 'dept_certs_batch.zip')
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode.removeChild(link)
+    } catch (err) {
+      addToast({ type: 'error', message: 'Failed to download this batch ZIP archive.' })
+    } finally {
+      setIsDownloadingBatch(false)
     }
   }
 
@@ -204,6 +237,15 @@ function GenerateCertificatesView() {
         <div className="card p-4">
           <p className="text-sm font-medium text-navy">{lastResult.message}</p>
           <p className="mt-1 text-xs text-gray-500">Generated: {lastResult.generated} / Rows: {lastResult.total_rows}</p>
+          {(lastResult.cert_numbers || []).length > 0 && (
+            <button
+              onClick={handleDownloadBatch}
+              disabled={isDownloadingBatch}
+              className="btn-secondary mt-3"
+            >
+              {isDownloadingBatch ? <LoadingSpinner size="sm" label="Zipping..." /> : '📦 Download this batch as ZIP'}
+            </button>
+          )}
         </div>
       )}
 

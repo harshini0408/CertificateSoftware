@@ -5,8 +5,8 @@ Each event can have multiple FieldPosition documents — one per cert_type
 
 column_positions structure:
     {
-        "Name":              {"x_percent": 52.3, "y_percent": 48.1},
-        "Registration Number": {"x_percent": 60.0, "y_percent": 55.0},
+        "Name":              {"x_percent": 52.3, "y_percent": 48.1, "font_size": 36},
+        "Registration Number": {"x_percent": 60.0, "y_percent": 55.0, "font_size": 36},
     }
 
 asset_positions structure (optional — only set if coordinator placed the assets):
@@ -30,8 +30,8 @@ class FieldPosition(Document):
     event_id: PydanticObjectId
     cert_type: str                  # e.g. 'volunteer', 'winner_1st', 'coordinator'
     template_filename: str          # e.g. "template_01.png"
-    # { "column_header_name": { "x_percent": float, "y_percent": float } }
-    column_positions: Dict[str, Dict[str, float]] = Field(default_factory=dict)
+    # { "column_header_name": { "x_percent": float, "y_percent": float, "font_size": int } }
+    column_positions: Dict[str, Dict[str, float | int]] = Field(default_factory=dict)
     # { "logo": {...}, "signature": {...} }  — optional, set after asset placement
     asset_positions: Optional[Dict[str, Dict[str, float]]] = None
     display_width: float = 580.0    # CSS pixel width when coordinator clicked

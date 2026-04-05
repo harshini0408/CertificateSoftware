@@ -112,9 +112,6 @@ def parse_participants_excel(
             errors.append(f"Row {row_idx}: missing Email — skipped")
             continue
             
-        record["Email"] = email  # Enforce exact casing for the router
-
-
         # Derive cert_type from Role column (default to "participant")
         if cert_type_col_idx >= 0 and cert_type_col_idx < len(row):
             raw_role = str(row[cert_type_col_idx]).strip() if row[cert_type_col_idx] else ""
@@ -128,6 +125,19 @@ def parse_participants_excel(
 
         # Store derived cert_type so the upload endpoint can use it
         record["_cert_type"] = cert_type
+        record["_email"] = email
+
+        # Remove reserved columns — these must not appear as certificate print fields
+        _RESERVED_FIELDS = {
+            "email", "email id", "emailid", "mail", "role",
+            "certificate type", "certificatetype", "cert type", "certtype",
+            "type", "cert_type",
+        }
+        record = {
+            k: v
+            for k, v in record.items()
+            if _normalise_key(k) not in _RESERVED_FIELDS
+        }
 
         parsed.append(record)
 

@@ -107,6 +107,7 @@ export function useCreateClub() {
     mutationFn: (payload) => axiosInstance.post('/admin/clubs', payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['clubs'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'stats'] })
       addToast({ type: 'success', message: 'Club created successfully.' })
     },
     onError: (err) => {

@@ -3,7 +3,7 @@ from typing import List
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..core.dependencies import get_current_user, require_club_access
+from ..core.dependencies import get_current_user, require_club_access, require_role
 from ..models.user import User, UserRole
 from ..models.club import Club
 from ..models.event import Event, EventStatus
@@ -14,6 +14,7 @@ from ..schemas.club import ClubResponse
 from ..schemas.user import UserResponse
 
 router = APIRouter(prefix="/clubs", tags=["Clubs"])
+coordinator_router = APIRouter(prefix="/coordinator", tags=["Coordinator"])
 
 
 # ── Helper builders ──────────────────────────────────────────────────────────
@@ -163,3 +164,33 @@ async def club_members(
 
     users = await User.find(User.club_id == club_id).to_list()
     return [_user_response(u) for u in users]
+
+
+@coordinator_router.get("/stats")
+async def coordinator_stats(
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    club = await Club.get(current_user.club_id) if current_user.club_id else None
+    total_events = await Event.find(Event.club_id == current_user.club_id).count()
+    total_certs = await Certificate.find({"club_id": current_user.club_id}).count()
+    return {
+        "club_name": club.name if club else "",
+        "total_events": total_events,
+        "total_certificates": total_certs,
+    }
+
+
+@coordinator_router.get("/events")
+async def coordinator_events(
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    events = await Event.find(Event.club_id == current_user.club_id).sort("-created_at").to_list()
+    return [
+        {
+            "id": str(e.id),
+            "name": e.name,
+            "status": e.status.value,
+            "event_date": e.event_date,
+        }
+        for e in events
+    ]

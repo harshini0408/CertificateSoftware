@@ -246,6 +246,7 @@ function NewClubModal({ isOpen, onClose }) {
           <div className="relative">
             <input
               type={showPassword ? 'text' : 'password'}
+              autoComplete="new-password"
               className={`form-input pr-10 ${errors.coordinator_password ? 'form-input-error' : ''}`}
               value={form.coordinator_password}
               onChange={(e) => handleChange('coordinator_password', e.target.value)}
@@ -514,7 +515,7 @@ function NewUserModal({ isOpen, onClose }) {
             <div>
               <label className="form-label">Password *</label>
               <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} className={`form-input pr-10 ${errors.password ? 'form-input-error' : ''}`} value={form.password} onChange={(e) => handleChange('password', e.target.value)} />
+                <input type={showPassword ? 'text' : 'password'} autoComplete="new-password" className={`form-input pr-10 ${errors.password ? 'form-input-error' : ''}`} value={form.password} onChange={(e) => handleChange('password', e.target.value)} />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">{showPassword ? 'Hide' : 'Show'}</button>
               </div>
               {errors.password && <p className="form-error">{errors.password}</p>}

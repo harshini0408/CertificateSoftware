@@ -87,6 +87,11 @@ async def lifespan(app: FastAPI):
     print("[START] Starting PSG iTech Certificate Platform...")
     settings.ensure_storage_dirs()
     await connect_db()
+
+    # Mount storage after startup guarantees storage dirs exist.
+    from fastapi.staticfiles import StaticFiles as _SF
+    app.mount("/storage", _SF(directory=str(settings.storage_root)), name="storage")
+
     await _seed_superadmin()
     await _seed_image_templates()
 
@@ -154,6 +159,7 @@ from .routers import image_templates
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(clubs.router)
+app.include_router(clubs.coordinator_router)
 app.include_router(events.router)
 app.include_router(participants.router)
 app.include_router(templates.router)
@@ -169,11 +175,6 @@ from pathlib import Path
 _static_dir = Path(__file__).parent / "static"
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
-
-# Serve uploaded club assets (logos, signatures, generated certs)
-_storage_dir = settings.storage_root
-_storage_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/storage", StaticFiles(directory=str(_storage_dir)), name="storage")
 
 
 # ── Health / Root ────────────────────────────────────────────────────────

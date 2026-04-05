@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # ── MongoDB ──────────────────────────────────────────────────────────
     mongodb_url: str = "mongodb://localhost:27017"
-    db_name: str = "psgicerts"
+    db_name: str = "certsoftware"
 
     # ── JWT ──────────────────────────────────────────────────────────────
     access_token_expire_minutes: int = 30
