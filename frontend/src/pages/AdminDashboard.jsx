@@ -402,7 +402,7 @@ const roles = [
   { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
   { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
   { value: 'student', label: 'Student', icon: '📚', desc: 'Has certificates & credits' },
-  { value: 'guest', label: 'Guest', icon: '🎟️', desc: 'Access to one event' },
+  { value: 'guest', label: 'Guest', icon: '🎟️', desc: 'Limited access account' },
 ]
 
 function NewUserModal({ isOpen, onClose }) {
@@ -413,7 +413,6 @@ function NewUserModal({ isOpen, onClose }) {
   const [errors, setErrors] = useState({})
   const createUser = useCreateUser()
   const { data: clubsList } = useClubs({ is_active: true })
-  const { data: eventsList } = useQuery_events(form.club_id)
 
   const handleChange = (field, value) => {
     setForm((f) => ({ ...f, [field]: value }))
@@ -432,7 +431,6 @@ function NewUserModal({ isOpen, onClose }) {
     if (!form.email.trim()) errs.email = 'Required'
     if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
-    if (selectedRole === 'guest') { if (!form.club_id) errs.club_id = 'Required'; if (!form.event_id) errs.event_id = 'Required' }
     if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
     if (selectedRole === 'student') {
       if (!form.department) errs.department = 'Required'
@@ -456,11 +454,8 @@ function NewUserModal({ isOpen, onClose }) {
       is_active: form.is_active,
     }
 
-    if (selectedRole === 'club_coordinator' || selectedRole === 'guest') {
+    if (selectedRole === 'club_coordinator') {
       payload.club_id = form.club_id
-    }
-    if (selectedRole === 'guest') {
-      payload.event_id = form.event_id
     }
     if (selectedRole === 'dept_coordinator' || selectedRole === 'student') {
       payload.department = form.department.trim()
@@ -527,7 +522,7 @@ function NewUserModal({ isOpen, onClose }) {
           </div>
 
           {/* Role-specific fields */}
-          {(selectedRole === 'club_coordinator' || selectedRole === 'guest') && (
+          {selectedRole === 'club_coordinator' && (
             <div>
               <label className="form-label">Club *</label>
               <select className={`form-input ${errors.club_id ? 'form-input-error' : ''}`} value={form.club_id} onChange={(e) => handleChange('club_id', e.target.value)}>
@@ -535,16 +530,6 @@ function NewUserModal({ isOpen, onClose }) {
                 {(clubsList || []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.slug})</option>)}
               </select>
               {errors.club_id && <p className="form-error">{errors.club_id}</p>}
-            </div>
-          )}
-          {selectedRole === 'guest' && form.club_id && (
-            <div>
-              <label className="form-label">Event *</label>
-              <select className={`form-input ${errors.event_id ? 'form-input-error' : ''}`} value={form.event_id} onChange={(e) => handleChange('event_id', e.target.value)}>
-                <option value="">Select event…</option>
-                {(eventsList || []).map((ev) => <option key={ev.id} value={ev.id}>{ev.name}{ev.event_date ? ` — ${fmtDate(ev.event_date)}` : ''}</option>)}
-              </select>
-              {errors.event_id && <p className="form-error">{errors.event_id}</p>}
             </div>
           )}
           {(selectedRole === 'dept_coordinator' || selectedRole === 'student') && (
@@ -592,19 +577,6 @@ function NewUserModal({ isOpen, onClose }) {
       )}
     </Modal>
   )
-}
-
-// ── Tiny hook to fetch events for a club (for guest role dropdown) ────────────
-function useQuery_events(clubId) {
-  return useQuery({
-    queryKey: ['events', 'by-club', clubId],
-    queryFn: async () => {
-      const { default: ax } = await import('../utils/axiosInstance')
-      const { data } = await ax.get(`/clubs/${clubId}/events`)
-      return data
-    },
-    enabled: !!clubId,
-  })
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

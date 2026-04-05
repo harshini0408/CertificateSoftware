@@ -37,10 +37,7 @@ class UserCreate(BaseModel):
                 raise ValueError("club_id is required for club_coordinator role")
 
         elif role == "guest":
-            if not self.club_id:
-                raise ValueError("club_id is required for guest role")
-            if not self.event_id:
-                raise ValueError("event_id is required for guest role")
+            pass
 
         elif role == "dept_coordinator":
             if not self.department:
