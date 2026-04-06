@@ -9,7 +9,7 @@ Step 1  POST /template         — Upload custom PNG background template
 Step 2  POST /excel            — Upload XLSX, parse headers + data
         POST /config           — Save selected_columns + email_column
 Step 3  POST /field-positions  — Reused from image_templates.py
-Step 4  POST /generate         — Pillow batch generation  
+Step 4  POST /generate         — Pillow batch generation
 Step 5  GET  /zip              — Download all generated PNGs as ZIP
         POST /send-emails      — Email each certificate to the email column
         GET  /status           — Poll current guest event state
@@ -336,13 +336,15 @@ def _render_guest_certificate(
     from PIL import Image, ImageDraw, ImageFont
 
     _FONTS_DIR = Path(__file__).parent.parent / "static" / "fonts"
-    _DEFAULT_FONT = _FONTS_DIR / "Montserrat-Bold.ttf"
-    DEFAULT_FONT_PERCENT = 3.2
+    _DEFAULT_FONT = _FONTS_DIR / "PlayfairDisplay.ttf"
+    _ALT_FONT = _FONTS_DIR / "PlayfairDisplay.ttf"
+    DEFAULT_FONT_PERCENT =2.7
 
-    def _load_font(size: int):
+    def _load_font(size: int, is_main: bool = True):
         try:
-            if _DEFAULT_FONT.exists():
-                return ImageFont.truetype(str(_DEFAULT_FONT), size)
+            f = _DEFAULT_FONT if is_main else _ALT_FONT
+            if f.exists():
+                return ImageFont.truetype(str(f), size)
         except Exception:
             pass
         return ImageFont.load_default()
@@ -357,7 +359,7 @@ def _render_guest_certificate(
             continue
         fsp = float(pos.get("font_size_percent") or DEFAULT_FONT_PERCENT)
         fsp = max(1.0, min(fsp, 8.0))
-        font_size = max(20, int(img_w * fsp / 100))
+        font_size = max(10, int(img_w * fsp / 100))
         font = _load_font(font_size)
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h

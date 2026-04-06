@@ -101,7 +101,7 @@ def _parse_dept_excel(file_bytes: bytes) -> list[dict]:
 
 
 def _load_font(size: int):
-    font_path = Path(__file__).parent.parent / "static" / "fonts" / "Montserrat-Bold.ttf"
+    font_path = Path(__file__).parent.parent / "static" / "fonts" / "PlayfairDisplay.ttf"
     try:
         if font_path.exists():
             return ImageFont.truetype(str(font_path), size)

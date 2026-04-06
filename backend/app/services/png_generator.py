@@ -22,14 +22,14 @@ logger = logging.getLogger(__name__)
 _STATIC_DIR    = Path(__file__).parent.parent / "static"
 _CERT_TMPL_DIR = _STATIC_DIR / "certificate_templates"
 _FONTS_DIR     = _STATIC_DIR / "fonts"
-_DEFAULT_FONT  = _FONTS_DIR / "Montserrat-Bold.ttf"
+_DEFAULT_FONT  = _FONTS_DIR / "PlayfairDisplay.ttf"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PILLOW OVERLAY PIPELINE — PNG image templates
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _load_font(size: int):
-    """Load Montserrat-Bold if available, else fall back to the default PIL font."""
+    """Load PlayfairDisplay if available, else fall back to the default PIL font."""
     try:
         from PIL import ImageFont
         if _DEFAULT_FONT.exists():
@@ -153,7 +153,7 @@ def _render_certificate_pillow(
 
     # DEFAULT_FONT_PERCENT: slightly smaller than the body text for safer first-pass rendering.
     # Override per-field via font_size_percent in column_positions.
-    DEFAULT_FONT_PERCENT = 3.2
+    DEFAULT_FONT_PERCENT = 2.7
 
     for col_header, pos in (column_positions or {}).items():
         value = str((fields or {}).get(col_header, ""))

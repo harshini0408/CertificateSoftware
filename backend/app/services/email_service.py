@@ -174,16 +174,11 @@ def _build_certificate_email(
     msg = MIMEMultipart()
     msg["To"] = recipient_email
     msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
-    msg["Subject"] = f"Your Certificate — {event_name} | {club_name}"
+    msg["Subject"] = f"VAC Completion Certificate"
 
     body = (
-        f"Dear {recipient_name},\n\n"
-        f"Congratulations! Please find your certificate for "
-        f'"{event_name}" (organized by {club_name}) attached.\n\n'
-        f"Certificate Number: {cert_number}\n"
-        f"You can verify this certificate at: "
-        f"{settings.base_url}/verify/{cert_number}\n\n"
-        f"Regards,\n{club_name}\nPSG iTech Certificate Platform"
+        "Please find the attached certificate.\n"
+        "Thank you."
     )
     msg.attach(MIMEText(body, "plain"))
 
