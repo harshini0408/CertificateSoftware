@@ -154,7 +154,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
 # ── Routers ──────────────────────────────────────────────────────────────
 from .routers import auth, admin, clubs, events, participants, templates
 from .routers import certificates, verify, student, dept
-from .routers import image_templates
+from .routers import image_templates, guest_flow
 
 app.include_router(auth.router)
 app.include_router(admin.router)
@@ -168,6 +168,7 @@ app.include_router(verify.router)
 app.include_router(student.router)
 app.include_router(dept.router)
 app.include_router(image_templates.router)
+app.include_router(guest_flow.router)
 
 # ── Static files (PNG templates, fonts, etc.) ────────────────────────────────
 from pathlib import Path

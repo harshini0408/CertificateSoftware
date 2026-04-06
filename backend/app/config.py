@@ -85,6 +85,8 @@ class Settings(BaseSettings):
         self.assets_dir.mkdir(parents=True, exist_ok=True)
         (self.storage_root / "dept_templates").mkdir(parents=True, exist_ok=True)
         (self.storage_root / "tmp").mkdir(parents=True, exist_ok=True)
+        (self.storage_root / "guest_templates").mkdir(parents=True, exist_ok=True)
+        (self.certs_dir / "guest").mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache()

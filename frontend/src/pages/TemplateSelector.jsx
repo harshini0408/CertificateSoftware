@@ -145,20 +145,18 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
   const [positions, setPositions] = useState(() => {
     const initial = {}
     Object.entries(existingPositions ?? {}).forEach(([col, pos]) => {
-      const parsedSize = Number(pos?.font_size)
       initial[col] = {
         x_percent: pos?.x_percent,
         y_percent: pos?.y_percent,
-        font_size: Number.isFinite(parsedSize) ? parsedSize : 36,
       }
     })
     return initial
   })
+  // font_size_percent per column — default 3.2 for slightly smaller text.
   const [fontSizes, setFontSizes] = useState(() => {
     const initial = {}
     columns.forEach((col) => {
-      const parsedSize = Number(existingPositions?.[col]?.font_size)
-      initial[col] = Number.isFinite(parsedSize) ? parsedSize : 36
+      initial[col] = existingPositions?.[col]?.font_size_percent ?? 3.2
     })
     return initial
   })
@@ -166,13 +164,36 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
   const [imgW, setImgW] = useState(0)
   const colorMap = Object.fromEntries(columns.map((c,i) => [c, MARKER_COLORS[i % MARKER_COLORS.length]]))
 
+  useEffect(() => {
+    if (!existingPositions) return
+    setPositions((prev) => {
+      if (Object.keys(prev).length > 0) return prev
+      const hydrated = {}
+      Object.entries(existingPositions).forEach(([col, pos]) => {
+        hydrated[col] = {
+          x_percent: pos?.x_percent,
+          y_percent: pos?.y_percent,
+        }
+      })
+      return hydrated
+    })
+  }, [existingPositions])
+
+  useEffect(() => {
+    setFontSizes((prev) => {
+      const next = { ...prev }
+      columns.forEach((col) => {
+        if (next[col] == null) {
+          next[col] = existingPositions?.[col]?.font_size_percent ?? 3.2
+        }
+      })
+      return next
+    })
+  }, [columns, existingPositions])
+
   const getFontSize = (col) => {
     const fs = Number(fontSizes[col])
-    return Number.isFinite(fs) ? fs : 36
-  }
-
-  const setFontSize = (col, size) => {
-    setFontSizes((prev) => ({ ...prev, [col]: size }))
+    return Number.isFinite(fs) ? fs : 3.2
   }
 
   useEffect(() => {
@@ -190,12 +211,11 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
       [activeField]: {
         x_percent: xp,
         y_percent: yp,
-        font_size: getFontSize(activeField),
       },
     }))
     const next = columns.find(c => c !== activeField && !positions[c])
     setActiveField(next ?? null)
-  }, [activeField, columns, positions, fontSizes])
+  }, [activeField, columns, positions])
 
   const allPlaced = columns.length > 0 && columns.every(c => positions[c])
   const placed = columns.filter(c => positions[c]).length
@@ -246,23 +266,29 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
                       <span className="truncate flex-1">{col}</span>
                       {isPlaced && <svg className="h-3 w-3 shrink-0" style={{ color }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
                     </button>
-                    <div className="mt-2 flex items-center gap-2 px-1">
-                      <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Size</label>
-                      <input
-                        type="range"
-                        min="12"
-                        max="120"
-                        value={getFontSize(col)}
-                        onChange={(e) => setFontSize(col, Number(e.target.value))}
-                        className="flex-1 accent-indigo-600"
-                      />
-                      <span className="w-7 text-right text-[10px] font-mono text-gray-500">{getFontSize(col)}</span>
-                    </div>
+                    {positions[col] && (
+                      <div className="mt-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400 w-12">Size</span>
+                          <input
+                            type="range"
+                            min={1.5}
+                            max={6.0}
+                            step={0.25}
+                            value={getFontSize(col)}
+                            onChange={e => setFontSizes(prev => ({ ...prev, [col]: parseFloat(e.target.value) }))}
+                            className="flex-1 h-1.5 accent-navy"
+                          />
+                          <span className="text-xs text-gray-500 w-10">{getFontSize(col).toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
             </div>
           )}
+          <p className="text-[10px] text-gray-400">3.2% = slightly smaller default. Increase for names, decrease for emails.</p>
           {activeField && (
             <div className="rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2 text-xs text-indigo-700 mt-1">
               <p className="font-semibold mb-0.5">Placing:</p>
@@ -310,14 +336,15 @@ function PlaceFieldsStep({ certType, template, columns, existingPositions, onBac
         <p className="text-xs text-gray-400">{allPlaced ? '✅ All columns placed.' : 'Select a column, then click on the certificate.'}</p>
         <button className="btn-primary" disabled={!allPlaced || columns.length === 0}
           onClick={() => {
-            const positionsWithSizes = {}
+            // Merge font_size_percent into each position before advancing.
+            const positionsWithFontSize = {}
             Object.entries(positions).forEach(([col, pos]) => {
-              positionsWithSizes[col] = {
+              positionsWithFontSize[col] = {
                 ...pos,
-                font_size: getFontSize(col),
+                font_size_percent: fontSizes[col] ?? 3.2,
               }
             })
-            onNext(positionsWithSizes, imgW)
+            onNext(positionsWithFontSize, imgW)
           }}>
           Next: Place Logo & Signature →
         </button>

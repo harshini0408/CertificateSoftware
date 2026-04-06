@@ -8,8 +8,10 @@ import StatusBadge from '../components/StatusBadge'
 import FileUpload from '../components/FileUpload'
 import LoadingSpinner from '../components/LoadingSpinner'
 import DataTable from '../components/DataTable'
+import GuestWizard from '../components/GuestWizard'
 import { useEvent } from '../api/events'
 import { useToastStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
 import axiosInstance from '../utils/axiosInstance'
 import { eventKeys } from '../api/events'
 import CertificateIssue from './CertificateIssue'
@@ -618,6 +620,7 @@ function ParticipantsTab({ clubId, eventId, event, onGoToTemplates }) {
 export default function EventDetail() {
   const { club_id, event_id } = useParams()
   const [activeTab, setActiveTab] = useState('overview')
+  const role = useAuthStore((s) => s.role)
 
   const navigate = useNavigate()
   const { data: event, isLoading } = useEvent(club_id, event_id)
@@ -639,6 +642,33 @@ export default function EventDetail() {
     )
   }
 
+  // ── Guest user — render the 5-step wizard ──────────────────────────────────
+  if (role === 'guest') {
+    return (
+      <div className="flex h-dvh flex-col overflow-hidden">
+        <Navbar />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto bg-background">
+            <div className="page-container">
+              {/* Heading */}
+              <div className="mb-8">
+                <h1 className="text-2xl font-bold text-foreground">
+                  {event?.name ?? 'Certificate Wizard'}
+                </h1>
+                <p className="mt-1 text-sm text-gray-500">
+                  Follow the steps below to generate and distribute certificates for this event.
+                </p>
+              </div>
+              <GuestWizard clubId={club_id} eventId={event_id} />
+            </div>
+          </main>
+        </div>
+      </div>
+    )
+  }
+
+  // ── All other roles — standard tabbed interface ────────────────────────────
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <Navbar />

@@ -151,22 +151,29 @@ def _render_certificate_pillow(
     draw = ImageDraw.Draw(img)
     img_w, img_h = img.size
 
-    # ── Text fields ───────────────────────────────────────────────────────
-    # Use per-field font size when configured; default to 36px.
+    # DEFAULT_FONT_PERCENT: slightly smaller than the body text for safer first-pass rendering.
+    # Override per-field via font_size_percent in column_positions.
+    DEFAULT_FONT_PERCENT = 3.2
+
     for col_header, pos in (column_positions or {}).items():
         value = str((fields or {}).get(col_header, ""))
         if not value:
             continue
+
+        # Per-field font size — coordinator can set this in the UI.
+        # Falls back to DEFAULT_FONT_PERCENT if not stored (backward-compatible).
+        fsp = float(pos.get("font_size_percent") or DEFAULT_FONT_PERCENT)
+        fsp = max(1.0, min(fsp, 8.0))
+        field_font_size = max(20, int(img_w * fsp / 100))
+        field_font = _load_font(field_font_size)
+
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h
-        field_font_size = max(12, int(pos.get("font_size", 36)))
-        field_font = _load_font(field_font_size)
         draw.text((x, y), value, font=field_font, fill=(30, 30, 30, 255), anchor="mm")
 
-    # ── Certificate Number (default placement near "CERTIFICATE NO:") ─────
-    # Printed on every image-template certificate, even if not manually mapped.
+    # Certificate number — slightly smaller than body text.
     if cert_number:
-        cert_font = _load_font(max(40, int(img_w * 0.054)))
+        cert_font = _load_font(max(20, int(img_w * 0.025)))
         cert_x = int(img_w * 0.83)
         cert_y = int(img_h * 0.048)
         draw.text((cert_x, cert_y), cert_number, font=cert_font, fill=(44, 61, 127, 255), anchor="lm")

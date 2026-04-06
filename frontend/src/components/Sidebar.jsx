@@ -105,6 +105,19 @@ function useNavItems() {
         { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
       ]
 
+    case 'guest': {
+      // Guest always has club_id + event_id from JWT — use auth store directly
+      const { event_id: guestEventId } = useAuthStore.getState()
+      return [
+        {
+          to: `/club/${effectiveClubId}/events/${guestEventId}`,
+          icon: icons.certificate,
+          label: 'My Event',
+          end: true,
+        },
+      ]
+    }
+
     case 'dept_coordinator':
       return [
         { to: '/dept', icon: icons.student, label: 'Department', end: true },
@@ -118,6 +131,7 @@ function useNavItems() {
     default:
       return []
   }
+
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────

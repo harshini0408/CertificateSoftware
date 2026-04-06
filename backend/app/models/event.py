@@ -4,7 +4,6 @@ from typing import Dict, List, Optional, Any
 
 from beanie import Document, PydanticObjectId
 from pydantic import BaseModel, Field, field_validator
-from typing import Any
 
 class EventStatus(str, Enum):
     DRAFT = "draft"
@@ -43,6 +42,20 @@ class Event(Document):
     mapping_confirmed: bool = False
     participant_count: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # ── Guest flow fields ──────────────────────────────────────────────────
+    # Path to the custom PNG uploaded by the guest as their certificate template
+    guest_template_path: Optional[str] = None
+    # Parsed rows from the uploaded Excel (list of dicts keyed by column header)
+    guest_excel_data: Optional[List[Dict[str, Any]]] = None
+    # Column headers selected by the guest to be printed on certificates
+    guest_selected_columns: Optional[List[str]] = None
+    # The column header that contains recipient email addresses
+    guest_email_column: Optional[str] = None
+    # Paths to generated certificate PNGs (one per Excel row)
+    guest_generated_certs: Optional[List[str]] = None
+    # Whether emails have been sent for this guest event
+    guest_emails_sent: bool = False
 
     class Settings:
         name = "events"

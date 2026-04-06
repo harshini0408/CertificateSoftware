@@ -319,3 +319,38 @@ export function useUpdateCreditRules() {
     },
   })
 }
+
+// ── useBulkImportStudents ─────────────────────────────────────────────────────
+/**
+ * POST /admin/users/bulk-import
+ * Accepts a FormData with a single "file" field (.xlsx).
+ * Returns { created, skipped, errors[] }
+ */
+export function useBulkImportStudents() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return axiosInstance.post('/admin/users/bulk-import', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'stats'] })
+      addToast({
+        type: 'success',
+        message: `${data.created} student${data.created !== 1 ? 's' : ''} imported, ${data.skipped} skipped.`,
+      })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Bulk import failed.',
+      })
+    },
+  })
+}

@@ -20,8 +20,10 @@ import {
   useAdminCertificates,
   useRevokeCertificate,
   useCreditRules,
-  useUpdateCreditRules
+  useUpdateCreditRules,
+  useBulkImportStudents,
 } from '../api/admin'
+import { useEvents } from '../api/events'
 
 // ── Debounce hook ─────────────────────────────────────────────────────────────
 function useDebounce(value, delay = 300) {
@@ -414,6 +416,9 @@ function NewUserModal({ isOpen, onClose }) {
   const [errors, setErrors] = useState({})
   const createUser = useCreateUser()
   const { data: clubsList } = useClubs({ is_active: true })
+  const { data: eventsList, isFetching: fetchingEvents } = useEvents(
+    selectedRole === 'guest' && form.club_id ? form.club_id : null
+  )
 
   const handleChange = (field, value) => {
     setForm((f) => ({ ...f, [field]: value }))
@@ -432,6 +437,10 @@ function NewUserModal({ isOpen, onClose }) {
     if (!form.email.trim()) errs.email = 'Required'
     if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
+    if (selectedRole === 'guest') {
+      if (!form.club_id) errs.club_id = 'Required'
+      if (!form.event_id) errs.event_id = 'Required'
+    }
     if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
     if (selectedRole === 'student') {
       if (!form.department) errs.department = 'Required'
@@ -457,6 +466,10 @@ function NewUserModal({ isOpen, onClose }) {
 
     if (selectedRole === 'club_coordinator') {
       payload.club_id = form.club_id
+    }
+    if (selectedRole === 'guest') {
+      payload.club_id = form.club_id
+      payload.event_id = form.event_id
     }
     if (selectedRole === 'dept_coordinator' || selectedRole === 'student') {
       payload.department = form.department.trim()
@@ -523,14 +536,26 @@ function NewUserModal({ isOpen, onClose }) {
           </div>
 
           {/* Role-specific fields */}
-          {selectedRole === 'club_coordinator' && (
+          {(selectedRole === 'club_coordinator' || selectedRole === 'guest') && (
             <div>
               <label className="form-label">Club *</label>
-              <select className={`form-input ${errors.club_id ? 'form-input-error' : ''}`} value={form.club_id} onChange={(e) => handleChange('club_id', e.target.value)}>
+              <select className={`form-input ${errors.club_id ? 'form-input-error' : ''}`} value={form.club_id} onChange={(e) => { handleChange('club_id', e.target.value); if (selectedRole === 'guest') handleChange('event_id', ''); }}>
                 <option value="">Select club…</option>
                 {(clubsList || []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.slug})</option>)}
               </select>
               {errors.club_id && <p className="form-error">{errors.club_id}</p>}
+            </div>
+          )}
+          {selectedRole === 'guest' && (
+            <div>
+              <label className="form-label">
+                Event * {fetchingEvents && <span className="text-xs transition text-gray-400 ml-2">Loading...</span>}
+              </label>
+              <select className={`form-input ${errors.event_id ? 'form-input-error' : ''}`} value={form.event_id} onChange={(e) => handleChange('event_id', e.target.value)} disabled={!form.club_id || fetchingEvents}>
+                <option value="">Select event…</option>
+                {(eventsList || []).map((ev) => <option key={ev.id} value={ev.id}>{ev.name} ({new Date(ev.event_date).toLocaleDateString()})</option>)}
+              </select>
+              {errors.event_id && <p className="form-error">{errors.event_id}</p>}
             </div>
           )}
           {(selectedRole === 'dept_coordinator' || selectedRole === 'student') && (
@@ -1033,6 +1058,128 @@ function ClubsTab() {
   )
 }
 
+function BulkImportModal({ isOpen, onClose }) {
+  const [file, setFile] = useState(null)
+  const [result, setResult] = useState(null)   // { created, skipped, errors[] }
+  const importMutation = useBulkImportStudents()
+
+  const handleClose = () => {
+    setFile(null)
+    setResult(null)
+    onClose()
+  }
+
+  const handleSubmit = () => {
+    if (!file) return
+    importMutation.mutate(file, {
+      onSuccess: ({ data }) => setResult(data),
+    })
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Bulk Import Students" wide>
+      {!result ? (
+        <div className="space-y-5">
+          <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
+            <p className="text-sm font-semibold text-blue-800 mb-1">Excel File Requirements</p>
+            <p className="text-xs text-blue-700">
+              Upload a <span className="font-mono font-bold">.xlsx</span> file with these column headers
+              (case-insensitive, in any order):
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {['name','email','username','password','department','registration_number','batch','section'].map(col => (
+                <span key={col} className="inline-block rounded bg-blue-100 px-2 py-0.5 font-mono text-[11px] text-blue-800">{col}</span>
+              ))}
+            </div>
+            <p className="text-xs text-blue-600 mt-2">
+              Rows with duplicate username, email, or registration number will be skipped (not failed).
+            </p>
+          </div>
+
+          <div>
+            <label className="form-label">Select Excel File (.xlsx)</label>
+            <input
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-gray-500 file:mr-3 file:rounded file:border-0
+                file:bg-navy/10 file:px-3 file:py-1.5 file:text-xs file:font-medium
+                file:text-navy hover:file:bg-navy/20 cursor-pointer"
+            />
+            {file && (
+              <p className="mt-1 text-xs text-gray-500">
+                Selected: <span className="font-medium">{file.name}</span> ({(file.size / 1024).toFixed(1)} KB)
+              </p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            <button className="btn-secondary" onClick={handleClose}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={handleSubmit}
+              disabled={!file || importMutation.isPending}
+            >
+              {importMutation.isPending ? (
+                <span className="flex items-center gap-2">
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  Importing…
+                </span>
+              ) : 'Import Students'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        // Results view
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg bg-green-50 border border-green-100 p-3 text-center">
+              <p className="text-2xl font-bold text-green-700">{result.created}</p>
+              <p className="text-xs text-green-600 font-medium mt-0.5">Created</p>
+            </div>
+            <div className="rounded-lg bg-yellow-50 border border-yellow-100 p-3 text-center">
+              <p className="text-2xl font-bold text-yellow-700">{result.skipped}</p>
+              <p className="text-xs text-yellow-600 font-medium mt-0.5">Skipped</p>
+            </div>
+            <div className="rounded-lg bg-red-50 border border-red-100 p-3 text-center">
+              <p className="text-2xl font-bold text-red-700">{result.errors.length}</p>
+              <p className="text-xs text-red-600 font-medium mt-0.5">Errors</p>
+            </div>
+          </div>
+
+          {result.errors.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                Row Errors
+              </p>
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-red-100 bg-red-50 divide-y divide-red-100">
+                {result.errors.map((e, i) => (
+                  <div key={i} className="flex gap-3 px-3 py-2">
+                    <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-red-700">
+                      Row {e.row}
+                    </span>
+                    <span className="text-xs text-red-700">{e.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            <button className="btn-secondary" onClick={() => { setFile(null); setResult(null) }}>
+              Import Another File
+            </button>
+            <button className="btn-primary" onClick={handleClose}>Done</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 // ── USERS TAB ─────────────────────────────────────────────────────────────────
 function UsersTab() {
   const [search, setSearch] = useState('')
@@ -1050,6 +1197,7 @@ function UsersTab() {
   const { data: users, isLoading } = useUsers(filters)
   const { data: clubs } = useClubs()
 
+  const [showBulkImport, setShowBulkImport] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [editUser, setEditUser] = useState(null)
   const deactivateUser = useDeactivateUser()
@@ -1093,7 +1241,15 @@ function UsersTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Users</h1>
-        <button className="btn-primary" onClick={() => setShowNew(true)}>+ New User</button>
+        <div className="flex items-center gap-2">
+          <button
+            className="btn-secondary"
+            onClick={() => setShowBulkImport(true)}
+          >
+            ↑ Bulk Import
+          </button>
+          <button className="btn-primary" onClick={() => setShowNew(true)}>+ New User</button>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <input type="search" placeholder="Search users…" value={search} onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
@@ -1111,6 +1267,7 @@ function UsersTab() {
         </select>
       </div>
       <DataTable columns={columns} data={users || []} isLoading={isLoading} emptyMessage="No users found matching your filters." />
+      <BulkImportModal isOpen={showBulkImport} onClose={() => setShowBulkImport(false)} />
       <NewUserModal isOpen={showNew} onClose={() => setShowNew(false)} />
       <EditUserModal isOpen={!!editUser} onClose={() => setEditUser(null)} user={editUser} />
       <ConfirmModal isOpen={!!confirmUser} onClose={() => setConfirmUser(null)}
