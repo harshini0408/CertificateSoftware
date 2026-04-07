@@ -48,6 +48,16 @@ def _user_response(u: User) -> UserResponse:
     )
 
 
+# ═══ GET /clubs ══════════════════════════════════════════════════════════════
+
+@router.get("", response_model=List[ClubResponse])
+async def list_clubs(_user: User = Depends(get_current_user)):
+    # Any authenticated user could potentially list active clubs (used by Guest dashboard)
+    # We could restrict to GUEST and SUPER_ADMIN
+    clubs = await Club.find(Club.is_active == True).to_list()
+    return [_club_response(c) for c in clubs]
+
+
 # ═══ GET /clubs/{club_id} ════════════════════════════════════════════════════
 
 @router.get("/{club_id}", response_model=ClubResponse)

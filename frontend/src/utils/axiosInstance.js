@@ -78,7 +78,9 @@ axiosInstance.interceptors.response.use(
 
         // Refresh failed — clear auth state and redirect.
         const { useAuthStore } = await import('../store/authStore')
+        const { default: queryClient } = await import('./queryClient')
         useAuthStore.getState().clearAuth()
+        queryClient.clear()
         window.location.href = '/login'
 
         return Promise.reject(refreshError)

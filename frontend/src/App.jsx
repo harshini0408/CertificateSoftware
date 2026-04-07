@@ -12,6 +12,7 @@ import DeptCoordinatorDashboard from './pages/DeptCoordinatorDashboard'
 import StudentDashboard from './pages/StudentDashboard'
 import VerifyPage from './pages/VerifyPage'
 import TemplateSelector from './pages/TemplateSelector'
+import GuestDashboard from './pages/GuestDashboard'
 
 // ── Role constants ─────────────────────────────────────────────────────────────
 const ROLES = {
@@ -56,7 +57,7 @@ export default function App() {
           path="/club/:club_id/events/:event_id"
           element={
             <ProtectedRoute
-              allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN, ROLES.GUEST]}
+              allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN]}
             >
               <EventDetail />
             </ProtectedRoute>
@@ -65,8 +66,18 @@ export default function App() {
         <Route
           path="/club/:club_id/events/:event_id/templates/select"
           element={
-            <ProtectedRoute allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN, ROLES.GUEST]}>
+            <ProtectedRoute allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN]}>
               <TemplateSelector />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Guest dashboard ────────────────────────────────────────────── */}
+        <Route
+          path="/guest"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.GUEST]}>
+              <GuestDashboard />
             </ProtectedRoute>
           }
         />

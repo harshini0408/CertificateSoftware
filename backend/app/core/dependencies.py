@@ -65,8 +65,6 @@ async def require_club_access(
         return current_user
 
     if current_user.role == UserRole.GUEST:
-        if current_user.club_id != club_id:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this club")
         return current_user
 
     raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
@@ -84,8 +82,6 @@ async def require_event_access(
         return current_user
 
     if current_user.role == UserRole.GUEST:
-        if current_user.club_id != club_id or current_user.event_id != event_id:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this event")
         return current_user
 
     if current_user.role == UserRole.CLUB_COORDINATOR:

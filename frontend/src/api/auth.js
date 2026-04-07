@@ -20,7 +20,7 @@ const roleRedirect = (data) => {
     case 'student':
       return '/student'
     case 'guest':
-      return `/club/${data.club_id}/events/${data.event_id}`
+      return '/guest'
     default:
       return '/login'
   }

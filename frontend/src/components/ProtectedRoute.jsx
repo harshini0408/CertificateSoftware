@@ -17,7 +17,7 @@ const roleHomePath = (role, store) => {
     case 'student':
       return '/student'
     case 'guest':
-      return `/club/${store.club_id}/events/${store.event_id}`
+      return `/guest`
     default:
       return '/login'
   }
@@ -48,24 +48,6 @@ export default function ProtectedRoute({ allowedRoles = [], children }) {
   // 2. Logged in but wrong role for this route.
   if (allowedRoles.length > 0 && !allowedRoles.includes(role)) {
     return <Navigate to={roleHomePath(role, store)} replace />
-  }
-
-  // 3. Guest scoping — guest may only visit their locked event.
-  if (role === 'guest') {
-    const routeClubId = params.club_id
-    const routeEventId = params.event_id
-
-    const clubMatch = !routeClubId || routeClubId === String(club_id)
-    const eventMatch = !routeEventId || routeEventId === String(event_id)
-
-    if (!clubMatch || !eventMatch) {
-      return (
-        <Navigate
-          to={`/club/${club_id}/events/${event_id}`}
-          replace
-        />
-      )
-    }
   }
 
   return children

@@ -437,10 +437,6 @@ function NewUserModal({ isOpen, onClose }) {
     if (!form.email.trim()) errs.email = 'Required'
     if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
-    if (selectedRole === 'guest') {
-      if (!form.club_id) errs.club_id = 'Required'
-      if (!form.event_id) errs.event_id = 'Required'
-    }
     if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
     if (selectedRole === 'student') {
       if (!form.department) errs.department = 'Required'
@@ -466,10 +462,6 @@ function NewUserModal({ isOpen, onClose }) {
 
     if (selectedRole === 'club_coordinator') {
       payload.club_id = form.club_id
-    }
-    if (selectedRole === 'guest') {
-      payload.club_id = form.club_id
-      payload.event_id = form.event_id
     }
     if (selectedRole === 'dept_coordinator' || selectedRole === 'student') {
       payload.department = form.department.trim()
@@ -536,26 +528,14 @@ function NewUserModal({ isOpen, onClose }) {
           </div>
 
           {/* Role-specific fields */}
-          {(selectedRole === 'club_coordinator' || selectedRole === 'guest') && (
+          {selectedRole === 'club_coordinator' && (
             <div>
               <label className="form-label">Club *</label>
-              <select className={`form-input ${errors.club_id ? 'form-input-error' : ''}`} value={form.club_id} onChange={(e) => { handleChange('club_id', e.target.value); if (selectedRole === 'guest') handleChange('event_id', ''); }}>
+              <select className={`form-input ${errors.club_id ? 'form-input-error' : ''}`} value={form.club_id} onChange={(e) => { handleChange('club_id', e.target.value); }}>
                 <option value="">Select club…</option>
                 {(clubsList || []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.slug})</option>)}
               </select>
               {errors.club_id && <p className="form-error">{errors.club_id}</p>}
-            </div>
-          )}
-          {selectedRole === 'guest' && (
-            <div>
-              <label className="form-label">
-                Event * {fetchingEvents && <span className="text-xs transition text-gray-400 ml-2">Loading...</span>}
-              </label>
-              <select className={`form-input ${errors.event_id ? 'form-input-error' : ''}`} value={form.event_id} onChange={(e) => handleChange('event_id', e.target.value)} disabled={!form.club_id || fetchingEvents}>
-                <option value="">Select event…</option>
-                {(eventsList || []).map((ev) => <option key={ev.id} value={ev.id}>{ev.name} ({new Date(ev.event_date).toLocaleDateString()})</option>)}
-              </select>
-              {errors.event_id && <p className="form-error">{errors.event_id}</p>}
             </div>
           )}
           {(selectedRole === 'dept_coordinator' || selectedRole === 'student') && (

@@ -9,7 +9,7 @@ class DeptCertificate(Document):
     cert_number: Indexed(str, unique=True)  # type: ignore[valid-type]
     department: str
     coordinator_user_id: str
-    
+
     # Reference to DeptAsset used for this certificate (optional for backward compatibility)
     dept_asset_id: Optional[PydanticObjectId] = None
 

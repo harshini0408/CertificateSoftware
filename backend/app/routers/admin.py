@@ -192,7 +192,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
 
     # Club validation
     club_oid = None
-    if body.club_id:
+    if body.club_id and body.role != "guest":
         club_oid = PydanticObjectId(body.club_id)
         club = await Club.get(club_oid)
         if not club or not club.is_active:
@@ -203,7 +203,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
 
     # Event validation
     event_oid = None
-    if body.event_id:
+    if body.event_id and body.role != "guest":
         event_oid = PydanticObjectId(body.event_id)
         event = await Event.get(event_oid)
         if not event:
@@ -233,10 +233,10 @@ async def create_user(body: UserCreate, _user: User = _admin):
         is_active=body.is_active,
         club_id=club_oid,
         event_id=event_oid,
-        department=body.department.strip() if body.department else None,
-        registration_number=body.registration_number.strip() if body.registration_number else None,
-        batch=body.batch.strip() if body.batch else None,
-        section=body.section.strip() if body.section else None,
+        department=body.department.strip() if body.department and body.role not in ["guest", "club_coordinator"] else None,
+        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
+        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
+        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
     )
     await new_user.insert()
 
