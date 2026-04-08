@@ -12,7 +12,6 @@ import GuestWizard from '../../components/GuestWizard'
 import { useEvent, eventKeys } from './eventsApi'
 import { useToastStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
-import axiosInstance from '../../utils/axiosInstance'
 
 import CertificateIssue from './CertificateIssue'
 import { BACKEND_URL } from '../../utils/axiosInstance'
@@ -76,70 +75,14 @@ function formatDateOnly(value) {
 // Overview Tab
 // ─────────────────────────────────────────────────────────────────────────────
 function OverviewTab({ event, clubId, eventId, onNextStep }) {
-  const navigate = useNavigate()
-  const qc = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-
-  // ── Asset upload state ─────────────────────────────────────────────────
-  const [logoFile, setLogoFile]         = useState(null)
-  const [logoPreview, setLogoPreview]   = useState(event?.assets?.logo_url ?? null)
-  const [sigFile, setSigFile]           = useState(null)
-  const [sigPreview, setSigPreview]     = useState(event?.assets?.signature_url ?? null)
-  const [uploadingAssets, setUploadingAssets] = useState(false)
+  const logoPreview = event?.assets?.logo_url ?? null
+  const sigPreview = event?.assets?.signature_url ?? null
 
   const toAssetSrc = (url, hash) => {
     if (!url) return null
     const withVersion = hash ? `${url}${url.includes('?') ? '&' : '?'}v=${hash}` : url
     if (withVersion.startsWith('blob:') || withVersion.startsWith('http')) return withVersion
     return `${BACKEND_URL}${withVersion}`
-  }
-
-  useEffect(() => {
-    if (!logoFile) setLogoPreview(event?.assets?.logo_url ?? null)
-  }, [event?.assets?.logo_url, logoFile])
-
-  useEffect(() => {
-    if (!sigFile) setSigPreview(event?.assets?.signature_url ?? null)
-  }, [event?.assets?.signature_url, sigFile])
-
-  // ── Asset handlers ─────────────────────────────────────────────────────
-  const handleLogoChange = (file) => {
-    setLogoFile(file)
-    setLogoPreview(URL.createObjectURL(file))
-  }
-
-  const handleSigChange = (file) => {
-    setSigFile(file)
-    setSigPreview(URL.createObjectURL(file))
-  }
-
-  const uploadAssets = async () => {
-    if (!logoFile && !sigFile) {
-      addToast({ type: 'warning', message: 'Select at least one asset to upload.' })
-      return
-    }
-    setUploadingAssets(true)
-    try {
-      const formData = new FormData()
-      if (logoFile) formData.append('logo', logoFile)
-      if (sigFile)  formData.append('signature', sigFile)
-
-      await axiosInstance.post(
-        `/clubs/${clubId}/events/${eventId}/assets`,
-        formData,
-        { headers: { 'Content-Type': 'multipart/form-data' } },
-      )
-      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
-      addToast({ type: 'success', message: 'Assets uploaded. Now add participants.' })
-      setLogoFile(null)
-      setSigFile(null)
-      if (onNextStep) onNextStep()
-    } catch (err) {
-      const msg = err?.response?.data?.detail || 'Asset upload failed.'
-      addToast({ type: 'error', message: msg })
-    } finally {
-      setUploadingAssets(false)
-    }
   }
 
   return (
@@ -153,8 +96,8 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
             ['Date',        event?.event_date
                               ? formatDateOnly(event.event_date)
                               : '—'],
+            ['Academic Year', event?.academic_year || '—'],
             ['Status',      <StatusBadge key="s" status={event?.status ?? 'draft'} />],
-            ['Description', event?.description || '—'],
           ].map(([label, value]) => (
             <div key={label} className="flex flex-col gap-0.5">
               <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -172,8 +115,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
       <section className="card p-6">
         <h2 className="section-title mb-1">Assets</h2>
         <p className="mb-5 text-sm text-gray-500">
-          Upload the club logo and organiser signature for this event.
-          The signature will have its background automatically removed.
+          The following club-level assets are used for this event.
         </p>
 
         <div className="grid gap-6 sm:grid-cols-2">
@@ -187,14 +129,6 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 className="h-24 w-auto rounded border border-gray-200 object-contain bg-gray-50 p-2"
               />
             )}
-            <FileUpload
-              id="logo-upload"
-              accept="image/*"
-              label="Drop logo here"
-              hint="PNG / JPG / SVG, max 5 MB"
-              maxSizeMB={5}
-              onFile={handleLogoChange}
-            />
           </div>
 
           {/* Signature */}
@@ -207,46 +141,11 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 className="h-24 w-auto rounded border border-gray-200 object-contain bg-gray-50 p-2"
               />
             )}
-            <FileUpload
-              id="sig-upload"
-              accept="image/*"
-              label="Drop signature here"
-              hint="PNG / JPG, max 5 MB — background will be removed"
-              maxSizeMB={5}
-              onFile={handleSigChange}
-            />
           </div>
         </div>
-
-        <div className="mt-5 flex justify-end">
-          <button
-            id="upload-assets-btn"
-            className="btn-primary"
-            onClick={uploadAssets}
-            disabled={uploadingAssets || (!logoFile && !sigFile)}
-          >
-            {uploadingAssets ? (
-              <><LoadingSpinner size="sm" label="" /> Uploading…</>
-            ) : (
-              'Upload Assets'
-            )}
-          </button>
-        </div>
-      </section>
-
-      {/* ── Certificate Templates section ──────────────────────────────── */}
-      <section className="card p-6">
-        <h2 className="section-title mb-1">Certificate Templates</h2>
-        <p className="mb-5 text-sm text-gray-500">
-          Select a pre-built template for each certificate type and click on it to place your Excel columns.
+        <p className="mt-5 text-xs text-gray-500">
+          If you want to change these assets, change it in Settings.
         </p>
-        <button
-          id="configure-templates-btn"
-          className="btn-primary"
-          onClick={() => navigate(`/club/${clubId}/events/${eventId}/templates/select`)}
-        >
-          🖼 Configure Templates & Field Positions
-        </button>
       </section>
     </div>
   )
@@ -255,7 +154,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Excel Upload Sub-tab
 // ─────────────────────────────────────────────────────────────────────────────
-function ExcelUploadTab({ clubId, eventId, onGoToTemplates }) {
+function ExcelUploadTab({ clubId, eventId }) {
   const addToast = useToastStore((s) => s.addToast)
   const [file, setFile] = useState(null)
   const [result, setResult] = useState(null)
@@ -265,18 +164,15 @@ function ExcelUploadTab({ clubId, eventId, onGoToTemplates }) {
   const downloadTemplate = async () => {
     setDownloading(true)
     try {
-      const resp = await axiosInstance.get(
-        `/clubs/${clubId}/events/${eventId}/excel-template`,
-        { responseType: 'blob' },
-      )
-      const url = URL.createObjectURL(resp.data)
-      const a   = document.createElement('a')
-      a.href    = url
-      a.download = `participants_template_${eventId}.xlsx`
+      const a = document.createElement('a')
+      a.href = `${BACKEND_URL}/clubs/${clubId}/events/${eventId}/excel-template`
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      a.download = ''
       a.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      addToast({ type: 'error', message: 'Failed to download template.' })
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Failed to download template.'
+      addToast({ type: 'error', message: msg })
     } finally {
       setDownloading(false)
     }
@@ -303,7 +199,7 @@ function ExcelUploadTab({ clubId, eventId, onGoToTemplates }) {
         message: `${data.created ?? 0} participant(s) imported successfully.`,
       })
       if ((data.created ?? 0) > 0) {
-        onGoToTemplates()
+        addToast({ type: 'info', message: 'Participants imported. Proceed to Certificates.' })
       }
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Upload failed.'
@@ -414,14 +310,7 @@ function ExcelUploadTab({ clubId, eventId, onGoToTemplates }) {
               </ul>
             </div>
           )}
-          {(result.created ?? 0) > 0 && (
-            <button
-              className="btn-primary mt-4 text-sm"
-              onClick={onGoToTemplates}
-            >
-              Configure Templates →
-            </button>
-          )}
+          {(result.created ?? 0) > 0 && null}
         </div>
       )}
     </div>
@@ -431,7 +320,7 @@ function ExcelUploadTab({ clubId, eventId, onGoToTemplates }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Manual Entry Sub-tab
 // ─────────────────────────────────────────────────────────────────────────────
-function ManualEntryTab({ clubId, eventId, event, onGoToTemplates }) {
+function ManualEntryTab({ clubId, eventId, event }) {
   const addToast = useToastStore((s) => s.addToast)
   const qc = useQueryClient()
 
@@ -568,7 +457,7 @@ const PARTICIPANT_SUBTABS = [
   { id: 'manual', label: 'Manual Entry' },
 ]
 
-function ParticipantsTab({ clubId, eventId, event, onGoToTemplates }) {
+function ParticipantsTab({ clubId, eventId, event }) {
   const [subTab, setSubTab] = useState('excel')
 
   return (
@@ -598,7 +487,6 @@ function ParticipantsTab({ clubId, eventId, event, onGoToTemplates }) {
         <ExcelUploadTab
           clubId={clubId}
           eventId={eventId}
-          onGoToTemplates={onGoToTemplates}
         />
       )}
       {subTab === 'manual' && (
@@ -606,7 +494,6 @@ function ParticipantsTab({ clubId, eventId, event, onGoToTemplates }) {
           clubId={clubId}
           eventId={eventId}
           event={event}
-          onGoToTemplates={onGoToTemplates}
         />
       )}
     </div>
@@ -624,9 +511,6 @@ export default function EventDetail() {
 
   const navigate = useNavigate()
   const { data: event, isLoading } = useEvent(club_id, event_id)
-
-  const goToTemplates = () =>
-    navigate(`/club/${club_id}/events/${event_id}/templates/select`)
 
   if (isLoading) {
     return (
@@ -751,7 +635,6 @@ export default function EventDetail() {
                 clubId={club_id}
                 eventId={event_id}
                 event={event}
-                onGoToTemplates={goToTemplates}
               />
             )}
             {activeTab === 'certificates' && (

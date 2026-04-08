@@ -6,6 +6,8 @@ from jose import JWTError
 from ..core.dependencies import get_current_user
 from ..core.security import decode_token, verify_password, hash_password
 from ..models.user import User
+from ..models.user import UserRole
+from ..models.club import Club
 from ..schemas.auth import LoginRequest, LoginResponse, MeResponse, PasswordChangeRequest, TokenResponse
 from ..services.auth_service import (
     authenticate_user,
@@ -33,6 +35,37 @@ async def login(body: LoginRequest, response: Response):
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password")
 
+    if user.role == UserRole.CLUB_COORDINATOR and not user.first_login_completed:
+        if (body.username or "").strip().lower() != user.username.lower():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "First login must use faculty ID as username",
+            )
+
+        provided_email = (body.email or "").strip().lower()
+        if not provided_email:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "First login requires faculty Gmail",
+            )
+        if provided_email != user.email.lower():
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "Faculty Gmail does not match this account",
+            )
+
+        user.first_login_completed = True
+        await user.save()
+
+    requires_profile_setup = False
+    if user.role == UserRole.CLUB_COORDINATOR and user.club_id:
+        club = await Club.get(user.club_id)
+        if club:
+            assets = getattr(club, "assets", None)
+            requires_profile_setup = not bool(
+                assets and assets.logo_path and assets.signature_path
+            )
+
     access, refresh = build_tokens(user)
     response.set_cookie("access_token", access, max_age=settings.access_token_expire_minutes * 60, **_COOKIE_DEFAULTS)
     response.set_cookie("refresh_token", refresh, max_age=settings.refresh_token_expire_days * 86400, **_COOKIE_DEFAULTS)
@@ -44,6 +77,7 @@ async def login(body: LoginRequest, response: Response):
         club_id=str(user.club_id) if user.club_id else None,
         event_id=str(user.event_id) if user.event_id else None,
         department=user.department,
+        requires_profile_setup=requires_profile_setup,
     )
 
 
@@ -111,6 +145,15 @@ async def me(current_user: User = Depends(get_current_user)):
     when sessionStorage has been cleared but the httpOnly cookie is still valid.
     """
     from ..services.auth_service import build_redirect
+    requires_profile_setup = False
+    if current_user.role == UserRole.CLUB_COORDINATOR and current_user.club_id:
+        club = await Club.get(current_user.club_id)
+        if club:
+            assets = getattr(club, "assets", None)
+            requires_profile_setup = not bool(
+                assets and assets.logo_path and assets.signature_path
+            )
+
     return MeResponse(
         role=current_user.role.value,
         name=current_user.name,
@@ -118,4 +161,5 @@ async def me(current_user: User = Depends(get_current_user)):
         club_id=str(current_user.club_id) if current_user.club_id else None,
         event_id=str(current_user.event_id) if current_user.event_id else None,
         department=current_user.department,
+        requires_profile_setup=requires_profile_setup,
     )

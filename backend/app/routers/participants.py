@@ -116,7 +116,12 @@ async def upload_participants(
             continue
         p = Participant(
             event_id=event_id, club_id=club_id, email=email,
-            registration_number=row.get("Registration Number", row.get("Reg No", "")),
+            registration_number=(
+                row.get("Registration Number")
+                or row.get("Reg No")
+                or row.get("Roll No")
+                or ""
+            ),
             cert_type=cert_type, fields=row,
             source=ParticipantSource.EXCEL, verified=True,
         )

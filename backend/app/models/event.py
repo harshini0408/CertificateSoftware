@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Literal
 
 from beanie import Document, PydanticObjectId
 from pydantic import BaseModel, Field, field_validator
@@ -26,6 +26,7 @@ class Event(Document):
     name: str
     description: Optional[str] = None
     event_date: Optional[datetime] = None
+    academic_year: Optional[Literal["2025-2026(EVEN)", "2026-2027(ODD)"]] = None
     status: EventStatus = EventStatus.DRAFT
 
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)

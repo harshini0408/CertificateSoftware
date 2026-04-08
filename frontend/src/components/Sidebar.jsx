@@ -101,7 +101,6 @@ function useNavItems() {
       return [
         { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard, label: 'Dashboard', end: true },
         { to: `/club/${effectiveClubId}?tab=events`,           icon: icons.calendar,  label: 'Events' },
-        { to: `/club/${effectiveClubId}?tab=templates`,        icon: icons.template,  label: 'Templates' },
         { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
       ]
 

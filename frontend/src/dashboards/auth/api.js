@@ -37,8 +37,12 @@ export function useLogin() {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: ({ username, password }) =>
-      axiosInstance.post('/auth/login', { username: username?.trim(), password }),
+    mutationFn: ({ username, email, password }) =>
+      axiosInstance.post('/auth/login', {
+        username: username?.trim(),
+        email: email?.trim() || undefined,
+        password,
+      }),
 
     onSuccess: ({ data }) => {
       setAuth(data)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9,16 +9,16 @@ import DataTable from '../../components/DataTable'
 import StatusBadge from '../../components/StatusBadge'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import ConfirmModal from '../../components/ConfirmModal'
-import { useClubDashboard, useClubMembers } from './api'
+import FileUpload from '../../components/FileUpload'
+import { useClubDashboard, useClubAssets, useUpdateClubAssets } from './api'
 import { useCreateEvent, useDeleteEvent } from './eventsApi'
-import { useImageTemplates } from './eventsApi'
 import { useAuthStore } from '../../store/authStore'
 import { useChangePassword } from '../auth/api'
 import axiosInstance from '../../utils/axiosInstance'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ── Tab ids ───────────────────────────────────────────────────────────────────
-const TABS = ['dashboard', 'events', 'templates', 'settings']
+const TABS = ['dashboard', 'events', 'settings']
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDate(iso) {
@@ -26,34 +26,17 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-const roleBadge = {
-  club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
-  guest: 'bg-amber-50 text-amber-700 ring-amber-200',
-}
-const roleLabel = {
-  club_coordinator: 'Coordinator',
-  guest: 'Guest',
-}
-
 // ── Icon helpers ──────────────────────────────────────────────────────────────
 const Icon = {
   events: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
-  active: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
   certs: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>,
   participants: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
-  email: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
-  failed: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Dashboard tab
 // ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab({ clubId, dashboard, isLoading }) {
-  const role = useAuthStore((s) => s.role)
-  const { data: members, isLoading: membersLoading } = useClubMembers(
-    role !== 'guest' ? clubId : null
-  )
-
   if (isLoading) return <LoadingSpinner fullPage label="Loading dashboard…" />
 
   const stats = dashboard?.stats || {}
@@ -77,14 +60,11 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
         <StatusBadge status={club.is_active ? 'Active' : 'Inactive'} size="sm" />
       </div>
 
-      {/* Stat cards — 2 rows of 3 */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard label="Total Events" value={stats.total_events ?? 0} icon={Icon.events} accent="navy" />
-        <StatCard label="Active Events" value={stats.active_events ?? 0} icon={Icon.active} accent="gold" />
         <StatCard label="Certificates Issued" value={stats.total_certificates_issued ?? 0} icon={Icon.certs} accent="green" />
         <StatCard label="Total Participants" value={stats.total_participants ?? 0} icon={Icon.participants} accent="blue" />
-        <StatCard label="Pending Emails" value={stats.pending_emails ?? 0} icon={Icon.email} accent="teal" />
-        <StatCard label="Failed Emails" value={stats.failed_emails ?? 0} icon={Icon.failed} accent="red" />
       </div>
 
       {/* Recent events */}
@@ -101,33 +81,6 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
         />
       </div>
 
-      {/* Members section — visible to coordinators only */}
-      {role !== 'guest' && (
-        <div>
-          <h2 className="section-title mb-3">Club Members</h2>
-          {membersLoading ? (
-            <LoadingSpinner label="Loading members…" />
-          ) : (members || []).length === 0 ? (
-            <p className="text-sm text-gray-500">No other members. Admin can add coordinators and guests.</p>
-          ) : (
-            <div className="flex flex-wrap gap-3">
-              {members.map((m) => (
-                <div key={m.id} className="card flex items-center gap-3 px-4 py-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-navy text-sm font-bold text-white shrink-0">
-                    {m.name?.charAt(0)?.toUpperCase() || '?'}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{m.name}</p>
-                    <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[m.role] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>
-                      {roleLabel[m.role] || m.role}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }
@@ -234,6 +187,20 @@ function EventsTab({ clubId }) {
                 <label className="form-label" htmlFor="date">Event Date</label>
                 <input id="date" type="date" className="form-input" {...register('event_date')} />
               </div>
+              <div>
+                <label className="form-label" htmlFor="academic_year">Academic Year *</label>
+                <select
+                  id="academic_year"
+                  className={`form-input ${errors.academic_year ? 'form-input-error' : ''}`}
+                  {...register('academic_year', { required: 'Academic year is required' })}
+                  defaultValue=""
+                >
+                  <option value="" disabled>Select academic year</option>
+                  <option value="2025-2026(EVEN)">2025-2026(EVEN)</option>
+                  <option value="2026-2027(ODD)">2026-2027(ODD)</option>
+                </select>
+                {errors.academic_year && <p className="form-error">{errors.academic_year.message}</p>}
+              </div>
               <div className="pt-2 flex justify-end gap-3">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="btn-secondary">Cancel</button>
                 <button type="submit" disabled={isSubmitting} className="btn-primary">{isSubmitting ? 'Creating...' : 'Create'}</button>
@@ -279,7 +246,7 @@ function TemplatesTab() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Certificate Templates</h1>
         <p className="text-sm text-gray-500 mt-1">
-          These are the pre-built templates available for your events. Go to an event → <strong>Overview</strong> → <strong>Configure Templates</strong> to assign one per role.
+          These are the pre-built templates available for your events.
         </p>
       </div>
 
@@ -342,8 +309,43 @@ function TemplatesTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Settings tab
 // ═══════════════════════════════════════════════════════════════════════════════
-function SettingsTab({ club, clubLoading }) {
+function SettingsTab({ club, clubId, clubLoading }) {
   const changePassword = useChangePassword()
+  const { data: assetState, isLoading: assetsLoading } = useClubAssets(clubId)
+  const updateAssets = useUpdateClubAssets(clubId)
+
+  const [logoFile, setLogoFile] = useState(null)
+  const [signatureFile, setSignatureFile] = useState(null)
+  const [logoPreview, setLogoPreview] = useState(null)
+  const [sigPreview, setSigPreview] = useState(null)
+
+  const toAssetSrc = (url, hash) => {
+    if (!url) return null
+    const withVersion = hash ? `${url}${url.includes('?') ? '&' : '?'}v=${hash}` : url
+    if (withVersion.startsWith('blob:') || withVersion.startsWith('http')) return withVersion
+    return `${BACKEND_URL}${withVersion}`
+  }
+
+  useEffect(() => {
+    if (!logoFile) {
+      setLogoPreview(toAssetSrc(assetState?.logo_url, assetState?.logo_hash))
+      return undefined
+    }
+    const objectUrl = URL.createObjectURL(logoFile)
+    setLogoPreview(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [logoFile, assetState?.logo_url, assetState?.logo_hash])
+
+  useEffect(() => {
+    if (!signatureFile) {
+      setSigPreview(toAssetSrc(assetState?.signature_url, assetState?.signature_hash))
+      return undefined
+    }
+    const objectUrl = URL.createObjectURL(signatureFile)
+    setSigPreview(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [signatureFile, assetState?.signature_url, assetState?.signature_hash])
+
   const [showCurrent, setShowCurrent] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const {
@@ -361,12 +363,19 @@ function SettingsTab({ club, clubLoading }) {
     )
   }
 
+  const onAssetSubmit = async () => {
+    if (!logoFile && !signatureFile) return
+    await updateAssets.mutateAsync({ logoFile, signatureFile })
+    setLogoFile(null)
+    setSignatureFile(null)
+  }
+
   if (clubLoading) return <LoadingSpinner fullPage label="Loading club info…" />
 
   return (
-    <div className="max-w-lg space-y-8">
+    <div className="space-y-8">
       {/* Club info (read-only) */}
-      <div>
+      <div className="max-w-2xl">
         <h2 className="section-title mb-3">Club Information</h2>
         <div className="card divide-y divide-gray-100 overflow-hidden">
           {[
@@ -385,8 +394,71 @@ function SettingsTab({ club, clubLoading }) {
         <p className="mt-2 text-xs text-gray-400">Contact admin to make changes.</p>
       </div>
 
+      {/* Logo + signature */}
+      <div className="max-w-3xl">
+        <h2 className="section-title mb-3">Logo and Signature</h2>
+        {assetsLoading ? (
+          <LoadingSpinner label="Loading current assets…" />
+        ) : (
+          <div className="card p-5 space-y-5">
+            <p className="text-sm text-gray-500">
+              Upload your club logo and faculty coordinator signature. These assets are reused in certificates.
+            </p>
+
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Club Logo</p>
+                {logoPreview && (
+                  <img
+                    src={logoPreview}
+                    alt="Club logo preview"
+                    className="h-24 w-auto rounded border border-gray-200 object-contain bg-gray-50 p-2"
+                  />
+                )}
+                <FileUpload
+                  id="club-logo-upload"
+                  accept="image/*"
+                  label="Drop logo here"
+                  hint="PNG / JPG / SVG, max 5 MB"
+                  maxSizeMB={5}
+                  onFile={setLogoFile}
+                />
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Faculty Signature</p>
+                {sigPreview && (
+                  <img
+                    src={sigPreview}
+                    alt="Signature preview"
+                    className="h-24 w-auto rounded border border-gray-200 object-contain bg-gray-50 p-2"
+                  />
+                )}
+                <FileUpload
+                  id="club-signature-upload"
+                  accept="image/*"
+                  label="Drop signature here"
+                  hint="PNG / JPG, max 5 MB"
+                  maxSizeMB={5}
+                  onFile={setSignatureFile}
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={onAssetSubmit}
+              disabled={updateAssets.isPending || (!logoFile && !signatureFile)}
+            >
+              {updateAssets.isPending ? <LoadingSpinner size="sm" label="" /> : 'Update Logo/Signature'}
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Change password */}
-      <div>
+      <div className="max-w-lg">
         <h2 className="section-title mb-3">Change Password</h2>
         <form onSubmit={handleSubmit(onSubmit)} className="card p-5 space-y-4">
           <div>
@@ -446,6 +518,7 @@ function SettingsTab({ club, clubLoading }) {
 export default function ClubDashboard() {
   const { club_id } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
+  const requiresProfileSetup = useAuthStore((s) => s.requires_profile_setup)
 
   const activeTab = TABS.includes(searchParams.get('tab'))
     ? searchParams.get('tab')
@@ -456,6 +529,12 @@ export default function ClubDashboard() {
 
   const { data: dashboard, isLoading: dashLoading } = useClubDashboard(club_id)
   const club = dashboard?.club || null
+
+  useEffect(() => {
+    if (requiresProfileSetup && activeTab !== 'settings') {
+      setSearchParams({ tab: 'settings' }, { replace: true })
+    }
+  }, [requiresProfileSetup, activeTab, setSearchParams])
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -485,13 +564,18 @@ export default function ClubDashboard() {
             </div>
 
             {/* Tab content */}
+            {requiresProfileSetup && (
+              <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                First login setup pending. Please upload club logo and faculty signature in Settings.
+              </div>
+            )}
+
             {activeTab === 'dashboard' && (
               <DashboardTab clubId={club_id} dashboard={dashboard} isLoading={dashLoading} />
             )}
             {activeTab === 'events' && <EventsTab clubId={club_id} />}
-            {activeTab === 'templates' && <TemplatesTab />}
             {activeTab === 'settings' && (
-              <SettingsTab club={club} clubLoading={dashLoading} />
+              <SettingsTab club={club} clubId={club_id} clubLoading={dashLoading} />
             )}
           </div>
         </main>

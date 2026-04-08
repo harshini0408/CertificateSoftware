@@ -69,7 +69,7 @@ export default function Login() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm({ defaultValues: { username: '', password: '' } })
+  } = useForm({ defaultValues: { username: '', email: '', password: '' } })
 
   // Already logged in — redirect to own dashboard
   if (isAuthenticated) {
@@ -130,24 +130,53 @@ export default function Login() {
             {/* Username */}
             <div>
               <label htmlFor="username" className="form-label">
-                Username
+                Faculty ID (Username)
               </label>
               <input
                 id="username"
                 type="text"
                 autoComplete="username"
                 autoFocus
-                placeholder="Enter your username"
+                placeholder="Enter your faculty ID"
                 className={`form-input ${errors.username ? 'form-input-error' : ''}`}
                 disabled={busy}
                 {...register('username', {
-                  required: 'Username is required.',
+                  required: 'Faculty ID is required.',
                   minLength: { value: 3, message: 'Username is too short.' },
                 })}
               />
               {errors.username && (
                 <p className="form-error" role="alert">
                   {errors.username.message}
+                </p>
+              )}
+            </div>
+
+            {/* Gmail (first login only) */}
+            <div>
+              <label htmlFor="email" className="form-label">
+                Faculty Gmail (First Login Only)
+              </label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder="Enter your Gmail for first login"
+                className={`form-input ${errors.email ? 'form-input-error' : ''}`}
+                disabled={busy}
+                {...register('email', {
+                  pattern: {
+                    value: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                    message: 'Enter a valid email address.',
+                  },
+                })}
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Required only the first time for club coordinators.
+              </p>
+              {errors.email && (
+                <p className="form-error" role="alert">
+                  {errors.email.message}
                 </p>
               )}
             </div>

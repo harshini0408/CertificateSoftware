@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class LoginRequest(BaseModel):
     username: str
+    email: Optional[str] = None
     password: str
 
 
@@ -15,6 +16,7 @@ class LoginResponse(BaseModel):
     club_id: Optional[str] = None
     event_id: Optional[str] = None
     department: Optional[str] = None
+    requires_profile_setup: bool = False
 
 
 class MeResponse(BaseModel):
@@ -25,6 +27,7 @@ class MeResponse(BaseModel):
     club_id: Optional[str] = None
     event_id: Optional[str] = None
     department: Optional[str] = None
+    requires_profile_setup: bool = False
 
 
 class PasswordChangeRequest(BaseModel):

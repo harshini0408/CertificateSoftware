@@ -88,6 +88,7 @@ async def create_club(body: ClubCreate, _user: User = _admin):
         email=body.contact_email,
         password_hash=hash_password(body.coordinator_password),
         role=UserRole.CLUB_COORDINATOR,
+        first_login_completed=False,
         club_id=club.id,
         is_active=True,
     )
@@ -230,6 +231,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
         email=email,
         password_hash=hash_password(password_input),
         role=UserRole(body.role),
+        first_login_completed=(body.role != "club_coordinator"),
         is_active=body.is_active,
         club_id=club_oid,
         event_id=event_oid,

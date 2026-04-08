@@ -23,6 +23,7 @@ class User(Document):
     password_hash: str
 
     role: UserRole = UserRole.STUDENT
+    first_login_completed: bool = True
     is_active: bool = True
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

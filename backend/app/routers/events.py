@@ -19,7 +19,7 @@ from ..models.field_position import FieldPosition
 from ..schemas.event import EventCreate, EventUpdate, EventResponse
 from ..services.signature_service import process_signature, save_logo
 from ..services.storage_service import storage_path_to_url
-from ..services.excel_service import generate_excel_template
+from ..services.excel_service import generate_excel_template, get_excel_template_filename
 
 router = APIRouter(prefix="/clubs/{club_id}/events", tags=["Events"])
 settings = get_settings()
@@ -50,6 +50,7 @@ def _event_response(e: Event) -> EventResponse:
     return EventResponse(
         id=str(e.id), club_id=str(e.club_id), name=e.name,
         description=e.description, event_date=e.event_date,
+        academic_year=e.academic_year,
         status=e.status.value, template_map={k: str(v) if v else None for k, v in e.template_map.items()},
         assets=e.assets.model_dump(),
         mapping_confirmed=e.mapping_confirmed,
@@ -89,8 +90,9 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
             inherited_assets = latest_with_assets.assets
             await club.set({"assets": inherited_assets.model_dump()})
 
-    event = Event(club_id=club_id, name=body.name, description=body.description,
-                  event_date=body.event_date, template_map=tmap, assets=inherited_assets)
+    event = Event(club_id=club_id, name=body.name,
+                  event_date=body.event_date, academic_year=body.academic_year,
+                  template_map=tmap, assets=inherited_assets)
     await event.insert()
     return _event_response(event)
 
@@ -260,5 +262,5 @@ async def download_excel_template(club_id: PydanticObjectId, event_id: PydanticO
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={event.name}_participants.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={get_excel_template_filename()}"},
     )

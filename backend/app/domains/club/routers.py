@@ -1,17 +1,19 @@
+import hashlib
 from typing import List
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 
 from ...core.dependencies import get_current_user, require_club_access, require_role
 from ...models.user import User, UserRole
 from ...models.club import Club
-from ...models.event import Event, EventStatus
+from ...models.event import Event
 from ...models.certificate import Certificate, CertStatus
-from ...models.email_log import EmailLog, EmailStatus
 from ...models.participant import Participant
 from ...schemas.club import ClubResponse
 from ...schemas.user import UserResponse
+from ...services.signature_service import process_signature, save_logo
+from ...services.storage_service import storage_path_to_url
 
 router = APIRouter(prefix="/clubs", tags=["Clubs"])
 coordinator_router = APIRouter(prefix="/coordinator", tags=["Coordinator"])
@@ -46,6 +48,11 @@ def _user_response(u: User) -> UserResponse:
         batch=u.batch,
         section=u.section,
     )
+
+
+def _club_assets_ready(club: Club) -> bool:
+    assets = getattr(club, "assets", None)
+    return bool(assets and assets.logo_path and assets.signature_path)
 
 
 # ═══ GET /clubs ══════════════════════════════════════════════════════════════
@@ -84,10 +91,6 @@ async def club_dashboard(
 
     # ── Stats ────────────────────────────────────────────────────────────────
     total_events = await Event.find(Event.club_id == club_id).count()
-    active_events = await Event.find(
-        Event.club_id == club_id,
-        Event.status == EventStatus.ACTIVE,
-    ).count()
 
     total_certificates_issued = await Certificate.find(
         Certificate.club_id == club_id,
@@ -97,29 +100,6 @@ async def club_dashboard(
     total_participants = await Participant.find(
         Participant.club_id == club_id,
     ).count()
-
-    # EmailLog doesn't have club_id — find via club certificates
-    club_cert_ids = [
-        c.id
-        for c in await Certificate.find(
-            Certificate.club_id == club_id,
-        ).to_list()
-    ]
-
-    pending_emails = 0
-    failed_emails = 0
-    if club_cert_ids:
-        pending_emails = await EmailLog.find(
-            {
-                "certificate_id": {"$in": club_cert_ids},
-                "status": {"$in": [EmailStatus.PENDING.value, EmailStatus.QUEUED.value]},
-            },
-        ).count()
-
-        failed_emails = await EmailLog.find(
-            {"certificate_id": {"$in": club_cert_ids}},
-            EmailLog.status == EmailStatus.FAILED,
-        ).count()
 
     # ── Recent events ────────────────────────────────────────────────────────
     recent_events_docs = await Event.find(
@@ -148,13 +128,74 @@ async def club_dashboard(
         "club": _club_response(club),
         "stats": {
             "total_events": total_events,
-            "active_events": active_events,
             "total_certificates_issued": total_certificates_issued,
             "total_participants": total_participants,
-            "pending_emails": pending_emails,
-            "failed_emails": failed_emails,
         },
         "recent_events": recent_events,
+        "assets_configured": _club_assets_ready(club),
+    }
+
+
+@router.get("/{club_id}/assets")
+async def get_club_assets(
+    club_id: PydanticObjectId,
+    _user: User = Depends(require_club_access),
+):
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    assets = club.assets
+    return {
+        "logo_url": assets.logo_url,
+        "logo_hash": assets.logo_hash,
+        "signature_url": assets.signature_url,
+        "signature_hash": assets.signature_hash,
+        "is_configured": _club_assets_ready(club),
+    }
+
+
+@router.post("/{club_id}/assets")
+async def update_club_assets(
+    club_id: PydanticObjectId,
+    logo: UploadFile | None = File(None),
+    signature: UploadFile | None = File(None),
+    _user: User = Depends(require_club_access),
+):
+    if not logo and not signature:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload logo or signature")
+
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    assets = club.assets
+    club_slug = club.slug or "club"
+
+    if logo:
+        logo_bytes = await logo.read()
+        assets.logo_hash = hashlib.md5(logo_bytes).hexdigest()
+        assets.logo_path = save_logo(logo_bytes, club_slug)
+        assets.logo_url = storage_path_to_url(assets.logo_path)
+
+    if signature:
+        sig_bytes = await signature.read()
+        assets.signature_hash = hashlib.md5(sig_bytes).hexdigest()
+        assets.signature_path = process_signature(sig_bytes, club_slug)
+        assets.signature_url = storage_path_to_url(assets.signature_path)
+
+    await club.set({"assets": assets.model_dump()})
+    await Event.find(Event.club_id == club_id).update_many({"$set": {"assets": assets.model_dump()}})
+
+    return {
+        "message": "Club assets updated",
+        "assets": {
+            "logo_url": assets.logo_url,
+            "logo_hash": assets.logo_hash,
+            "signature_url": assets.signature_url,
+            "signature_hash": assets.signature_hash,
+            "is_configured": _club_assets_ready(club),
+        },
     }
 
 
