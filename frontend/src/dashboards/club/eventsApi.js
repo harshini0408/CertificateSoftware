@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import axiosInstance from '../utils/axiosInstance'
-import { useToastStore } from '../store/uiStore'
+import axiosInstance from '../../utils/axiosInstance'
+import { useToastStore } from '../../store/uiStore'
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 function extractErrorMsg(err, fallback) {

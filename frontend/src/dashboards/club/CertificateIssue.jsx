@@ -1,18 +1,18 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import DataTable from '../components/DataTable'
-import StatusBadge from '../components/StatusBadge'
-import LoadingSpinner from '../components/LoadingSpinner'
+import DataTable from '../../components/DataTable'
+import StatusBadge from '../../components/StatusBadge'
+import LoadingSpinner from '../../components/LoadingSpinner'
 import {
   useCertificates,
   useGenerateCerts,
   useSendRemaining,
   useResendCert,
-} from '../api/certificates'
-import { BACKEND_URL } from '../utils/axiosInstance'
-import axiosInstance from '../utils/axiosInstance'
-import { useParticipants } from '../api/participants'
+} from './certificatesApi'
+import { BACKEND_URL } from '../../utils/axiosInstance'
+import axiosInstance from '../../utils/axiosInstance'
+import { useParticipants } from './participantsApi'
 
 const IST_TIMEZONE = 'Asia/Kolkata'
 const HAS_TZ_RE = /(Z|[+\-]\d{2}:\d{2})$/i

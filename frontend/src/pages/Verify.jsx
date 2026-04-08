@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
-import { useVerifyCert } from '../api/verify'
+import { useVerifyCert } from './verifyApi'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 // ── Cert type display map ─────────────────────────────────────────────────────

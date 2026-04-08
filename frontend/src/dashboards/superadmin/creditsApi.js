@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import axiosInstance from '../utils/axiosInstance'
+import axiosInstance from '../../utils/axiosInstance'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const creditKeys = {

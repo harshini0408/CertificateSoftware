@@ -4,14 +4,14 @@ import ProtectedRoute from './components/ProtectedRoute'
 import ToastProvider from './components/ToastProvider'
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
-import Login from './pages/Login'
+import Login from './dashboards/auth/Login'
 import AdminDashboard from './dashboards/superadmin'
 import ClubDashboard from './dashboards/club'
-import EventDetail from './pages/EventDetail'
+import EventDetail from './dashboards/club/EventDetail'
 import DeptCoordinatorDashboard from './dashboards/dept'
 import StudentDashboard from './dashboards/student'
-import VerifyPage from './pages/VerifyPage'
-import TemplateSelector from './pages/TemplateSelector'
+import VerifyPage from './pages/Verify'
+import TemplateSelector from './dashboards/club/TemplateSelector'
 import GuestDashboard from './dashboards/guest/GuestDashboard'
 import GuestHistory from './dashboards/guest/GuestHistory'
 

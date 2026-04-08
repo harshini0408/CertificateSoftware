@@ -13,7 +13,7 @@ import DataTable from '../../components/DataTable'
 import ConfirmModal from '../../components/ConfirmModal'
 
 import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../club/api'
-import { useUsers, useCreateUser, useUpdateUser, useDeactivateUser } from '../../api/users'
+import { useUsers, useCreateUser, useUpdateUser, useDeactivateUser } from './usersApi'
 import {
   useAdminStats,
   useAdminClubs,
@@ -23,7 +23,7 @@ import {
   useUpdateCreditRules,
   useBulkImportStudents,
 } from './api'
-import { useEvents } from '../../api/events'
+import { useEvents } from '../club/eventsApi'
 
 // ── Debounce hook ─────────────────────────────────────────────────────────────
 function useDebounce(value, delay = 300) {

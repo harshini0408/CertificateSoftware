@@ -16,12 +16,12 @@ import {
   useAllFieldPositions,
   useSaveFieldPositions,
   useEvent,
-} from '../api/events'
-import { useParticipants } from '../api/participants'
-import LoadingSpinner from '../components/LoadingSpinner'
-import Navbar from '../components/Navbar'
-import Sidebar from '../components/Sidebar'
-import { BACKEND_URL } from '../utils/axiosInstance'
+} from './eventsApi'
+import { useParticipants } from './participantsApi'
+import LoadingSpinner from '../../components/LoadingSpinner'
+import Navbar from '../../components/Navbar'
+import Sidebar from '../../components/Sidebar'
+import { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const MARKER_COLORS = [

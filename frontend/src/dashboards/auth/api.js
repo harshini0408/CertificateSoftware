@@ -1,9 +1,9 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import axiosInstance from '../utils/axiosInstance'
-import { useAuthStore } from '../store/authStore'
-import { useToastStore } from '../store/uiStore'
+import axiosInstance from '../../utils/axiosInstance'
+import { useAuthStore } from '../../store/authStore'
+import { useToastStore } from '../../store/uiStore'
 import { useNavigate } from 'react-router-dom'
-import queryClient from '../utils/queryClient'
+import queryClient from '../../utils/queryClient'
 
 // ── Role → redirect path ──────────────────────────────────────────────────────
 const roleRedirect = (data) => {

@@ -11,12 +11,12 @@ import {
   closestCenter,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import Navbar from '../components/Navbar'
-import Sidebar from '../components/Sidebar'
+import Navbar from '../../components/Navbar'
+import Sidebar from '../../components/Sidebar'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useExcelColumns, useFieldMapping, useConfirmMapping } from '../api/participants'
 import { useEvent } from '../api/events'
-import { useToastStore } from '../store/uiStore'
+import { useToastStore } from '../../store/uiStore'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Draggable column chip

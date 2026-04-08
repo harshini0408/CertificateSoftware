@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useLogin } from '../api/auth'
-import { useAuthStore } from '../store/authStore'
+import { useLogin } from './api'
+import { useAuthStore } from '../../store/authStore'
 import { Navigate } from 'react-router-dom'
-import LoadingSpinner from '../components/LoadingSpinner'
-import collegeBg from '../Images/college bg.jpeg'
-import collegeLogo from '../Images/College logo.png'
+import LoadingSpinner from '../../components/LoadingSpinner'
+import collegeBg from '../../Images/college bg.jpeg'
+import collegeLogo from '../../Images/College logo.png'
 
 // ── PSG Logo ───────────────────────────────────────────────────────────────
 function PsgLogo() {

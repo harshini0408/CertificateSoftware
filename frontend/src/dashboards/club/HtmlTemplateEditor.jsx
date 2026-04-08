@@ -41,15 +41,15 @@ import {
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 
-import Navbar from '../components/Navbar'
-import Sidebar from '../components/Sidebar'
+import Navbar from '../../components/Navbar'
+import Sidebar from '../../components/Sidebar'
 import LoadingSpinner from '../components/LoadingSpinner'
 import {
   useTemplate,
   useTemplateHtml,
   useUpdateTemplateHtml,
   useForkTemplate,
-} from '../api/templates'
+} from ./templatesApi
 
 // ── A4 reference canvas dimensions (pixels at 300 DPI) ───────────────────────
 const REF_W = 2480
