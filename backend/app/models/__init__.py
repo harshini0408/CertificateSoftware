@@ -14,6 +14,7 @@ from .image_template import ImageTemplate
 from .field_position import FieldPosition
 from .dept_asset import DeptAsset, DeptFieldPosition
 from .dept_certificate import DeptCertificate
+from .guest_session import GuestSession
 
 ALL_MODELS = [
     Club,
@@ -32,6 +33,7 @@ ALL_MODELS = [
     FieldPosition,
     DeptAsset,
     DeptCertificate,
+    GuestSession,
 ]
 
 __all__ = [
@@ -50,5 +52,6 @@ __all__ = [
     "ImageTemplate",
     "FieldPosition",    "DeptAsset", "DeptFieldPosition",
     "DeptCertificate",
+    "GuestSession",
     "ALL_MODELS",
 ]

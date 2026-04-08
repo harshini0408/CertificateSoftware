@@ -18,6 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from .models.email_log import EmailLog, EmailStatus
 from .models.certificate import Certificate, CertStatus
+from .models.guest_session import GuestSession
 from .services.email_service import send_certificate_email, get_daily_sent_count
 from .services.storage_service import storage_url_to_path
 from .services.credit_service import award_credits
@@ -166,6 +167,50 @@ async def _retry_failed_certs() -> None:
     )
 
 
+# ── Job 3: cleanup expired guest sessions ────────────────────────────────────
+
+async def _cleanup_expired_guest_sessions() -> None:
+    """Permanently delete expired GuestSession documents and their files.
+
+    A session is expired when expires_at <= now (i.e. 15 days have passed).
+    Both the certificate PNG files and the template PNG are removed from disk
+    before the MongoDB document is deleted.
+    Runs once every 24 hours.
+    """
+    from pathlib import Path as _Path
+
+    now = datetime.utcnow()
+    expired = await GuestSession.find(
+        GuestSession.expires_at <= now,
+    ).to_list()
+
+    logger.info("[SCHEDULER] cleanup_expired_guest_sessions: found %d expired session(s)", len(expired))
+
+    for session in expired:
+        # 1. Delete generated certificate PNGs
+        for path_str in (session.guest_generated_certs or []):
+            p = _Path(path_str)
+            if p.exists():
+                try:
+                    p.unlink()
+                except Exception as exc:
+                    logger.warning("[SCHEDULER] Could not delete cert file %s: %s", path_str, exc)
+
+        # 2. Delete template PNG
+        if session.guest_template_path:
+            p = _Path(session.guest_template_path)
+            if p.exists():
+                try:
+                    p.unlink()
+                except Exception as exc:
+                    logger.warning("[SCHEDULER] Could not delete template %s: %s", session.guest_template_path, exc)
+
+        # 3. Delete DB document
+        await session.delete()
+
+    logger.info("[SCHEDULER] cleanup_expired_guest_sessions: cleaned up %d session(s)", len(expired))
+
+
 # ── Public API ────────────────────────────────────────────────────────────
 
 def start_scheduler() -> None:
@@ -197,6 +242,16 @@ def start_scheduler() -> None:
         name="Retry failed certificate generation",
         replace_existing=True,
         misfire_grace_time=60,
+    )
+
+    # Job 3: cleanup expired guest sessions every 24 hours
+    _scheduler.add_job(
+        _cleanup_expired_guest_sessions,
+        trigger=IntervalTrigger(hours=24),
+        id="cleanup_expired_guest_sessions",
+        name="Cleanup expired guest sessions",
+        replace_existing=True,
+        misfire_grace_time=300,
     )
 
     _scheduler.start()

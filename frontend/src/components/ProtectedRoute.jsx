@@ -29,7 +29,6 @@ const roleHomePath = (role, store) => {
  * Wraps a page component and enforces:
  *   1. Authentication — unauthenticated users → /login
  *   2. Role authorisation — wrong role → user's own dashboard
- *   3. Guest scoping — guest users can only access their locked event
  *
  * Props:
  *   allowedRoles  string[]   Roles that may access this route.

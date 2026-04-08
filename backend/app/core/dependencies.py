@@ -49,6 +49,17 @@ def require_role(*roles: UserRole):
     return _checker
 
 
+# ── Guest-only gate ──────────────────────────────────────────────────────
+
+async def require_guest(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allow access only to active guest users."""
+    if current_user.role != UserRole.GUEST:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Guest access only")
+    return current_user
+
+
 # ── Club access gate ─────────────────────────────────────────────────────
 
 async def require_club_access(
@@ -64,9 +75,6 @@ async def require_club_access(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this club")
         return current_user
 
-    if current_user.role == UserRole.GUEST:
-        return current_user
-
     raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
 
 
@@ -79,9 +87,6 @@ async def require_event_access(
 ) -> User:
     """Ensure the user has permission to operate on *event_id*."""
     if current_user.role == UserRole.SUPER_ADMIN:
-        return current_user
-
-    if current_user.role == UserRole.GUEST:
         return current_user
 
     if current_user.role == UserRole.CLUB_COORDINATOR:

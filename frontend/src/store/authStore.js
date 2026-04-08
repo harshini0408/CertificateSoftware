@@ -12,8 +12,8 @@ import { persist, createJSONStorage } from 'zustand/middleware'
  *   user          – display name returned by /auth/login
  *   role          – 'super_admin' | 'club_coordinator' | 'dept_coordinator'
  *                   | 'student' | 'guest'
- *   club_id       – present for club_coordinator and guest roles
- *   event_id      – present for guest role only
+ *   club_id       – present for club_coordinator (unused for guest)
+ *   event_id      – unused for guest flow (deprecated)
  *   department    – present for dept_coordinator role
  *   isAuthenticated – derived boolean
  */

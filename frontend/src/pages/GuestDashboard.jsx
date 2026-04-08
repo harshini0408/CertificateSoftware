@@ -1,215 +1,127 @@
 import React, { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import axiosInstance from '../utils/axiosInstance'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
+import { useToastStore } from '../store/uiStore'
+import axiosInstance from '../utils/axiosInstance'
 import GuestWizard from '../components/GuestWizard'
-
-const DownloadIcon = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-    <polyline points="7 10 12 15 17 10"></polyline>
-    <line x1="12" y1="15" x2="12" y2="3"></line>
-  </svg>
-)
-
-const EyeIcon = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-    <circle cx="12" cy="12" r="3"></circle>
-  </svg>
-)
+import LoadingSpinner from '../components/LoadingSpinner'
+import Navbar from '../components/Navbar'
+import Sidebar from '../components/Sidebar'
 
 export default function GuestDashboard() {
   const user = useAuthStore((s) => s.user)
-  const [selectedClub, setSelectedClub] = useState('')
-  const [selectedEvent, setSelectedEvent] = useState('')
+  const addToast = useToastStore((s) => s.addToast)
+  const navigate = useNavigate()
 
-  // 1. Fetch clubs
-  const { data: clubs, isLoading: isLoadingClubs } = useQuery({
-    queryKey: ['guestClubs'],
-    queryFn: async () => {
-      const res = await axiosInstance.get('/clubs')
-      return res.data
-    },
-  })
+  const [eventName, setEventName] = useState('')
+  const [submittedName, setSubmittedName] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // 2. Fetch events for selected club
-  const { data: events, isLoading: isLoadingEvents } = useQuery({
-    queryKey: ['guestEvents', selectedClub],
-    queryFn: async () => {
-      const res = await axiosInstance.get(`/clubs/${selectedClub}/events`)
-      return res.data
-    },
-    enabled: !!selectedClub,
-  })
+  // Start fresh wrapper
+  const handleStartSession = async (e) => {
+    e.preventDefault()
+    const trimmed = eventName.trim()
+    if (trimmed.length < 3) {
+      addToast({ type: 'warning', message: 'Event name must be at least 3 characters long.' })
+      return
+    }
 
-  // Handle club change — reset event
-  const handleClubChange = (e) => {
-    setSelectedClub(e.target.value)
-    setSelectedEvent('')
+    setIsSubmitting(true)
+    try {
+      await axiosInstance.post('/guest/start-session', { event_name: trimmed })
+      setSubmittedName(trimmed)
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Failed to start session.'
+      addToast({ type: 'error', message: msg })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
-  // 3. Fetch previous certificates for this guest
-  const { data: certificates, isLoading: isLoadingCerts } = useQuery({
-    queryKey: ['guestCertificates', selectedClub, selectedEvent],
-    queryFn: async () => {
-      const res = await axiosInstance.get(`/clubs/${selectedClub}/events/${selectedEvent}/certificates`)
-      return res.data
-    },
-    enabled: !!selectedClub && !!selectedEvent,
-  })
-
-  // Filter certificates down to only those matching the current logged in guest's email.
-  // The guest user generated their own certificate in the system as a participant, or generated certificates for themselves.
-  const myCertificates = (certificates || []).filter(
-    (cert) => cert.participant_email?.toLowerCase() === user?.email?.toLowerCase() ||
-              cert.snapshot?.email?.toLowerCase() === user?.email?.toLowerCase()
-  )
-
-  return (
-    <div className="p-6 max-w-7xl mx-auto space-y-8">
-      {/* ── Selection Area ─────────────────────────────────────────────────── */}
-      <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-        <h2 className="text-xl font-semibold">Select Workspace</h2>
-        <p className="text-sm text-gray-500 pb-2">
-          Choose a club and event to manage or view your certificates.
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Club
-            </label>
-            <select
-              className="w-full form-input"
-              value={selectedClub}
-              onChange={handleClubChange}
-              disabled={isLoadingClubs}
-            >
-              <option value="">Select a club...</option>
-              {clubs?.map((club) => (
-                <option key={club.id} value={club.id}>
-                  {club.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Event
-            </label>
-            <select
-              className="w-full form-input"
-              value={selectedEvent}
-              onChange={(e) => setSelectedEvent(e.target.value)}
-              disabled={!selectedClub || isLoadingEvents}
-            >
-              <option value="">Select an event...</option>
-              {events?.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name} ({new Date(ev.event_date).toLocaleDateString()})
-                </option>
-              ))}
-            </select>
-          </div>
+  // Once a session is successfully created and we have the submittedName,
+  // we step directly into the Wizard.
+  if (submittedName) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <Navbar />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-7xl mx-auto space-y-8">
+              <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                <div className="mb-6 border-b border-gray-100 pb-4">
+                  <h2 className="text-xl font-semibold">Event: {submittedName}</h2>
+                  <p className="text-sm text-gray-500">
+                    Follow the steps below to upload templates and generate bulk certificates.
+                  </p>
+                </div>
+                <GuestWizard eventName={submittedName} />
+              </div>
+            </div>
+          </main>
         </div>
       </div>
+    )
+  }
 
-      {selectedClub && selectedEvent && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* ── Left Column: Generate Certificate (GuestWizard) ───────────── */}
-          <div className="lg:col-span-8 bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-            <div className="mb-6 border-b border-gray-100 pb-4">
-              <h2 className="text-xl font-semibold">Generate Certificate</h2>
-              <p className="text-sm text-gray-500">
-                Follow the steps below to upload templates and generate bulk certificates.
-              </p>
-            </div>
-            
-            {/* 
-              Force remount on user, club, or event change so that local state
-              (like step state in GuestWizard) gets completely wiped on change.
-            */}
-            <GuestWizard
-              key={`${user?.email}-${selectedClub}-${selectedEvent}`}
-              clubId={selectedClub}
-              eventId={selectedEvent}
+  // The initial event name form
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Navbar />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-7xl mx-auto space-y-8">
+            <div className="max-w-xl mx-auto bg-white p-8 rounded-2xl border border-gray-100 shadow-sm mt-12">
+              <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome, {user || 'Guest'}! Let's get started.</h1>
+          <p className="text-sm text-gray-500">
+            Enter a descriptive name for your certificate-generation event.
+          </p>
+        </div>
+
+        <form onSubmit={handleStartSession} className="space-y-6">
+          <div>
+            <label htmlFor="event-name" className="block text-sm font-semibold text-gray-800 mb-2">
+              Event Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              id="event-name"
+              type="text"
+              required
+              minLength={3}
+              maxLength={100}
+              placeholder="e.g. Annual Tech Symposium 2024"
+              value={eventName}
+              onChange={(e) => setEventName(e.target.value)}
+              className="w-full form-input px-4 py-3 rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 transition-colors"
             />
           </div>
 
-          {/* ── Right Column: Previous Certificates ───────────────────────── */}
-          <div className="lg:col-span-4 space-y-6">
-            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm relative">
-              <h2 className="text-xl font-semibold mb-4">Previous Certificates</h2>
-              <p className="text-sm text-gray-500 mb-6">
-                Certificates already generated for {user?.name || user?.email}.
-              </p>
+          <button
+            type="submit"
+            disabled={isSubmitting || eventName.trim().length < 3}
+            className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isSubmitting ? <><LoadingSpinner size="sm" label="" /> Starting…</> : 'Continue →'}
+          </button>
+        </form>
 
-              {isLoadingCerts ? (
-                <div className="text-center py-8 text-gray-400">Loading...</div>
-              ) : myCertificates.length === 0 ? (
-                <div className="text-center py-8 border-2 border-dashed border-gray-100 rounded-lg">
-                  <span className="text-gray-400 text-sm">No certificates found.</span>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {myCertificates.map((cert) => (
-                    <div
-                      key={cert.id}
-                      className="flex flex-col gap-2 p-4 border border-gray-100 rounded-lg bg-gray-50"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-mono text-xs font-semibold text-gray-800">
-                            {cert.cert_number}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {new Date(cert.issued_at || cert.generated_at || Date.now()).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${
-                            cert.status === 'emailed'
-                              ? 'bg-green-100 text-green-700'
-                              : cert.status === 'generated'
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-gray-200 text-gray-600'
-                          }`}
-                        >
-                          {cert.status}
-                        </span>
-                      </div>
-                      
-                      {cert.pdf_url && (
-                        <div className="flex gap-2 mt-2">
-                          <a
-                            href={cert.pdf_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-1 text-xs px-3 py-1.5 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 transition"
-                          >
-                            <EyeIcon className="w-3.5 h-3.5" /> View
-                          </a>
-                          <a
-                            href={cert.pdf_url}
-                            download={`${cert.cert_number}.png`}
-                            className="flex items-center gap-1 text-xs px-3 py-1.5 bg-blue-50 border border-blue-100 rounded text-blue-600 hover:bg-blue-100 transition"
-                          >
-                            <DownloadIcon className="w-3.5 h-3.5" /> Download
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="mt-8 pt-6 border-t border-gray-100 text-center">
+                <p className="text-sm text-gray-500">
+                  Looking for past certificates?
+                  <button
+                    onClick={() => navigate('/guest/history')}
+                    className="ml-2 text-indigo-600 font-semibold hover:underline"
+                  >
+                    View History
+                  </button>
+                </p>
+              </div>
             </div>
           </div>
-          
-        </div>
-      )}
+        </main>
+      </div>
     </div>
   )
 }

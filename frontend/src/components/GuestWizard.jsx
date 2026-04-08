@@ -17,8 +17,6 @@ import axiosInstance, { BACKEND_URL } from '../utils/axiosInstance'
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-const isValidId = (v) => v && v !== 'null' && v !== 'undefined'
-
 function resolveImgSrc(url) {
   if (!url) return null
   if (url.startsWith('blob:') || url.startsWith('http')) return url
@@ -88,7 +86,7 @@ function StepCard({ title, subtitle, children }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 1 — Upload PNG template
 // ─────────────────────────────────────────────────────────────────────────────
-function Step1({ clubId, eventId, initialTemplateUrl, initialBlobUrl, onComplete }) {
+function Step1({ initialTemplateUrl, initialBlobUrl, onComplete }) {
   const addToast = useToastStore((s) => s.addToast)
   const [file, setFile]           = useState(null)
   // Prefer blob URL (instant, no network) over server URL for local preview
@@ -107,7 +105,7 @@ function Step1({ clubId, eventId, initialTemplateUrl, initialBlobUrl, onComplete
       const fd = new FormData()
       fd.append('file', file)
       const { data } = await axiosInstance.post(
-        `/clubs/${clubId}/events/${eventId}/guest/template`,
+        `/guest/template`,
         fd,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
@@ -170,7 +168,7 @@ function Step1({ clubId, eventId, initialTemplateUrl, initialBlobUrl, onComplete
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 2 — Upload Excel + select columns
 // ─────────────────────────────────────────────────────────────────────────────
-function Step2({ clubId, eventId, initialState, onComplete, onBack }) {
+function Step2({ initialState, onComplete, onBack }) {
   const addToast = useToastStore((s) => s.addToast)
 
   const [file, setFile]                 = useState(null)
@@ -188,7 +186,7 @@ function Step2({ clubId, eventId, initialState, onComplete, onBack }) {
       const fd = new FormData()
       fd.append('file', file)
       const { data } = await axiosInstance.post(
-        `/clubs/${clubId}/events/${eventId}/guest/excel`,
+        `/guest/excel`,
         fd,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
@@ -218,7 +216,7 @@ function Step2({ clubId, eventId, initialState, onComplete, onBack }) {
     setSaving(true)
     try {
       await axiosInstance.post(
-        `/clubs/${clubId}/events/${eventId}/guest/config`,
+        `/guest/config`,
         { selected_columns: Array.from(selectedCols), email_column: emailCol },
       )
       addToast({ type: 'success', message: 'Column configuration saved.' })
@@ -337,7 +335,7 @@ function Step2({ clubId, eventId, initialState, onComplete, onBack }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 3 — Position fields on the canvas
 // ─────────────────────────────────────────────────────────────────────────────
-function Step3({ clubId, eventId, templateUrl, templateBlobUrl, selectedColumns, initialPositions, onComplete, onBack }) {
+function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions, onComplete, onBack }) {
   const addToast  = useToastStore((s) => s.addToast)
   const canvasRef = useRef(null)
   const imgRef    = useRef(null)
@@ -384,7 +382,7 @@ function Step3({ clubId, eventId, templateUrl, templateBlobUrl, selectedColumns,
       })
       const rect = canvasRef.current?.getBoundingClientRect()
       await axiosInstance.post(
-        `/clubs/${clubId}/events/${eventId}/field-positions`,
+        `/guest/field-positions`,
         {
           cert_type:         'guest',
           template_filename: '__guest__',
@@ -541,7 +539,7 @@ function Step3({ clubId, eventId, templateUrl, templateBlobUrl, selectedColumns,
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 4 — Generate certificates
 // ─────────────────────────────────────────────────────────────────────────────
-function Step4({ clubId, eventId, rowCount, onComplete, onBack }) {
+function Step4({ rowCount, onComplete, onBack }) {
   const addToast = useToastStore((s) => s.addToast)
   const [generating, setGenerating] = useState(false)
   const [result, setResult]         = useState(null)
@@ -550,7 +548,7 @@ function Step4({ clubId, eventId, rowCount, onComplete, onBack }) {
     setGenerating(true)
     setResult(null)
     try {
-      const { data } = await axiosInstance.post(`/clubs/${clubId}/events/${eventId}/guest/generate`)
+      const { data } = await axiosInstance.post(`/guest/generate`)
       setResult(data)
       if (data.generated > 0) addToast({ type: 'success', message: `${data.generated} certificate(s) generated!` })
     } catch (err) {
@@ -642,7 +640,7 @@ function Step4({ clubId, eventId, rowCount, onComplete, onBack }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 5 — Send emails + ZIP download
 // ─────────────────────────────────────────────────────────────────────────────
-function Step5({ clubId, eventId, generatedCount, emailsSent: initialEmailsSent, onBack }) {
+function Step5({ generatedCount, emailsSent: initialEmailsSent, onBack }) {
   const addToast   = useToastStore((s) => s.addToast)
   const [sending, setSending]         = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -652,7 +650,7 @@ function Step5({ clubId, eventId, generatedCount, emailsSent: initialEmailsSent,
   const sendEmails = async () => {
     setSending(true)
     try {
-      const { data } = await axiosInstance.post(`/clubs/${clubId}/events/${eventId}/guest/send-emails`)
+      const { data } = await axiosInstance.post(`/guest/send-emails`)
       setEmailResult(data)
       if (data.sent > 0) { setEmailsSent(true); addToast({ type: 'success', message: `${data.sent} email(s) sent!` }) }
     } catch (err) {
@@ -665,10 +663,10 @@ function Step5({ clubId, eventId, generatedCount, emailsSent: initialEmailsSent,
   const downloadZip = async () => {
     setDownloading(true)
     try {
-      const resp = await axiosInstance.get(`/clubs/${clubId}/events/${eventId}/guest/zip`, { responseType: 'blob' })
+      const resp = await axiosInstance.get(`/guest/zip`, { responseType: 'blob' })
       const url  = URL.createObjectURL(resp.data)
       const a    = document.createElement('a')
-      a.href = url; a.download = `certificates_${eventId}.zip`; a.click()
+      a.href = url; a.download = `certificates.zip`; a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
       addToast({ type: 'error', message: err?.response?.data?.detail || 'Download failed.' })
@@ -772,18 +770,8 @@ function Step5({ clubId, eventId, generatedCount, emailsSent: initialEmailsSent,
 // ─────────────────────────────────────────────────────────────────────────────
 // Main GuestWizard
 // ─────────────────────────────────────────────────────────────────────────────
-export default function GuestWizard({ clubId: propClubId, eventId: propEventId }) {
-  const auth = useAuthStore()
-
-  // Resolve IDs: URL params take priority; fall back to auth store JWT values.
-  // Guards against the string "null"/"undefined" that occurs when auth-store
-  // values are used to build the URL before being populated.
-  const clubId  = isValidId(propClubId)  ? propClubId  : auth.club_id
-  const eventId = isValidId(propEventId) ? propEventId : auth.event_id
-
+export default function GuestWizard({ eventName }) {
   const [step, setStep]         = useState(1)
-  const [loading, setLoading]   = useState(true)
-  const [status, setStatus]     = useState(null)
 
   // Per-step state carried between wizard steps
   const [templateUrl,    setTemplateUrl]    = useState(null)  // server path /storage/guest_templates/…
@@ -792,69 +780,12 @@ export default function GuestWizard({ clubId: propClubId, eventId: propEventId }
   const [fieldPositions, setFieldPositions] = useState(null)  // { positions }
   const [generatedCount, setGeneratedCount] = useState(0)
 
-  // Load persisted progress from backend on mount
-  useEffect(() => {
-    if (!clubId || !eventId) { setLoading(false); return }
-    ;(async () => {
-      try {
-        const { data } = await axiosInstance.get(`/clubs/${clubId}/events/${eventId}/guest/status`)
-        setStatus(data)
-        if (data.template_url) setTemplateUrl(data.template_url)
-        if (data.step2_complete) {
-          setExcelState({
-            headers:         data.all_excel_headers,
-            rowCount:        data.excel_row_count,
-            selectedColumns: data.selected_columns,
-            emailColumn:     data.email_column,
-          })
-        }
-        if (data.step3_complete && data.field_positions) {
-          setFieldPositions({ positions: data.field_positions.column_positions })
-        }
-        if (data.step4_complete) setGeneratedCount(data.generated_count)
-
-        // Resume at the furthest completed step
-        if      (data.step4_complete)  setStep(5)
-        else if (data.step3_complete)  setStep(4)
-        else if (data.step2_complete)  setStep(3)
-        else if (data.step1_complete)  setStep(2)
-        else                           setStep(1)
-      } catch {
-        setStep(1)  // first visit — start fresh
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [clubId, eventId])
-
-  // ── Guard: IDs still not resolved ─────────────────────────────────────────
-  if (!clubId || !eventId) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
-        <div className="text-4xl">⚠️</div>
-        <p className="text-gray-600 text-sm max-w-xs">
-          Could not determine your event ID. Please log out and log in again.
-        </p>
-      </div>
-    )
-  }
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 gap-4">
-        <LoadingSpinner label="Loading your workspace…" />
-      </div>
-    )
-  }
-
   return (
     <div className="max-w-4xl mx-auto">
       <StepIndicator current={step} />
 
       {step === 1 && (
         <Step1
-          clubId={clubId}
-          eventId={eventId}
           initialTemplateUrl={templateUrl}
           initialBlobUrl={templateBlob}
           onComplete={({ templateUrl: url, blobUrl }) => {
@@ -867,8 +798,6 @@ export default function GuestWizard({ clubId: propClubId, eventId: propEventId }
 
       {step === 2 && (
         <Step2
-          clubId={clubId}
-          eventId={eventId}
           initialState={excelState}
           onBack={() => setStep(1)}
           onComplete={(data) => { setExcelState(data); setStep(3) }}
@@ -877,8 +806,6 @@ export default function GuestWizard({ clubId: propClubId, eventId: propEventId }
 
       {step === 3 && (
         <Step3
-          clubId={clubId}
-          eventId={eventId}
           templateUrl={templateUrl}
           templateBlobUrl={templateBlob}
           selectedColumns={excelState?.selectedColumns || []}
@@ -890,8 +817,6 @@ export default function GuestWizard({ clubId: propClubId, eventId: propEventId }
 
       {step === 4 && (
         <Step4
-          clubId={clubId}
-          eventId={eventId}
           rowCount={excelState?.rowCount || 0}
           onBack={() => setStep(3)}
           onComplete={({ generated }) => { setGeneratedCount(generated); setStep(5) }}
@@ -900,10 +825,8 @@ export default function GuestWizard({ clubId: propClubId, eventId: propEventId }
 
       {step === 5 && (
         <Step5
-          clubId={clubId}
-          eventId={eventId}
           generatedCount={generatedCount}
-          emailsSent={status?.step5_emails_sent || false}
+          emailsSent={false}
           onBack={() => setStep(4)}
         />
       )}

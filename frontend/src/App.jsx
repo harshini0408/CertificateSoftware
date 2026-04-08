@@ -13,6 +13,7 @@ import StudentDashboard from './pages/StudentDashboard'
 import VerifyPage from './pages/VerifyPage'
 import TemplateSelector from './pages/TemplateSelector'
 import GuestDashboard from './pages/GuestDashboard'
+import GuestHistory from './pages/GuestHistory'
 
 // ── Role constants ─────────────────────────────────────────────────────────────
 const ROLES = {
@@ -78,6 +79,14 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.GUEST]}>
               <GuestDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/guest/history"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.GUEST]}>
+              <GuestHistory />
             </ProtectedRoute>
           }
         />

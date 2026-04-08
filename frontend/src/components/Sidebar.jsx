@@ -105,18 +105,11 @@ function useNavItems() {
         { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
       ]
 
-    case 'guest': {
-      // Guest always has club_id + event_id from JWT — use auth store directly
-      const { event_id: guestEventId } = useAuthStore.getState()
+    case 'guest':
       return [
-        {
-          to: `/club/${effectiveClubId}/events/${guestEventId}`,
-          icon: icons.certificate,
-          label: 'My Event',
-          end: true,
-        },
+        { to: '/guest',         icon: icons.dashboard,   label: 'Home',    end: true },
+        { to: '/guest/history', icon: icons.certificate, label: 'History', end: false },
       ]
-    }
 
     case 'dept_coordinator':
       return [

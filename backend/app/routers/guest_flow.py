@@ -1,18 +1,21 @@
 """
-Guest Flow Router — 5-step wizard backend.
+Guest Flow Router — 5-step certificate wizard backend.
 
-All routes are prefixed: /clubs/{club_id}/events/{event_id}/guest
-All routes are protected by require_event_access (guest role check already
-verifies club_id + event_id match the JWT).
+All routes are prefixed: /guest
+All routes are protected by require_guest.
 
-Step 1  POST /template         — Upload custom PNG background template
-Step 2  POST /excel            — Upload XLSX, parse headers + data
-        POST /config           — Save selected_columns + email_column
-Step 3  POST /field-positions  — Reused from image_templates.py
-Step 4  POST /generate         — Pillow batch generation
-Step 5  GET  /zip              — Download all generated PNGs as ZIP
-        POST /send-emails      — Email each certificate to the email column
-        GET  /status           — Poll current guest event state
+POST /guest/start-session    — Create a new GuestSession (event name entry)
+POST /guest/template         — Step 1: Upload custom PNG background template
+POST /guest/excel            — Step 2a: Upload XLSX, parse headers + data
+POST /guest/config           — Step 2b: Save selected_columns + email_column
+POST /guest/field-positions  — Step 3: Save field positions for this session
+POST /guest/generate         — Step 4: Pillow batch generation
+GET  /guest/zip              — Step 5: Download all generated PNGs as ZIP (current session)
+POST /guest/send-emails      — Step 5: Email each certificate to the email column
+GET  /guest/status           — Poll current guest session state
+
+GET  /guest/history                      — List all non-expired sessions for this guest
+GET  /guest/sessions/{session_id}/zip    — Re-download ZIP for a past session
 """
 
 import asyncio
@@ -20,39 +23,41 @@ import io
 import logging
 import uuid
 import zipfile
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from ..config import get_settings
-from ..core.dependencies import require_event_access
-from ..models.event import Event
+from ..core.dependencies import require_guest
 from ..models.field_position import FieldPosition
+from ..models.guest_session import GuestSession
 from ..models.user import User
 from ..services.email_service import send_certificate_email
-from ..services.storage_service import storage_path_to_url
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 router = APIRouter(
-    prefix="/clubs/{club_id}/events/{event_id}/guest",
+    prefix="/guest",
     tags=["Guest Flow"],
 )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _guest_certs_dir(club_id: str, event_id: str) -> Path:
-    """Directory where generated guest certificates are stored."""
-    d = settings.certs_dir / "guest" / str(club_id) / str(event_id)
+def _guest_certs_dir(session_id: str) -> Path:
+    """Directory where generated guest certificates are stored for a session."""
+    d = settings.certs_dir / "guest" / session_id
     d.mkdir(parents=True, exist_ok=True)
     return d
+
 
 def _guest_templates_dir() -> Path:
     """Directory where guest-uploaded PNG templates are stored."""
@@ -61,26 +66,81 @@ def _guest_templates_dir() -> Path:
     return d
 
 
+async def _resolve_active_session(user: User) -> GuestSession:
+    """Return the most recent non-expired GuestSession for this user.
+
+    Raises HTTP 400 if no active session exists — the guest must call
+    POST /guest/start-session first.
+    """
+    session = await GuestSession.find_one(
+        GuestSession.user_id == user.id,
+        GuestSession.expires_at > datetime.utcnow(),
+        sort=[("created_at", -1)],
+    )
+    if not session:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No active guest session. Please start a new session from the dashboard.",
+        )
+    return session
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# START SESSION
+# POST /guest/start-session
+# ─────────────────────────────────────────────────────────────────────────────
+
+class StartSessionRequest(BaseModel):
+    event_name: str
+
+    @field_validator("event_name")
+    @classmethod
+    def validate_event_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Event name must be at least 3 characters")
+        if len(v) > 100:
+            raise ValueError("Event name must be at most 100 characters")
+        return v
+
+
+@router.post("/start-session")
+async def start_guest_session(
+    body: StartSessionRequest,
+    current_user: User = Depends(require_guest),
+):
+    """Create a new GuestSession for this guest user.
+
+    Each call creates a fresh session; previous sessions remain accessible
+    in history until they expire (15 days).
+    """
+    now = datetime.utcnow()
+    session = GuestSession(
+        user_id=current_user.id,
+        event_name=body.event_name,
+        created_at=now,
+        expires_at=now + timedelta(days=15),
+    )
+    await session.insert()
+    return {
+        "session_id": str(session.id),
+        "event_name": session.event_name,
+        "expires_at": session.expires_at.isoformat(),
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 1 — Upload custom PNG template
-# POST /clubs/{club_id}/events/{event_id}/guest/template
+# POST /guest/template
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/template")
 async def upload_guest_template(
-    club_id: PydanticObjectId,
-    event_id: PydanticObjectId,
     file: UploadFile = File(...),
-    _user: User = Depends(require_event_access),
+    current_user: User = Depends(require_guest),
 ):
-    """Upload a PNG file as the guest's custom certificate background.
-
-    The file is stored in storage/guest_templates/ and the path is saved
-    on the Event document as ``guest_template_path``.
-    """
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+    """Upload a PNG file as the guest's custom certificate background."""
+    session = await _resolve_active_session(current_user)
 
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -89,19 +149,18 @@ async def upload_guest_template(
         )
 
     content = await file.read()
-    if len(content) > 20 * 1024 * 1024:  # 20 MB hard cap
+    if len(content) > 20 * 1024 * 1024:
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             "Template image must be smaller than 20 MB",
         )
 
-    # Save with a unique name so concurrent uploads don't collide
     ext = Path(file.filename or "template.png").suffix or ".png"
-    filename = f"guest_{club_id}_{event_id}_{uuid.uuid4().hex[:8]}{ext}"
+    filename = f"guest_{session.id}_{uuid.uuid4().hex[:8]}{ext}"
     dest = _guest_templates_dir() / filename
     dest.write_bytes(content)
 
-    await event.set({"guest_template_path": str(dest)})
+    await session.set({"guest_template_path": str(dest)})
 
     preview_url = f"/storage/guest_templates/{filename}"
     return {
@@ -113,24 +172,16 @@ async def upload_guest_template(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 2a — Upload XLSX, parse and return headers
-# POST /clubs/{club_id}/events/{event_id}/guest/excel
+# POST /guest/excel
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/excel")
 async def upload_guest_excel(
-    club_id: PydanticObjectId,
-    event_id: PydanticObjectId,
     file: UploadFile = File(...),
-    _user: User = Depends(require_event_access),
+    current_user: User = Depends(require_guest),
 ):
-    """Parse an uploaded XLSX file and return its column headers + row count.
-
-    The parsed rows are stored temporarily on the Event document so that
-    Step 4 (generation) can reference them without re-uploading.
-    """
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+    """Parse an uploaded XLSX file and return its column headers + row count."""
+    session = await _resolve_active_session(current_user)
 
     content = await file.read()
     if len(content) > 20 * 1024 * 1024:
@@ -154,7 +205,6 @@ async def upload_guest_excel(
                 status.HTTP_400_BAD_REQUEST, "No column headers found in the first row"
             )
 
-        # Parse all rows into list-of-dicts for later use
         parsed_rows: List[Dict] = []
         for row in rows_iter:
             if all(cell is None for cell in row):
@@ -174,10 +224,8 @@ async def upload_guest_excel(
         logger.error("Excel parse error: %s", exc)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Failed to parse Excel: {exc}")
 
-    # Persist parsed data on the event (will be used in Step 4)
-    await event.set({
+    await session.set({
         "guest_excel_data": parsed_rows,
-        # Reset downstream state since a new file was uploaded
         "guest_selected_columns": None,
         "guest_email_column": None,
         "guest_generated_certs": None,
@@ -193,7 +241,7 @@ async def upload_guest_excel(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 2b — Save column selection + email column
-# POST /clubs/{club_id}/events/{event_id}/guest/config
+# POST /guest/config
 # ─────────────────────────────────────────────────────────────────────────────
 
 class GuestConfigRequest(BaseModel):
@@ -203,29 +251,21 @@ class GuestConfigRequest(BaseModel):
 
 @router.post("/config")
 async def save_guest_config(
-    club_id: PydanticObjectId,
-    event_id: PydanticObjectId,
     body: GuestConfigRequest,
-    _user: User = Depends(require_event_access),
+    current_user: User = Depends(require_guest),
 ):
     """Persist which columns should be printed and which is the email column."""
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+    session = await _resolve_active_session(current_user)
 
     if not body.selected_columns:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "At least one column must be selected",
         )
-    if body.email_column not in body.selected_columns and body.email_column:
-        # email_column doesn't have to be in selected_columns (it may be metadata-only)
-        pass
 
-    await event.set({
+    await session.set({
         "guest_selected_columns": body.selected_columns,
         "guest_email_column": body.email_column,
-        # Reset certs so old stale certs are not mixed with new config
         "guest_generated_certs": None,
         "guest_emails_sent": False,
     })
@@ -238,50 +278,97 @@ async def save_guest_config(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STEP 3 — Save field positions for this session
+# POST /guest/field-positions
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ColumnPositionEntry(BaseModel):
+    x_percent: float
+    y_percent: float
+    font_size_percent: float = 3.2
+
+
+class GuestFieldPositionsRequest(BaseModel):
+    column_positions: Dict[str, ColumnPositionEntry]
+    display_width: float = 580.0
+    confirmed: bool = True
+
+
+@router.post("/field-positions")
+async def save_guest_field_positions(
+    body: GuestFieldPositionsRequest,
+    current_user: User = Depends(require_guest),
+):
+    """Save or update field positions for the current guest session.
+
+    Uses session.id as the event_id in FieldPosition, cert_type='guest'.
+    """
+    session = await _resolve_active_session(current_user)
+
+    # Serialise Pydantic models to plain dicts
+    column_positions_dict: Dict[str, Dict[str, float]] = {
+        col: {
+            "x_percent": pos.x_percent,
+            "y_percent": pos.y_percent,
+            "font_size_percent": pos.font_size_percent,
+        }
+        for col, pos in body.column_positions.items()
+    }
+
+    # Upsert: update if exists, insert if not
+    existing = await FieldPosition.find_one(
+        FieldPosition.event_id == session.id,
+        FieldPosition.cert_type == "guest",
+    )
+    if existing:
+        await existing.set({
+            "column_positions": column_positions_dict,
+            "display_width": body.display_width,
+            "confirmed": body.confirmed,
+        })
+    else:
+        await FieldPosition(
+            event_id=session.id,
+            cert_type="guest",
+            template_filename="__guest__",
+            column_positions=column_positions_dict,
+            display_width=body.display_width,
+            confirmed=body.confirmed,
+        ).insert()
+
+    return {"message": "Field positions saved", "session_id": str(session.id)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STEP 4 — Generate certificates (Pillow batch)
-# POST /clubs/{club_id}/events/{event_id}/guest/generate
+# POST /guest/generate
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/generate")
 async def generate_guest_certificates(
-    club_id: PydanticObjectId,
-    event_id: PydanticObjectId,
-    _user: User = Depends(require_event_access),
+    current_user: User = Depends(require_guest),
 ):
-    """Generate one PNG certificate per Excel row using the Pillow pipeline.
+    """Generate one PNG certificate per Excel row using the Pillow pipeline."""
+    session = await _resolve_active_session(current_user)
 
-    Requires:
-    - guest_template_path: set in Step 1
-    - guest_excel_data:    set in Step 2a
-    - guest_selected_columns + guest_email_column: set in Step 2b
-    - FieldPosition confirmed:  set in Step 3 via the shared /field-positions endpoint
-
-    Returns list of generated certificate paths and a summary.
-    """
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
-
-    # Validate prerequisites
-    if not event.guest_template_path or not Path(event.guest_template_path).exists():
+    if not session.guest_template_path or not Path(session.guest_template_path).exists():
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "No valid certificate template found. Please complete Step 1 first.",
         )
-    if not event.guest_excel_data:
+    if not session.guest_excel_data:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "No Excel data found. Please complete Step 2 first.",
         )
-    if not event.guest_selected_columns or not event.guest_email_column:
+    if not session.guest_selected_columns or not session.guest_email_column:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Column configuration not saved. Please complete Step 2 first.",
         )
 
-    # Fetch field positions (Step 3) — we use cert_type="guest" for guest events
     fp = await FieldPosition.find_one(
-        FieldPosition.event_id == event_id,
+        FieldPosition.event_id == session.id,
         FieldPosition.cert_type == "guest",
     )
     if not fp:
@@ -290,14 +377,13 @@ async def generate_guest_certificates(
             "Field positions not configured. Please complete Step 3 first.",
         )
 
-    template_path = Path(event.guest_template_path)
-    output_dir = _guest_certs_dir(str(club_id), str(event_id))
-    rows = event.guest_excel_data
+    template_path = Path(session.guest_template_path)
+    output_dir = _guest_certs_dir(str(session.id))
+    rows = session.guest_excel_data
 
     generated: List[str] = []
     errors: List[str] = []
 
-    # Run CPU-bound Pillow work in a thread pool
     for idx, row in enumerate(rows):
         safe_name = f"cert_{idx+1:04d}_{uuid.uuid4().hex[:6]}.png"
         out_path = output_dir / safe_name
@@ -314,7 +400,7 @@ async def generate_guest_certificates(
             logger.error("Error generating cert for row %d: %s", idx + 1, exc)
             errors.append(f"Row {idx + 1}: {exc}")
 
-    await event.set({
+    await session.set({
         "guest_generated_certs": generated,
         "guest_emails_sent": False,
     })
@@ -337,14 +423,12 @@ def _render_guest_certificate(
 
     _FONTS_DIR = Path(__file__).parent.parent / "static" / "fonts"
     _DEFAULT_FONT = _FONTS_DIR / "PlayfairDisplay.ttf"
-    _ALT_FONT = _FONTS_DIR / "PlayfairDisplay.ttf"
-    DEFAULT_FONT_PERCENT =2.7
+    DEFAULT_FONT_PERCENT = 2.7
 
-    def _load_font(size: int, is_main: bool = True):
+    def _load_font(size: int):
         try:
-            f = _DEFAULT_FONT if is_main else _ALT_FONT
-            if f.exists():
-                return ImageFont.truetype(str(f), size)
+            if _DEFAULT_FONT.exists():
+                return ImageFont.truetype(str(_DEFAULT_FONT), size)
         except Exception:
             pass
         return ImageFont.load_default()
@@ -377,92 +461,45 @@ def _render_guest_certificate(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 5a — Download all certificates as ZIP
-# GET /clubs/{club_id}/events/{event_id}/guest/zip
+# STEP 5a — Download all certificates as ZIP (current session)
+# GET /guest/zip
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/zip")
 async def download_guest_zip(
-    club_id: PydanticObjectId,
-    event_id: PydanticObjectId,
-    _user: User = Depends(require_event_access),
+    current_user: User = Depends(require_guest),
 ):
-    """Return all generated guest certificates as a single zip file."""
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
-
-    if not event.guest_generated_certs:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "No certificates have been generated yet. Please complete Step 4 first.",
-        )
-
-    existing = [p for p in event.guest_generated_certs if Path(p).exists()]
-    if not existing:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            "Certificate files not found on disk. Please regenerate.",
-        )
-
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path_str in existing:
-            p = Path(path_str)
-            zf.write(p, arcname=p.name)
-    zip_buf.seek(0)
-
-    event_name_safe = (event.name or "event").replace(" ", "_")
-    return StreamingResponse(
-        zip_buf,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{event_name_safe}_certificates.zip"'
-        },
-    )
+    """Return all generated guest certificates as a single ZIP (current session)."""
+    session = await _resolve_active_session(current_user)
+    return _build_zip_response(session)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 5b — Send emails
-# POST /clubs/{club_id}/events/{event_id}/guest/send-emails
+# POST /guest/send-emails
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/send-emails")
 async def send_guest_emails(
-    club_id: PydanticObjectId,
-    event_id: PydanticObjectId,
-    _user: User = Depends(require_event_access),
+    current_user: User = Depends(require_guest),
 ):
-    """Send each generated certificate to the email address in the email column.
+    """Send each generated certificate to the email address in the email column."""
+    session = await _resolve_active_session(current_user)
 
-    Matches generated certificate files (by index) to Excel rows.
-    """
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
-
-    if not event.guest_generated_certs:
+    if not session.guest_generated_certs:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "No certificates available. Please complete Step 4 first.",
         )
-    if not event.guest_email_column:
+    if not session.guest_email_column:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Email column not configured. Please complete Step 2 first.",
         )
 
-    rows = event.guest_excel_data or []
-    certs = event.guest_generated_certs or []
-    email_col = event.guest_email_column
-
-    # Try to get the club name for email body
-    try:
-        from ..models.club import Club
-        club = await Club.get(club_id)
-        club_name = club.name if club else "Your Club"
-    except Exception:
-        club_name = "Your Club"
+    rows = session.guest_excel_data or []
+    certs = session.guest_generated_certs or []
+    email_col = session.guest_email_column
 
     sent = 0
     failed = 0
@@ -480,7 +517,6 @@ async def send_guest_emails(
             failed += 1
             continue
 
-        # Determine recipient name from common name columns
         recipient_name = ""
         for name_key in ("Name", "name", "Full Name", "full_name", "Student Name"):
             if name_key in row and row[name_key]:
@@ -489,14 +525,14 @@ async def send_guest_emails(
         if not recipient_name:
             recipient_name = recipient_email.split("@")[0]
 
-        cert_number = f"GUEST-{str(event_id)[-6:]}-{idx+1:04d}"
+        cert_number = f"GUEST-{str(session.id)[-6:]}-{idx+1:04d}"
         try:
             success = await send_certificate_email(
                 recipient_email=recipient_email,
                 recipient_name=recipient_name,
                 cert_number=cert_number,
-                event_name=event.name,
-                club_name=club_name,
+                event_name=session.event_name,
+                club_name="Guest Event",
                 png_path=cert_path,
             )
             if success:
@@ -509,7 +545,7 @@ async def send_guest_emails(
             errors.append(f"Row {idx + 1}: {exc}")
 
     if sent > 0:
-        await event.set({"guest_emails_sent": True})
+        await session.set({"guest_emails_sent": True})
 
     return {
         "sent": sent,
@@ -520,49 +556,147 @@ async def send_guest_emails(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STATUS — Poll current guest event state
-# GET /clubs/{club_id}/events/{event_id}/guest/status
+# STATUS — Poll current guest session state
+# GET /guest/status
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/status")
 async def get_guest_status(
-    club_id: PydanticObjectId,
-    event_id: PydanticObjectId,
-    _user: User = Depends(require_event_access),
+    current_user: User = Depends(require_guest),
 ):
-    """Return the current state of the guest wizard for this event."""
-    event = await Event.get(event_id)
-    if not event or event.club_id != club_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+    """Return the current state of the active guest session."""
+    session = await _resolve_active_session(current_user)
 
-    # Check if field positions have been configured
     fp = await FieldPosition.find_one(
-        FieldPosition.event_id == event_id,
+        FieldPosition.event_id == session.id,
         FieldPosition.cert_type == "guest",
     )
 
     template_url = None
-    if event.guest_template_path:
-        tmpl = Path(event.guest_template_path)
+    if session.guest_template_path:
+        tmpl = Path(session.guest_template_path)
         if tmpl.exists():
             template_url = f"/storage/guest_templates/{tmpl.name}"
 
     return {
-        "step1_complete": bool(event.guest_template_path and Path(event.guest_template_path).exists()),
+        "session_id": str(session.id),
+        "event_name": session.event_name,
+        "expires_at": session.expires_at.isoformat(),
+        "step1_complete": bool(session.guest_template_path and Path(session.guest_template_path).exists()),
         "template_url": template_url,
-        "step2_complete": bool(event.guest_excel_data and event.guest_selected_columns and event.guest_email_column),
-        "excel_row_count": len(event.guest_excel_data) if event.guest_excel_data else 0,
-        "selected_columns": event.guest_selected_columns or [],
-        "email_column": event.guest_email_column,
+        "step2_complete": bool(
+            session.guest_excel_data
+            and session.guest_selected_columns
+            and session.guest_email_column
+        ),
+        "excel_row_count": len(session.guest_excel_data) if session.guest_excel_data else 0,
+        "selected_columns": session.guest_selected_columns or [],
+        "email_column": session.guest_email_column,
         "all_excel_headers": (
-            list(event.guest_excel_data[0].keys()) if event.guest_excel_data else []
+            list(session.guest_excel_data[0].keys()) if session.guest_excel_data else []
         ),
         "step3_complete": bool(fp),
         "field_positions": {
             "column_positions": fp.column_positions if fp else {},
             "display_width": fp.display_width if fp else 580.0,
         } if fp else None,
-        "step4_complete": bool(event.guest_generated_certs),
-        "generated_count": len(event.guest_generated_certs) if event.guest_generated_certs else 0,
-        "step5_emails_sent": event.guest_emails_sent,
+        "step4_complete": bool(session.guest_generated_certs),
+        "generated_count": len(session.guest_generated_certs) if session.guest_generated_certs else 0,
+        "step5_emails_sent": session.guest_emails_sent,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HISTORY — List all non-expired sessions
+# GET /guest/history
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/history")
+async def get_guest_history(
+    current_user: User = Depends(require_guest),
+):
+    """Return all non-expired GuestSessions for this guest, newest first."""
+    now = datetime.utcnow()
+    sessions = await GuestSession.find(
+        GuestSession.user_id == current_user.id,
+        GuestSession.expires_at > now,
+        sort=[("created_at", -1)],
+    ).to_list()
+
+    result = []
+    for s in sessions:
+        cert_count = len(s.guest_generated_certs) if s.guest_generated_certs else 0
+        has_downloadable = (
+            cert_count > 0
+            and any(Path(p).exists() for p in (s.guest_generated_certs or []))
+        )
+        days_remaining = max(0, (s.expires_at - now).days)
+        result.append({
+            "session_id": str(s.id),
+            "event_name": s.event_name,
+            "created_at": s.created_at.isoformat(),
+            "expires_at": s.expires_at.isoformat(),
+            "days_remaining": days_remaining,
+            "cert_count": cert_count,
+            "emails_sent": s.guest_emails_sent,
+            "has_downloadable_certs": has_downloadable,
+        })
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HISTORY ZIP — Re-download ZIP for a specific past session
+# GET /guest/sessions/{session_id}/zip
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/sessions/{session_id}/zip")
+async def download_session_zip(
+    session_id: PydanticObjectId,
+    current_user: User = Depends(require_guest),
+):
+    """Re-download ZIP for a historical session. Ownership-checked."""
+    session = await GuestSession.get(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status.HTTP_410_GONE, "Session has expired and files have been deleted")
+    return _build_zip_response(session)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal: build StreamingResponse ZIP
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_zip_response(session: GuestSession) -> StreamingResponse:
+    """Build a ZIP StreamingResponse from a session's generated certs."""
+    if not session.guest_generated_certs:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No certificates have been generated yet. Please complete Step 4 first.",
+        )
+
+    existing = [p for p in session.guest_generated_certs if Path(p).exists()]
+    if not existing:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Certificate files not found on disk. They may have been deleted.",
+        )
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path_str in existing:
+            p = Path(path_str)
+            zf.write(p, arcname=p.name)
+    zip_buf.seek(0)
+
+    safe_name = session.event_name.replace(" ", "_")[:50]
+    return StreamingResponse(
+        zip_buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}_certificates.zip"'
+        },
+    )
