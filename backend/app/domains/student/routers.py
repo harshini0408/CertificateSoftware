@@ -3,13 +3,13 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
-from ..core.dependencies import require_role
-from ..models.user import User, UserRole
-from ..models.student_credit import StudentCredit
-from ..models.certificate import Certificate, CertStatus
-from ..models.event import Event
-from ..models.club import Club
-from ..services.storage_service import storage_url_to_path
+from ...core.dependencies import require_role
+from ...models.user import User, UserRole
+from ...models.student_credit import StudentCredit
+from ...models.certificate import Certificate, CertStatus
+from ...models.event import Event
+from ...models.club import Club
+from ...services.storage_service import storage_url_to_path
 
 router = APIRouter(tags=["Student"])
 

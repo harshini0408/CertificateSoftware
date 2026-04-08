@@ -1,12 +1,12 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../store/authStore'
-import { useToastStore } from '../store/uiStore'
-import axiosInstance from '../utils/axiosInstance'
-import GuestWizard from '../components/GuestWizard'
-import LoadingSpinner from '../components/LoadingSpinner'
-import Navbar from '../components/Navbar'
-import Sidebar from '../components/Sidebar'
+import { useAuthStore } from '../../store/authStore'
+import { useToastStore } from '../../store/uiStore'
+import axiosInstance from '../../utils/axiosInstance'
+import GuestWizard from '../../components/GuestWizard'
+import LoadingSpinner from '../../components/LoadingSpinner'
+import Navbar from '../../components/Navbar'
+import Sidebar from '../../components/Sidebar'
 
 export default function GuestDashboard() {
   const user = useAuthStore((s) => s.user)

@@ -3,15 +3,15 @@ from typing import List
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..core.dependencies import get_current_user, require_club_access, require_role
-from ..models.user import User, UserRole
-from ..models.club import Club
-from ..models.event import Event, EventStatus
-from ..models.certificate import Certificate, CertStatus
-from ..models.email_log import EmailLog, EmailStatus
-from ..models.participant import Participant
-from ..schemas.club import ClubResponse
-from ..schemas.user import UserResponse
+from ...core.dependencies import get_current_user, require_club_access, require_role
+from ...models.user import User, UserRole
+from ...models.club import Club
+from ...models.event import Event, EventStatus
+from ...models.certificate import Certificate, CertStatus
+from ...models.email_log import EmailLog, EmailStatus
+from ...models.participant import Participant
+from ...schemas.club import ClubResponse
+from ...schemas.user import UserResponse
 
 router = APIRouter(prefix="/clubs", tags=["Clubs"])
 coordinator_router = APIRouter(prefix="/coordinator", tags=["Coordinator"])

@@ -9,10 +9,10 @@ import {
   closestCenter,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import LoadingSpinner from '../components/LoadingSpinner'
-import { useDeptAssetStatus, useConfigureFieldPositions, useGetFieldPositions } from '../api/dept'
-import { useToastStore } from '../store/uiStore'
-import { BACKEND_URL } from '../utils/axiosInstance'
+import LoadingSpinner from '../../components/LoadingSpinner'
+import { useDeptAssetStatus, useConfigureFieldPositions, useGetFieldPositions } from './api'
+import { useToastStore } from '../../store/uiStore'
+import { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 function imgSrc(url) {

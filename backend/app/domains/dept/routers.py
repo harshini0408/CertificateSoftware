@@ -11,13 +11,13 @@ from openpyxl import Workbook, load_workbook
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel
 
-from ..core.dependencies import require_role
-from ..models.user import User, UserRole
-from ..models.student_credit import StudentCredit
-from ..models.dept_asset import DeptAsset
-from ..models.dept_certificate import DeptCertificate
-from ..services.signature_service import process_signature, save_logo
-from ..services.storage_service import save_cert_png
+from ...core.dependencies import require_role
+from ...models.user import User, UserRole
+from ...models.student_credit import StudentCredit
+from ...models.dept_asset import DeptAsset
+from ...models.dept_certificate import DeptCertificate
+from ...services.signature_service import process_signature, save_logo
+from ...services.storage_service import save_cert_png
 
 router = APIRouter(tags=["Department"])
 
@@ -38,7 +38,7 @@ def _normalize_department(department: Optional[str]) -> str:
 
 
 def _pick_single_template() -> Path:
-    templates_dir = Path(__file__).parent.parent / "static" / "certificate_templates"
+    templates_dir = Path(__file__).parent.parent.parent / "static" / "certificate_templates"
     pngs = sorted(templates_dir.glob("*.png"))
     if not pngs:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "No PNG certificate templates available")
@@ -101,7 +101,7 @@ def _parse_dept_excel(file_bytes: bytes) -> list[dict]:
 
 
 def _load_font(size: int):
-    font_path = Path(__file__).parent.parent / "static" / "fonts" / "PlayfairDisplay.ttf"
+    font_path = Path(__file__).parent.parent.parent / "static" / "fonts" / "PlayfairDisplay.ttf"
     try:
         if font_path.exists():
             return ImageFont.truetype(str(font_path), size)
@@ -255,7 +255,7 @@ async def upload_certificate_template(
     dept_slug = _slugify(department)
 
     # Determine storage path
-    from ..config import get_settings
+    from ...config import get_settings
     settings = get_settings()
     template_dir = Path(settings.storage_root) / "dept_templates" / dept_slug
     template_dir.mkdir(parents=True, exist_ok=True)
@@ -398,7 +398,7 @@ async def download_department_certificates_zip(
 
     from zipfile import ZipFile, ZIP_DEFLATED
     import io
-    from ..services.storage_service import storage_url_to_path
+    from ...services.storage_service import storage_url_to_path
 
     department = _normalize_department(current_user.department)
     certs = await DeptCertificate.find(
@@ -467,7 +467,7 @@ async def download_all_department_certificates(
     """Zips all generated certificate PNGs for the user's department."""
     from zipfile import ZipFile, ZIP_DEFLATED
     import io
-    from ..services.storage_service import storage_url_to_path
+    from ...services.storage_service import storage_url_to_path
     
     department = _normalize_department(current_user.department)
     
@@ -524,7 +524,7 @@ async def configure_field_positions(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     """Save field position configurations for department certificates"""
-    from ..models.dept_asset import DeptFieldPosition
+    from ...models.dept_asset import DeptFieldPosition
     
     department = _normalize_department(current_user.department)
     asset = await _get_or_create_dept_asset(department)

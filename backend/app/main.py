@@ -152,23 +152,26 @@ async def _global_exception_handler(request: Request, exc: Exception):
     )
 
 # ── Routers ──────────────────────────────────────────────────────────────
-from .routers import auth, admin, clubs, events, participants, templates
-from .routers import certificates, verify, student, dept
-from .routers import image_templates, guest_flow
+from .routers import auth, events, participants, templates, certificates, verify, image_templates
+from .domains.student.routers import router as student_router
+from .domains.guest.routers import router as guest_router
+from .domains.dept.routers import router as dept_router
+from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
+from .domains.superadmin.routers import router as superadmin_router
 
 app.include_router(auth.router)
-app.include_router(admin.router)
-app.include_router(clubs.router)
-app.include_router(clubs.coordinator_router)
+app.include_router(superadmin_router)
+app.include_router(club_router)
+app.include_router(club_coordinator_router)
 app.include_router(events.router)
 app.include_router(participants.router)
 app.include_router(templates.router)
 app.include_router(certificates.router)
 app.include_router(verify.router)
-app.include_router(student.router)
-app.include_router(dept.router)
+app.include_router(student_router)
+app.include_router(dept_router)
 app.include_router(image_templates.router)
-app.include_router(guest_flow.router)
+app.include_router(guest_router)
 
 # ── Static files (PNG templates, fonts, etc.) ────────────────────────────────
 from pathlib import Path
@@ -192,3 +195,7 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
     }
+
+from .domains.dept.routers import router as dept_router
+from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
+from .domains.superadmin.routers import router as superadmin_router

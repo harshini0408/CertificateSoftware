@@ -1,10 +1,10 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { useToastStore } from '../store/uiStore'
-import axiosInstance from '../utils/axiosInstance'
-import Navbar from '../components/Navbar'
-import Sidebar from '../components/Sidebar'
+import { useToastStore } from '../../store/uiStore'
+import axiosInstance from '../../utils/axiosInstance'
+import Navbar from '../../components/Navbar'
+import Sidebar from '../../components/Sidebar'
 
 const DownloadIcon = ({ className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>

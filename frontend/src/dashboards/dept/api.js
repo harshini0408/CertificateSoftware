@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import axiosInstance from '../utils/axiosInstance'
-import { useToastStore } from '../store/uiStore'
+import axiosInstance from '../../utils/axiosInstance'
+import { useToastStore } from '../../store/uiStore'
 
 export const deptKeys = {
   assets: () => ['dept', 'assets-status'],

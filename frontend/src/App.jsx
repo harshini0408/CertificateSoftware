@@ -5,15 +5,15 @@ import ToastProvider from './components/ToastProvider'
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
 import Login from './pages/Login'
-import AdminDashboard from './pages/AdminDashboard'
-import ClubDashboard from './pages/ClubDashboard'
+import AdminDashboard from './dashboards/superadmin'
+import ClubDashboard from './dashboards/club'
 import EventDetail from './pages/EventDetail'
-import DeptCoordinatorDashboard from './pages/DeptCoordinatorDashboard'
-import StudentDashboard from './pages/StudentDashboard'
+import DeptCoordinatorDashboard from './dashboards/dept'
+import StudentDashboard from './dashboards/student'
 import VerifyPage from './pages/VerifyPage'
 import TemplateSelector from './pages/TemplateSelector'
-import GuestDashboard from './pages/GuestDashboard'
-import GuestHistory from './pages/GuestHistory'
+import GuestDashboard from './dashboards/guest/GuestDashboard'
+import GuestHistory from './dashboards/guest/GuestHistory'
 
 // ── Role constants ─────────────────────────────────────────────────────────────
 const ROLES = {

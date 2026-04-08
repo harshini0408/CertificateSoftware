@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import Navbar from '../components/Navbar'
-import Sidebar from '../components/Sidebar'
-import DataTable from '../components/DataTable'
-import LoadingSpinner from '../components/LoadingSpinner'
+import Navbar from '../../components/Navbar'
+import Sidebar from '../../components/Sidebar'
+import DataTable from '../../components/DataTable'
+import LoadingSpinner from '../../components/LoadingSpinner'
 import DeptFieldConfigurator from './DeptFieldConfigurator'
 import {
   useDeptAssetStatus,
@@ -12,8 +12,8 @@ import {
   useGetFieldPositions,
   downloadAllDeptCertificates,
   downloadDeptCertificatesZip,
-} from '../api/dept'
-import { useToastStore } from '../store/uiStore'
+} from './api'
+import { useToastStore } from '../../store/uiStore'
 
 function FeatureLanding({ onSelect }) {
   return (

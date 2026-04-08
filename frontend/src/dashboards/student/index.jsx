@@ -1,19 +1,19 @@
 import { useState } from 'react'
 
-import Navbar from '../components/Navbar'
-import Sidebar from '../components/Sidebar'
-import DataTable from '../components/DataTable'
-import StatusBadge from '../components/StatusBadge'
-import StatCard from '../components/StatCard'
-import LoadingSpinner from '../components/LoadingSpinner'
-import axiosInstance from '../utils/axiosInstance'
-import { useToastStore } from '../store/uiStore'
+import Navbar from '../../components/Navbar'
+import Sidebar from '../../components/Sidebar'
+import DataTable from '../../components/DataTable'
+import StatusBadge from '../../components/StatusBadge'
+import StatCard from '../../components/StatCard'
+import LoadingSpinner from '../../components/LoadingSpinner'
+import axiosInstance from '../../utils/axiosInstance'
+import { useToastStore } from '../../store/uiStore'
 import {
   useMyCredits,
   useMyCertificates,
   useMyProfile,
   CREDIT_WEIGHTS,
-} from '../api/credits'
+} from './api'
 
 // ── Icon helpers ──────────────────────────────────────────────────────────────
 const Icons = {
@@ -45,7 +45,6 @@ const TYPE_COLORS = {
 function CreditsBreakdown({ breakdown, total }) {
   if (!breakdown?.length) return null
 
-  // Color palette for segments
   const PALETTE = [
     '#1E3A5F', '#C9A84C', '#3B82F6', '#10B981',
     '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4',
@@ -58,7 +57,6 @@ function CreditsBreakdown({ breakdown, total }) {
         <span className="text-2xl font-black text-navy">{total}</span>
       </div>
 
-      {/* Stacked bar */}
       <div className="flex h-4 rounded-full overflow-hidden gap-0.5">
         {breakdown.map((item, i) => {
           const pct = total > 0 ? (item.credits / total) * 100 : 0
@@ -74,7 +72,6 @@ function CreditsBreakdown({ breakdown, total }) {
         })}
       </div>
 
-      {/* Legend */}
       <div className="grid grid-cols-2 gap-2">
         {breakdown.map((item, i) => (
           <div key={item.cert_type} className="flex items-center gap-2">
@@ -90,7 +87,6 @@ function CreditsBreakdown({ breakdown, total }) {
         ))}
       </div>
 
-      {/* Weight legend */}
       <div className="pt-2 border-t border-gray-100">
         <p className="text-xs text-gray-400 mb-1.5">Credit weights per cert type:</p>
         <div className="flex flex-wrap gap-2">
@@ -109,10 +105,8 @@ function CreditsBreakdown({ breakdown, total }) {
   )
 }
 
-// ── StudentDashboard ──────────────────────────────────────────────────────────
 export default function StudentDashboard() {
   const [downloadingId, setDownloadingId] = useState(null)
-
   const addToast = useToastStore((s) => s.addToast)
 
   const { data: profile,  isLoading: profileLoading  } = useMyProfile()
@@ -261,7 +255,6 @@ export default function StudentDashboard() {
         <main className="flex-1 overflow-y-auto bg-background">
           <div className="page-container space-y-6">
 
-            {/* ── Welcome header ─────────────────────────────────────── */}
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h1 className="text-2xl font-bold text-foreground">
@@ -276,7 +269,6 @@ export default function StudentDashboard() {
                 </p>
               </div>
 
-              {/* Verify certificate shortcut */}
               <a
                 href="/verify"
                 className="btn-secondary text-sm self-start sm:self-center"
@@ -285,7 +277,6 @@ export default function StudentDashboard() {
               </a>
             </div>
 
-            {/* ── Stat cards ─────────────────────────────────────────── */}
             <div className="grid grid-cols-2 gap-4">
               <StatCard
                 label="My Certificates"
@@ -303,13 +294,11 @@ export default function StudentDashboard() {
               />
             </div>
 
-            {/* ── Credits breakdown ───────────────────────────────────── */}
             <CreditsBreakdown
               breakdown={credits?.breakdown}
               total={totalCredits}
             />
 
-            {/* ── Credit History ────────────────────────────────────────── */}
             <div>
               <h2 className="section-title mb-3">Credit History</h2>
               <DataTable
@@ -334,7 +323,6 @@ export default function StudentDashboard() {
               />
             </div>
 
-            {/* ── Certificates table ──────────────────────────────────── */}
             <div>
               <h2 className="section-title mb-3">My Certificates</h2>
               <DataTable

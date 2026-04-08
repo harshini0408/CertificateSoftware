@@ -4,16 +4,16 @@ import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
-import Navbar from '../components/Navbar'
-import Sidebar from '../components/Sidebar'
-import LoadingSpinner from '../components/LoadingSpinner'
-import StatCard from '../components/StatCard'
-import StatusBadge from '../components/StatusBadge'
-import DataTable from '../components/DataTable'
-import ConfirmModal from '../components/ConfirmModal'
+import Navbar from '../../components/Navbar'
+import Sidebar from '../../components/Sidebar'
+import LoadingSpinner from '../../components/LoadingSpinner'
+import StatCard from '../../components/StatCard'
+import StatusBadge from '../../components/StatusBadge'
+import DataTable from '../../components/DataTable'
+import ConfirmModal from '../../components/ConfirmModal'
 
-import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../api/clubs'
-import { useUsers, useCreateUser, useUpdateUser, useDeactivateUser } from '../api/users'
+import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../club/api'
+import { useUsers, useCreateUser, useUpdateUser, useDeactivateUser } from '../../api/users'
 import {
   useAdminStats,
   useAdminClubs,
@@ -22,8 +22,8 @@ import {
   useCreditRules,
   useUpdateCreditRules,
   useBulkImportStudents,
-} from '../api/admin'
-import { useEvents } from '../api/events'
+} from './api'
+import { useEvents } from '../../api/events'
 
 // ── Debounce hook ─────────────────────────────────────────────────────────────
 function useDebounce(value, delay = 300) {

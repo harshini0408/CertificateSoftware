@@ -8,19 +8,19 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import File, UploadFile
 
-from ..core.dependencies import require_role
-from ..core.security import hash_password
-from ..models.user import User, UserRole
-from ..models.club import Club
-from ..models.event import Event
-from ..models.certificate import Certificate, CertStatus
-from ..models.email_log import EmailLog, EmailStatus
-from ..models.scan_log import ScanLog
-from ..models.credit_rule import CreditRule
-from ..models.student_credit import StudentCredit
-from ..schemas.club import ClubCreate, ClubUpdate, ClubResponse
-from ..schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
-from ..schemas.user import UserCreate, UserUpdate, UserResponse
+from ...core.dependencies import require_role
+from ...core.security import hash_password
+from ...models.user import User, UserRole
+from ...models.club import Club
+from ...models.event import Event
+from ...models.certificate import Certificate, CertStatus
+from ...models.email_log import EmailLog, EmailStatus
+from ...models.scan_log import ScanLog
+from ...models.credit_rule import CreditRule
+from ...models.student_credit import StudentCredit
+from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
+from ...schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
+from ...schemas.user import UserCreate, UserUpdate, UserResponse
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
