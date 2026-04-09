@@ -18,6 +18,7 @@ from .dept_event import DeptEvent, DeptEventStatus
 from .dept_template import DeptTemplate
 from .guest_session import GuestSession
 from .role_template_preset import RoleTemplatePreset
+from ..certificate_config.model import CertificateTemplateConfig
 
 ALL_MODELS = [
     Club,
@@ -40,6 +41,7 @@ ALL_MODELS = [
     DeptTemplate,
     GuestSession,
     RoleTemplatePreset,
+    CertificateTemplateConfig,
 ]
 
 __all__ = [

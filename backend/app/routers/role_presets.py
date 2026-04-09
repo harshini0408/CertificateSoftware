@@ -58,16 +58,7 @@ def _to_response(doc: RoleTemplatePreset) -> RolePresetResponse:
 
 
 def _default_column_positions() -> Dict[str, Dict[str, float]]:
-    # Shared default positions derived from the legacy flow, percentage-based.
-    return {
-        "Name": {"x_percent": 35.4, "y_percent": 52.6, "font_size_percent": 2.7},
-        "Registration Number": {"x_percent": 14.9, "y_percent": 59.4, "font_size_percent": 2.7},
-        "Role": {"x_percent": 52.6, "y_percent": 59.4, "font_size_percent": 2.7},
-        "Event Name": {"x_percent": 15.9, "y_percent": 65.8, "font_size_percent": 2.7},
-        "Event Date": {"x_percent": 65.8, "y_percent": 65.8, "font_size_percent": 2.7},
-        "Club Name": {"x_percent": 17.9, "y_percent": 72.8, "font_size_percent": 2.7},
-        "Year": {"x_percent": 14.4, "y_percent": 79.0, "font_size_percent": 2.7},
-    }
+    return {}
 
 
 def _default_asset_positions() -> Dict[str, Dict[str, float]]:
@@ -170,6 +161,8 @@ async def update_role_preset(role_name: str, body: RolePresetUpsert, _user: User
     if not preset:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Role preset not found")
 
+    print("--- UPDATE RECEIVED FOR ROLE:", role_name)
+    print("BODY COLUMN POSITIONS:", body.column_positions)
     update_data = {
         "role_name": _normalize_role_name(body.role_name),
         "display_label": body.display_label,
