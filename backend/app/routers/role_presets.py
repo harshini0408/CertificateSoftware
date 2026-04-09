@@ -85,20 +85,20 @@ async def seed_role_presets(_user: User = _admin):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No PNG templates found in static/certificate_templates")
 
     role_specs = [
-        ("student_council_member", "Student Council Member"),
-        ("office_bearer", "Office Bearer"),
-        ("club_member", "Club Member"),
-        ("class_representative", "Class Representative"),
-        ("student_volunteer", "Student Volunteer"),
-        ("organizer", "Organizer"),
-        ("coordinator", "Coordinator"),
-        ("technical_talk", "Technical Talk"),
-        ("paper_presenter", "Paper Presenter"),
-        ("first_place", "First Place"),
-        ("second_place", "Second Place"),
-        ("third_place", "Third Place"),
-        ("technical_participant", "Technical Participant"),
-        ("non_technical_participant", "Non-Technical Participant"),
+        ("Student Council Member", "Student Council Member"),
+        ("Office Bearer", "Office Bearer"),
+        ("Club Member", "Club Member"),
+        ("Class Representative", "Class Representative"),
+        ("Student Volunteer", "Student Volunteer"),
+        ("Organizer", "Organizer"),
+        ("Coordinator", "Coordinator"),
+        ("Technical Talk", "Technical Talk"),
+        ("Paper Presenter", "Paper Presenter"),
+        ("First Place", "First Place"),
+        ("Second Place", "Second Place"),
+        ("Third Place", "Third Place"),
+        ("Technical Participant", "Technical Participant"),
+        ("Non-Technical Participant", "Non-Technical Participant"),
     ]
 
     created = 0

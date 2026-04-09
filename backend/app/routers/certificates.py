@@ -63,7 +63,25 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         tmp_path = str(settings.storage_root / "tmp" / f"{cert.cert_number}.png")
         Path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
 
-        role_name = participant.cert_type or "participant"
+        # Consolidated Field Mapping logic (Case-Sensitive)
+        # 1. From Excel: Name, Registration Number, Role
+        # 2. From Event: Event, Date, Event Date, Year
+        # 3. From Club: Club
+        mapping_data = {
+            "Name": participant.fields.get("Name") or cert.snapshot.name,
+            "Registration Number": str(participant.registration_number or participant.fields.get("Registration Number") or ""),
+            "Role": participant.fields.get("Role") or participant.cert_type or "",
+            "Event": event.name,
+            "Date": event.event_date.strftime("%d-%m-%Y") if event.event_date else "",
+            "Event Date": event.event_date.strftime("%d-%m-%Y") if event.event_date else "",
+            "Year": event.academic_year or (str(event.event_date.year) if event.event_date else ""),
+            "Club": club.name,
+        }
+        # Final fields dictionary for the generator
+        all_fields = {**(participant.fields or {}), **mapping_data}
+
+        # Role detection for template selection
+        role_name = mapping_data["Role"] or "participant"
         normalized_role = role_name.lower().replace(" ", "_").replace("-", "_")
         preset = await RoleTemplatePreset.find_one(
             RoleTemplatePreset.role_name == normalized_role,
@@ -85,7 +103,7 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
 
             await generate_certificate_from_role_preset(
                 role_name=role_name,
-                participant_fields=participant.fields or {},
+                participant_fields=all_fields,
                 output_path=tmp_path,
                 cert_number=cert.cert_number,
                 logo_path=logo_path,
@@ -93,6 +111,8 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
             )
         else:
             # Fallback for manually configured per-event field positions.
+            # We override the participant.fields for this call to use our mapped data
+            participant.fields = all_fields
             await generate_certificate_pillow(
                 event=event,
                 participant=participant,
@@ -275,9 +295,9 @@ async def generate_certificates(
         cert_number = await generate_cert_number(club.slug, year)
 
         snapshot = CertSnapshot(
-            name=p.fields.get("Name", p.email),
+            name=p.fields.get("Name") or p.fields.get("name") or p.email,
             email=p.email,
-            registration_number=p.registration_number,
+            registration_number=p.registration_number or p.fields.get("Registration Number"),
             event_name=event.name,
             club_name=club.name,
             cert_type=cert_type,
