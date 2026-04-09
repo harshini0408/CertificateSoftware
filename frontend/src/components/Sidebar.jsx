@@ -113,7 +113,9 @@ function useNavItems() {
 
     case 'dept_coordinator':
       return [
-        { to: '/dept', icon: icons.student, label: 'Department', end: true },
+        { to: '/dept',                   icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: '/dept?tab=events',        icon: icons.calendar,  label: 'Events' },
+        { to: '/dept?tab=settings',      icon: icons.settings,  label: 'Settings' },
       ]
 
     case 'student':

@@ -1,274 +1,79 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
+import StatCard from '../../components/StatCard'
 import DataTable from '../../components/DataTable'
+import StatusBadge from '../../components/StatusBadge'
+import FileUpload from '../../components/FileUpload'
 import LoadingSpinner from '../../components/LoadingSpinner'
-import DeptFieldConfigurator from './DeptFieldConfigurator'
+
+import { useChangePassword } from '../auth/api'
+import { useAuthStore } from '../../store/authStore'
+
 import {
-  useDeptAssetStatus,
-  useDeptCertificates,
-  useDeptGenerateCertificates,
-  useDeptStudents,
-  useGetFieldPositions,
-  downloadAllDeptCertificates,
-  downloadDeptCertificatesZip,
+  useDeptDashboard,
+  useDeptEvents,
+  useCreateDeptEvent,
+  useDeptAssets,
+  useUpdateDeptAssets,
 } from './api'
-import { useToastStore } from '../../store/uiStore'
+import { BACKEND_URL } from '../../utils/axiosInstance'
+import DeptEventCertificateConfigurator from './DeptEventCertificateConfigurator'
 
-function FeatureLanding({ onSelect }) {
-  return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <button
-        onClick={() => onSelect('generate')}
-        className="card p-6 text-left border-2 border-transparent hover:border-navy/30 transition-colors"
-      >
-        <h2 className="text-xl font-bold text-foreground">Generate Certificates</h2>
-        <p className="mt-2 text-sm text-gray-500">
-          Upload Excel with Name, Class, Contribution and generate department certificates using a single template.
-        </p>
-      </button>
+const TABS = ['dashboard', 'events', 'settings']
 
-      <button
-        onClick={() => onSelect('credits')}
-        className="card p-6 text-left border-2 border-transparent hover:border-navy/30 transition-colors"
-      >
-        <h2 className="text-xl font-bold text-foreground">View Student Credit Points</h2>
-        <p className="mt-2 text-sm text-gray-500">
-          View your department students and their current credit totals from issued certificates.
-        </p>
-      </button>
-    </div>
-  )
+function fmtDate(iso) {
+  if (!iso) return '-'
+  return new Date(iso).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
-function GenerateCertificatesView() {
-  const { data: assetStatus } = useDeptAssetStatus()
-  const { data: savedPositions, isLoading: posLoading } = useGetFieldPositions()
-  const [excelFile, setExcelFile] = useState(null)
-  const [logoFile, setLogoFile] = useState(null)
-  const [sig1File, setSig1File] = useState(null)
-  const [sig2File, setSig2File] = useState(null)
-  const [localError, setLocalError] = useState('')
-  const [lastResult, setLastResult] = useState(null)
-  const [showConfigurator, setShowConfigurator] = useState(false)
-  const [isDownloadingAll, setIsDownloadingAll] = useState(false)
-  const [isDownloadingBatch, setIsDownloadingBatch] = useState(false)
-  const addToast = useToastStore((s) => s.addToast)
+const Icon = {
+  events: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
+  certs: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>,
+  participants: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
+}
 
-  // Check if first-time setup is needed
-  useEffect(() => {
-    if (assetStatus && !assetStatus.positions_configured && !posLoading) {
-      setShowConfigurator(true)
-    }
-  }, [assetStatus, posLoading])
+function DashboardTab() {
+  const { data, isLoading } = useDeptDashboard()
 
-  const generateMutation = useDeptGenerateCertificates()
-  const { data: certs, isLoading: certsLoading } = useDeptCertificates()
+  if (isLoading) return <LoadingSpinner fullPage label="Loading dashboard..." />
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    setLocalError('')
+  const stats = data?.stats || {}
+  const recentEvents = data?.recent_events || []
 
-    if (!excelFile) {
-      setLocalError('Please upload an Excel file.')
-      return
-    }
-
-    const missingStoredAssets = assetStatus && (!assetStatus.has_logo || !assetStatus.has_signature_primary || !assetStatus.has_signature_secondary)
-    if (missingStoredAssets && (!logoFile || !sig1File || !sig2File)) {
-      setLocalError('First-time setup for your department requires Logo + Primary Signature + Secondary Signature.')
-      return
-    }
-
-    const formData = new FormData()
-    formData.append('excel_file', excelFile)
-    if (logoFile) formData.append('logo_file', logoFile)
-    if (sig1File) formData.append('signature_primary_file', sig1File)
-    if (sig2File) formData.append('signature_secondary_file', sig2File)
-
-    generateMutation.mutate(formData, {
-      onSuccess: (data) => {
-        setLastResult(data)
-        setExcelFile(null)
-      },
-    })
-  }
-
-  const handleDownloadAll = async () => {
-    setIsDownloadingAll(true)
-    try {
-      const blob = await downloadAllDeptCertificates()
-      const url = window.URL.createObjectURL(new Blob([blob]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', 'certificates.zip')
-      document.body.appendChild(link)
-      link.click()
-      link.parentNode.removeChild(link)
-    } catch (err) {
-      addToast({ type: 'error', message: 'Failed to download certificates ZIP archive.' })
-    } finally {
-      setIsDownloadingAll(false)
-    }
-  }
-
-  const handleDownloadBatch = async () => {
-    const certNumbers = lastResult?.cert_numbers || []
-    if (!certNumbers.length) {
-      addToast({ type: 'error', message: 'No certificates found in the latest batch.' })
-      return
-    }
-
-    setIsDownloadingBatch(true)
-    try {
-      const blob = await downloadDeptCertificatesZip(certNumbers)
-      const url = window.URL.createObjectURL(new Blob([blob]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', 'dept_certs_batch.zip')
-      document.body.appendChild(link)
-      link.click()
-      link.parentNode.removeChild(link)
-    } catch (err) {
-      addToast({ type: 'error', message: 'Failed to download this batch ZIP archive.' })
-    } finally {
-      setIsDownloadingBatch(false)
-    }
-  }
-
-  // If position config needed, show configurator only
-  if (showConfigurator) {
-    return (
-      <DeptFieldConfigurator
-        onComplete={() => {
-          setShowConfigurator(false)
-        }}
-      />
-    )
-  }
-  const certColumns = [
-    {
-      key: 'cert_number',
-      header: 'Cert No',
-      render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v}</span>,
-    },
-    { key: 'name', header: 'Name', searchKey: true },
-    { key: 'class_name', header: 'Class', searchKey: true },
-    { key: 'contribution', header: 'Contribution', searchKey: true },
-    {
-      key: 'issued_at',
-      header: 'Issued',
-      render: (v) => (v ? new Date(v).toLocaleString('en-IN') : '—'),
-    },
-    {
-      key: 'png_url',
-      header: 'Action',
-      render: (url) => (
-        <a
-          href={url}
-          download
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 px-3 py-1 text-sm font-medium text-white bg-navy rounded hover:bg-navy/90 transition-colors"
-        >
-          📥 Download
-        </a>
-      ),
-    },
+  const eventColumns = [
+    { key: 'name', header: 'Event', sortable: true },
+    { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
+    { key: 'semester', header: 'Semester', sortable: true },
+    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
   ]
 
   return (
     <div className="space-y-6">
-      <div className="card p-5">
-        <h2 className="text-lg font-bold text-foreground">Department Certificate Generation</h2>
-        <p className="mt-1 text-sm text-gray-500">
-          Single template with fields: Name, Class, Contribution. Credits are not awarded in this flow.
-        </p>
-        {savedPositions?.positions_configured && (
-          <button
-            onClick={() => setShowConfigurator(true)}
-            className="btn-secondary mt-3"
-          >
-            ⚙️ Edit Position Configuration
-          </button>
-        )}
+      <h1 className="text-2xl font-bold text-foreground">Department Dashboard</h1>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard label="Total Events" value={stats.total_events ?? 0} icon={Icon.events} accent="navy" />
+        <StatCard label="Certificates Issued" value={stats.total_certificates_issued ?? 0} icon={Icon.certs} accent="green" />
+        <StatCard label="Total Participants" value={stats.total_participants ?? 0} icon={Icon.participants} accent="blue" />
       </div>
 
-      <form onSubmit={handleSubmit} className="card p-5 space-y-4">
-        <div>
-          <label className="form-label">Excel File * (columns: Name, Class, Contribution)</label>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            className="form-input"
-            onChange={(e) => setExcelFile(e.target.files?.[0] || null)}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div>
-            <label className="form-label">Logo (optional if already saved)</label>
-            <input type="file" accept="image/*" className="form-input" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} />
-          </div>
-          <div>
-            <label className="form-label">Primary Signature (optional if already saved)</label>
-            <input type="file" accept="image/*" className="form-input" onChange={(e) => setSig1File(e.target.files?.[0] || null)} />
-          </div>
-          <div>
-            <label className="form-label">Secondary Signature (optional if already saved)</label>
-            <input type="file" accept="image/*" className="form-input" onChange={(e) => setSig2File(e.target.files?.[0] || null)} />
-          </div>
-        </div>
-
-        {assetStatus && (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
-            Stored assets for your department: Logo {assetStatus.has_logo ? 'Yes' : 'No'} | Primary Signature {assetStatus.has_signature_primary ? 'Yes' : 'No'} | Secondary Signature {assetStatus.has_signature_secondary ? 'Yes' : 'No'}
-          </div>
-        )}
-
-        {localError && <p className="text-sm text-red-600">{localError}</p>}
-
-        <button type="submit" className="btn-primary min-w-[180px]" disabled={generateMutation.isPending}>
-          {generateMutation.isPending ? <LoadingSpinner size="sm" label="" /> : 'Generate Certificates'}
-        </button>
-      </form>
-
-      {lastResult && (
-        <div className="card p-4">
-          <p className="text-sm font-medium text-navy">{lastResult.message}</p>
-          <p className="mt-1 text-xs text-gray-500">Generated: {lastResult.generated} / Rows: {lastResult.total_rows}</p>
-          {(lastResult.cert_numbers || []).length > 0 && (
-            <button
-              onClick={handleDownloadBatch}
-              disabled={isDownloadingBatch}
-              className="btn-secondary mt-3"
-            >
-              {isDownloadingBatch ? <LoadingSpinner size="sm" label="Zipping..." /> : '📦 Download this batch as ZIP'}
-            </button>
-          )}
-        </div>
-      )}
-
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="section-title mb-0">Recently Generated Department Certificates</h3>
-          {certs?.length > 0 && (
-            <button
-              onClick={handleDownloadAll}
-              disabled={isDownloadingAll}
-              className="btn-secondary"
-            >
-              {isDownloadingAll ? <LoadingSpinner size="sm" label="Zipping..." /> : '📦 Download All as ZIP'}
-            </button>
-          )}
-        </div>
+        <h2 className="section-title mb-3">Recent Events</h2>
         <DataTable
-          columns={certColumns}
-          data={certs || []}
-          isLoading={certsLoading}
-          emptyMessage="No department certificates generated yet."
-          searchable
-          searchPlaceholder="Search by name/class/contribution…"
+          columns={eventColumns}
+          data={recentEvents}
+          isLoading={false}
+          emptyMessage="No events yet. Create your first event."
           rowKey="id"
         />
       </div>
@@ -276,70 +81,368 @@ function GenerateCertificatesView() {
   )
 }
 
-function CreditsView() {
-  const { data: students, isLoading } = useDeptStudents({ sort_by: 'total_credits', order: 'desc' })
+function EventsTab() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { data: events, isLoading } = useDeptEvents()
+  const createEvent = useCreateDeptEvent()
+  const [selectedEvent, setSelectedEvent] = useState(null)
 
-  const columns = [
-    { key: 'student_name', header: 'Name', searchKey: true },
-    { key: 'registration_number', header: 'Reg No', searchKey: true, render: (v) => <span className="font-mono text-xs">{v}</span> },
-    { key: 'student_email', header: 'Email', searchKey: true },
-    { key: 'department', header: 'Department', searchKey: true },
-    { key: 'batch', header: 'Batch', searchKey: true },
-    { key: 'section', header: 'Section', searchKey: true },
-    { key: 'total_credits', header: 'Credits', align: 'right', render: (v) => <span className="font-semibold text-navy">{v ?? 0}</span> },
-    { key: 'last_updated', header: 'Last Updated', render: (v) => (v ? new Date(v).toLocaleString('en-IN') : '—') },
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    defaultValues: {
+      name: '',
+      event_date: '',
+      semester: '',
+    },
+  })
+
+  const isModalOpen = searchParams.get('openEvent') === '1'
+
+  const openModal = () => {
+    const next = new URLSearchParams(searchParams)
+    next.set('openEvent', '1')
+    setSearchParams(next, { replace: true })
+  }
+
+  const closeModal = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('openEvent')
+    setSearchParams(next, { replace: true })
+  }
+
+  const onSubmit = async (values) => {
+    const payload = {
+      name: values.name,
+      event_date: values.event_date || null,
+      semester: values.semester,
+    }
+    await createEvent.mutateAsync(payload)
+    closeModal()
+    reset()
+  }
+
+  const eventColumns = [
+    { key: 'name', header: 'Event Name', sortable: true, searchKey: true },
+    { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
+    { key: 'semester', header: 'Semester', sortable: true },
+    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    {
+      key: '_actions',
+      header: 'Actions',
+      searchKey: false,
+      render: (_, row) => (
+        <button className="btn-secondary text-xs" onClick={() => setSelectedEvent(row)}>
+          Configure & Generate
+        </button>
+      ),
+    },
   ]
 
   return (
     <div className="space-y-4">
-      <div className="card p-5">
-        <h2 className="text-lg font-bold text-foreground">Department Student Credit Points</h2>
-        <p className="mt-1 text-sm text-gray-500">
-          Credits shown here are from club-issued certificates mapped to student email IDs.
-        </p>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-foreground">Events</h1>
+        <button className="btn-primary" onClick={openModal}>+ New Event</button>
       </div>
 
       <DataTable
-        columns={columns}
-        data={students || []}
+        columns={eventColumns}
+        data={events ?? []}
         isLoading={isLoading}
-        emptyMessage="No student credit records found for your department."
+        emptyMessage="No events yet. Click '+ New Event' to create one."
         searchable
-        searchPlaceholder="Search by name, reg no, email, batch…"
+        searchPlaceholder="Search events..."
         rowKey="id"
       />
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy/40 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-navy">Create New Event</h3>
+              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">x</button>
+            </div>
+            <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
+              <div>
+                <label className="form-label" htmlFor="name">Event Name *</label>
+                <input
+                  id="name"
+                  type="text"
+                  className={`form-input ${errors.name ? 'form-input-error' : ''}`}
+                  placeholder="e.g. Department Symposium"
+                  {...register('name', { required: 'Event name is required' })}
+                />
+                {errors.name && <p className="form-error">{errors.name.message}</p>}
+              </div>
+
+              <div>
+                <label className="form-label" htmlFor="event_date">Event Date</label>
+                <input id="event_date" type="date" className="form-input" {...register('event_date')} />
+              </div>
+
+              <div>
+                <label className="form-label" htmlFor="semester">Semester *</label>
+                <select
+                  id="semester"
+                  className={`form-input ${errors.semester ? 'form-input-error' : ''}`}
+                  defaultValue=""
+                  {...register('semester', { required: 'Semester is required' })}
+                >
+                  <option value="" disabled>Select semester</option>
+                  <option value="I">I</option>
+                  <option value="II">II</option>
+                  <option value="III">III</option>
+                  <option value="IV">IV</option>
+                  <option value="V">V</option>
+                  <option value="VI">VI</option>
+                  <option value="VII">VII</option>
+                  <option value="VIII">VIII</option>
+                </select>
+                {errors.semester && <p className="form-error">{errors.semester.message}</p>}
+              </div>
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button type="button" onClick={closeModal} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={isSubmitting || createEvent.isPending} className="btn-primary">
+                  {(isSubmitting || createEvent.isPending) ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {selectedEvent && (
+        <DeptEventCertificateConfigurator
+          event={selectedEvent}
+          onClose={() => setSelectedEvent(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function SettingsTab() {
+  const { data: assets, isLoading: assetsLoading } = useDeptAssets()
+  const updateAssets = useUpdateDeptAssets()
+  const changePassword = useChangePassword()
+
+  const [logoFile, setLogoFile] = useState(null)
+  const [signatureFile, setSignatureFile] = useState(null)
+
+  const [logoPreview, setLogoPreview] = useState(null)
+  const [signaturePreview, setSignaturePreview] = useState(null)
+
+  const toAssetSrc = (url, hash) => {
+    if (!url) return null
+    const withVersion = hash ? `${url}${url.includes('?') ? '&' : '?'}v=${hash}` : url
+    if (withVersion.startsWith('blob:') || withVersion.startsWith('http')) return withVersion
+    return `${BACKEND_URL}${withVersion}`
+  }
+
+  useEffect(() => {
+    if (!logoFile) {
+      setLogoPreview(toAssetSrc(assets?.logo_url, assets?.logo_hash))
+      return undefined
+    }
+    const objectUrl = URL.createObjectURL(logoFile)
+    setLogoPreview(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [logoFile, assets?.logo_url, assets?.logo_hash])
+
+  useEffect(() => {
+    if (!signatureFile) {
+      setSignaturePreview(toAssetSrc(assets?.signature_url, assets?.signature_hash))
+      return undefined
+    }
+    const objectUrl = URL.createObjectURL(signatureFile)
+    setSignaturePreview(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [signatureFile, assets?.signature_url, assets?.signature_hash])
+
+  const handleAssetSave = () => {
+    if (!logoFile && !signatureFile) return
+    updateAssets.mutate({ logoFile, signatureFile }, {
+      onSuccess: () => {
+        setLogoFile(null)
+        setSignatureFile(null)
+      },
+    })
+  }
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    formState: { errors },
+  } = useForm({
+    defaultValues: {
+      current_password: '',
+      new_password: '',
+      confirm_password: '',
+    },
+  })
+
+  const onPasswordSubmit = (values) => {
+    changePassword.mutate(
+      { current_password: values.current_password, new_password: values.new_password },
+      { onSuccess: () => reset() },
+    )
+  }
+
+  if (assetsLoading) {
+    return <LoadingSpinner fullPage label="Loading settings..." />
+  }
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div className="card p-5 space-y-4">
+        <h2 className="section-title">Department Assets</h2>
+        <p className="text-sm text-gray-500">
+          Upload department logo and coordinator signature. These can be updated anytime.
+        </p>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <FileUpload
+            id="dept-logo-upload"
+            accept="image/*"
+            label="Department Logo"
+            hint="PNG/JPG"
+            maxSizeMB={5}
+            onFile={setLogoFile}
+          />
+          <FileUpload
+            id="dept-signature-upload"
+            accept="image/*"
+            label="Coordinator Signature"
+            hint="PNG/JPG"
+            maxSizeMB={5}
+            onFile={setSignatureFile}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <p className="text-sm font-medium mb-2">Logo Preview</p>
+            {logoPreview ? (
+              <img src={logoPreview} alt="Logo preview" className="h-24 w-auto rounded border border-gray-200 bg-gray-50 p-2 object-contain" />
+            ) : <p className="text-xs text-gray-400">No logo uploaded.</p>}
+          </div>
+          <div>
+            <p className="text-sm font-medium mb-2">Signature Preview</p>
+            {signaturePreview ? (
+              <img src={signaturePreview} alt="Signature preview" className="h-24 w-auto rounded border border-gray-200 bg-gray-50 p-2 object-contain" />
+            ) : <p className="text-xs text-gray-400">No signature uploaded.</p>}
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button className="btn-primary" onClick={handleAssetSave} disabled={updateAssets.isPending || (!logoFile && !signatureFile)}>
+            {updateAssets.isPending ? 'Saving...' : 'Save Assets'}
+          </button>
+        </div>
+      </div>
+
+      <div className="card p-5">
+        <h2 className="section-title mb-4">Change Password</h2>
+        <form onSubmit={handleSubmit(onPasswordSubmit)} className="space-y-4">
+          <div>
+            <label className="form-label">Current Password</label>
+            <input
+              type="password"
+              className={`form-input ${errors.current_password ? 'form-input-error' : ''}`}
+              {...register('current_password', { required: 'Current password is required' })}
+            />
+            {errors.current_password && <p className="form-error">{errors.current_password.message}</p>}
+          </div>
+          <div>
+            <label className="form-label">New Password</label>
+            <input
+              type="password"
+              className={`form-input ${errors.new_password ? 'form-input-error' : ''}`}
+              {...register('new_password', { required: 'New password is required', minLength: { value: 8, message: 'Minimum 8 characters' } })}
+            />
+            {errors.new_password && <p className="form-error">{errors.new_password.message}</p>}
+          </div>
+          <div>
+            <label className="form-label">Confirm New Password</label>
+            <input
+              type="password"
+              className={`form-input ${errors.confirm_password ? 'form-input-error' : ''}`}
+              {...register('confirm_password', {
+                required: 'Confirm your new password',
+                validate: (v) => v === watch('new_password') || 'Passwords do not match',
+              })}
+            />
+            {errors.confirm_password && <p className="form-error">{errors.confirm_password.message}</p>}
+          </div>
+          <button type="submit" className="btn-primary" disabled={changePassword.isPending}>
+            {changePassword.isPending ? 'Updating...' : 'Change Password'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }
 
 export default function DeptCoordinatorDashboard() {
-  const [view, setView] = useState('home')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requiresProfileSetup = useAuthStore((s) => s.requires_profile_setup)
+  const { data: deptAssets } = useDeptAssets()
+
+  const needsAssetSetup = requiresProfileSetup || (deptAssets ? (!deptAssets.has_logo || !deptAssets.has_signature) : false)
+
+  const activeTab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'dashboard'
+
+  const setTab = (tab) => {
+    setSearchParams(tab === 'dashboard' ? {} : { tab }, { replace: true })
+  }
+
+  useEffect(() => {
+    if (needsAssetSetup && activeTab !== 'settings') {
+      setSearchParams({ tab: 'settings' }, { replace: true })
+    }
+  }, [needsAssetSetup, activeTab, setSearchParams])
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <Navbar />
-
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
-
         <main className="flex-1 overflow-y-auto bg-background">
-          <div className="page-container space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">Department Coordinator</h1>
-                <p className="mt-0.5 text-sm text-gray-500">Choose what you want to do.</p>
-              </div>
-
-              {view !== 'home' && (
-                <button className="btn-secondary" onClick={() => setView('home')}>
-                  ← Back to Options
+          <div className="page-container">
+            <div className="mb-6 flex gap-1 border-b border-gray-200">
+              {TABS.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setTab(tab)}
+                  className={`relative px-4 py-2.5 text-sm font-medium capitalize transition-colors ${
+                    activeTab === tab
+                      ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
+                      : 'text-gray-500 hover:text-navy'
+                  }`}
+                >
+                  {tab}
                 </button>
-              )}
+              ))}
             </div>
 
-            {view === 'home' && <FeatureLanding onSelect={setView} />}
-            {view === 'generate' && <GenerateCertificatesView />}
-            {view === 'credits' && <CreditsView />}
+            {needsAssetSetup && (
+              <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                First login setup pending. Please upload department logo and coordinator signature in Settings.
+              </div>
+            )}
+
+            {activeTab === 'dashboard' && <DashboardTab />}
+            {activeTab === 'events' && <EventsTab />}
+            {activeTab === 'settings' && <SettingsTab />}
           </div>
         </main>
       </div>

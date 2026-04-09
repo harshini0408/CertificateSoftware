@@ -8,6 +8,7 @@ from ..core.security import decode_token, verify_password, hash_password
 from ..models.user import User
 from ..models.user import UserRole
 from ..models.club import Club
+from ..models.dept_asset import DeptAsset
 from ..schemas.auth import LoginRequest, LoginResponse, MeResponse, PasswordChangeRequest, TokenResponse
 from ..services.auth_service import (
     authenticate_user,
@@ -65,6 +66,12 @@ async def login(body: LoginRequest, response: Response):
             requires_profile_setup = not bool(
                 assets and assets.logo_path and assets.signature_path
             )
+    if user.role == UserRole.DEPT_COORDINATOR:
+        department = (user.department or "General").strip() or "General"
+        dept_assets = await DeptAsset.find_one(DeptAsset.department == department)
+        requires_profile_setup = not bool(
+            dept_assets and dept_assets.logo_path and dept_assets.signature1_path
+        )
 
     access, refresh = build_tokens(user)
     response.set_cookie("access_token", access, max_age=settings.access_token_expire_minutes * 60, **_COOKIE_DEFAULTS)
@@ -153,6 +160,12 @@ async def me(current_user: User = Depends(get_current_user)):
             requires_profile_setup = not bool(
                 assets and assets.logo_path and assets.signature_path
             )
+    if current_user.role == UserRole.DEPT_COORDINATOR:
+        department = (current_user.department or "General").strip() or "General"
+        dept_assets = await DeptAsset.find_one(DeptAsset.department == department)
+        requires_profile_setup = not bool(
+            dept_assets and dept_assets.logo_path and dept_assets.signature1_path
+        )
 
     return MeResponse(
         role=current_user.role.value,

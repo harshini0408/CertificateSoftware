@@ -1,9 +1,10 @@
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any, Dict
 import hashlib
 import re
 from datetime import datetime
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -16,14 +17,41 @@ from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
 from ...models.dept_asset import DeptAsset
 from ...models.dept_certificate import DeptCertificate
+from ...models.dept_event import DeptEvent, DeptEventStatus
+from ...models.dept_template import DeptTemplate
 from ...services.signature_service import process_signature, save_logo
 from ...services.storage_service import save_cert_png
+from ...config import get_settings
 
 router = APIRouter(tags=["Department"])
 
 
 class DeptBatchDownloadRequest(BaseModel):
     cert_numbers: list[str]
+
+
+class DeptEventCreateRequest(BaseModel):
+    name: str
+    event_date: Optional[datetime] = None
+    semester: str
+
+
+class DeptEventFieldMappingRequest(BaseModel):
+    selected_fields: list[str]
+    field_positions: Dict[str, Dict[str, float]]
+
+
+def _event_response(evt: DeptEvent) -> dict:
+    return {
+        "id": str(evt.id),
+        "name": evt.name,
+        "event_date": evt.event_date,
+        "semester": evt.semester,
+        "status": evt.status.value,
+        "participant_count": evt.participant_count,
+        "cert_count": evt.cert_count,
+        "created_at": evt.created_at,
+    }
 
 
 def _slugify(value: str) -> str:
@@ -93,6 +121,53 @@ def _parse_dept_excel(file_bytes: bytes) -> list[dict]:
                 "contribution": contribution,
             }
         )
+
+    wb.close()
+    if not parsed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid rows found in Excel")
+    return parsed
+
+
+def _parse_excel_headers(file_bytes: bytes) -> list[str]:
+    wb = load_workbook(filename=BytesIO(file_bytes), read_only=True)
+    ws = wb.active
+    rows = ws.iter_rows(values_only=True)
+    headers_row = next(rows, None)
+    wb.close()
+    if not headers_row:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel is empty")
+    headers = [str(h).strip() if h is not None else "" for h in headers_row]
+    headers = [h for h in headers if h]
+    if not headers:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No usable header columns found")
+    return headers
+
+
+def _parse_excel_rows_dynamic(file_bytes: bytes) -> list[dict[str, str]]:
+    wb = load_workbook(filename=BytesIO(file_bytes), read_only=True)
+    ws = wb.active
+    rows = ws.iter_rows(values_only=True)
+    headers_row = next(rows, None)
+    if not headers_row:
+        wb.close()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel is empty")
+
+    headers = [str(h).strip() if h is not None else "" for h in headers_row]
+    if not any(headers):
+        wb.close()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel header row is empty")
+
+    parsed: list[dict[str, str]] = []
+    for row in rows:
+        if not row or all(v is None or str(v).strip() == "" for v in row):
+            continue
+        rec: dict[str, str] = {}
+        for i, h in enumerate(headers):
+            if not h:
+                continue
+            val = row[i] if i < len(row) else None
+            rec[h] = "" if val is None else str(val).strip()
+        parsed.append(rec)
 
     wb.close()
     if not parsed:
@@ -192,6 +267,76 @@ def _render_dept_certificate(
     return out.getvalue()
 
 
+def _render_dept_certificate_dynamic(
+    template_path: Path,
+    row: dict[str, str],
+    cert_number: str,
+    selected_fields: list[str],
+    field_positions: Dict[str, Dict[str, float]],
+    logo_path: Optional[str],
+    sig1_path: Optional[str],
+) -> bytes:
+    img = Image.open(str(template_path)).convert("RGBA")
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+
+    for field in selected_fields:
+        pos = field_positions.get(field)
+        if not pos:
+            continue
+        x = float(pos.get("x_percent", 50.0))
+        y = float(pos.get("y_percent", 50.0))
+        font_size = int(float(pos.get("font_size", 36)))
+        font = _load_font(max(1, font_size))
+        value = (row.get(field) or "").strip()
+        if value:
+            draw.text((w * x / 100, h * y / 100), value, fill=(28, 35, 70, 255), font=font, anchor="mm")
+
+    cert_pos = field_positions.get("_cert_number") or {"x_percent": 82.0, "y_percent": 5.0, "font_size": 24}
+    cert_font = _load_font(max(1, int(float(cert_pos.get("font_size", 24)))))
+    draw.text(
+        (w * float(cert_pos.get("x_percent", 82.0)) / 100, h * float(cert_pos.get("y_percent", 5.0)) / 100),
+        cert_number,
+        fill=(44, 61, 127, 255),
+        font=cert_font,
+        anchor="lm",
+    )
+
+    def _paste_scaled(path: Optional[str], field_id: str, def_x: float, def_y: float, max_w_ratio: float, max_h_ratio: float):
+        if not path:
+            return
+        p = Path(path)
+        if not p.exists():
+            return
+        pos = field_positions.get(field_id, {})
+        cx = float(pos.get("x_percent", def_x * 100)) / 100
+        cy = float(pos.get("y_percent", def_y * 100)) / 100
+
+        try:
+            asset = Image.open(str(p)).convert("RGBA")
+            max_w = int(w * max_w_ratio)
+            max_h = int(h * max_h_ratio)
+            asset.thumbnail((max_w, max_h), Image.LANCZOS)
+            x = int(w * cx - asset.width / 2)
+            y = int(h * cy - asset.height / 2)
+            img.paste(asset, (x, y), asset.split()[3])
+        except Exception:
+            return
+
+    _paste_scaled(logo_path, "_logo", 0.12, 0.12, 0.16, 0.16)
+    _paste_scaled(sig1_path, "_signature", 0.18, 0.84, 0.2, 0.1)
+
+    out = BytesIO()
+    if img.mode == "RGBA":
+        bg = Image.new("RGB", img.size, "white")
+        bg.paste(img, mask=img.split()[3])
+        bg.save(out, format="PNG")
+    else:
+        img.save(out, format="PNG")
+    out.seek(0)
+    return out.getvalue()
+
+
 async def _get_or_create_dept_asset(department: str) -> DeptAsset:
     asset = await DeptAsset.find_one(DeptAsset.department == department)
     if asset:
@@ -200,6 +345,371 @@ async def _get_or_create_dept_asset(department: str) -> DeptAsset:
     asset = DeptAsset(department=department)
     await asset.insert()
     return asset
+
+
+@router.get("/dept/assets")
+async def get_dept_assets(
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    asset = await _get_or_create_dept_asset(department)
+    return {
+        "department": department,
+        "logo_url": asset.logo_url,
+        "logo_hash": asset.logo_hash,
+        "signature_url": asset.signature1_url,
+        "signature_hash": asset.signature1_hash,
+        "has_logo": bool(asset.logo_path),
+        "has_signature": bool(asset.signature1_path),
+    }
+
+
+@router.post("/dept/assets")
+async def upsert_dept_assets(
+    logo: UploadFile | None = File(None),
+    signature: UploadFile | None = File(None),
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    if logo is None and signature is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload at least one asset (logo/signature)")
+
+    department = _normalize_department(current_user.department)
+    dept_slug = _slugify(department)
+    asset = await _get_or_create_dept_asset(department)
+
+    if logo is not None:
+        logo_bytes = await logo.read()
+        asset.logo_path = save_logo(logo_bytes, dept_slug)
+        asset.logo_hash = hashlib.md5(logo_bytes).hexdigest()
+        asset.logo_url = asset.logo_path
+
+    if signature is not None:
+        sig_bytes = await signature.read()
+        asset.signature1_path = process_signature(sig_bytes, dept_slug)
+        asset.signature1_hash = hashlib.md5(sig_bytes).hexdigest()
+        asset.signature1_url = asset.signature1_path
+
+    asset.updated_at = datetime.utcnow()
+    await asset.save()
+
+    return {
+        "message": "Department assets updated",
+        "department": department,
+        "logo_url": asset.logo_url,
+        "logo_hash": asset.logo_hash,
+        "signature_url": asset.signature1_url,
+        "signature_hash": asset.signature1_hash,
+        "has_logo": bool(asset.logo_path),
+        "has_signature": bool(asset.signature1_path),
+    }
+
+
+@router.get("/dept/dashboard")
+async def get_dept_dashboard(
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+
+    events = await DeptEvent.find(DeptEvent.department == department).sort(-DeptEvent.created_at).to_list()
+    certs = await DeptCertificate.find(DeptCertificate.department == department).to_list()
+
+    participants = {f"{(c.name or '').strip().lower()}|{(c.class_name or '').strip().lower()}" for c in certs if c.name}
+
+    recent_events = [_event_response(evt) for evt in events[:5]]
+
+    return {
+        "department": department,
+        "stats": {
+            "total_events": len(events),
+            "total_certificates_issued": len(certs),
+            "total_participants": len(participants),
+        },
+        "recent_events": recent_events,
+    }
+
+
+@router.get("/dept/events")
+async def list_dept_events(
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    events = await DeptEvent.find(DeptEvent.department == department).sort(-DeptEvent.created_at).to_list()
+    return [_event_response(evt) for evt in events]
+
+
+@router.post("/dept/events", status_code=201)
+async def create_dept_event(
+    body: DeptEventCreateRequest,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    name = (body.name or "").strip()
+    semester = (body.semester or "").strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Event name is required")
+    if not semester:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Semester is required")
+
+    evt = DeptEvent(
+        department=department,
+        name=name,
+        event_date=body.event_date,
+        semester=semester,
+        status=DeptEventStatus.DRAFT,
+        participant_count=0,
+        cert_count=0,
+    )
+    await evt.insert()
+    return _event_response(evt)
+
+
+async def _get_dept_event_or_404(event_id: str, department: str) -> DeptEvent:
+    try:
+        evt = await DeptEvent.get(event_id)
+    except Exception:
+        evt = None
+    if not evt or evt.department != department:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department event not found")
+    return evt
+
+
+@router.post("/dept/events/{event_id}/template", status_code=201)
+async def upload_dept_event_template(
+    event_id: str,
+    template_file: UploadFile = File(...),
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    content_type = (template_file.content_type or "").lower()
+    filename = (template_file.filename or "").lower()
+    if not (
+        content_type in ("image/png", "image/jpeg", "image/jpg")
+        or filename.endswith((".png", ".jpg", ".jpeg"))
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only PNG or JPEG files are accepted")
+
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department)
+
+    file_bytes = await template_file.read()
+    try:
+        img = Image.open(BytesIO(file_bytes))
+        img.verify()
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Uploaded file is not a valid image")
+
+    settings = get_settings()
+    dept_slug = _slugify(department)
+    event_slug = _slugify(evt.name)
+    out_dir = settings.storage_root / "dept_templates" / dept_slug / str(evt.id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_name = f"template-{event_slug}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6]}.png"
+    out_path = out_dir / out_name
+
+    img = Image.open(BytesIO(file_bytes)).convert("RGBA")
+    img.save(str(out_path), format="PNG")
+
+    rel = out_path.resolve().relative_to(settings.storage_root.resolve()).as_posix()
+    url = f"/storage/{rel}"
+
+    # Mark previous templates for this event inactive.
+    prev_templates = await DeptTemplate.find(
+        DeptTemplate.department == department,
+        DeptTemplate.event_id == evt.id,
+        DeptTemplate.is_active == True,
+    ).to_list()
+    for t in prev_templates:
+        await t.set({"is_active": False})
+
+    doc = DeptTemplate(
+        department=department,
+        event_id=evt.id,
+        original_filename=template_file.filename or out_name,
+        template_path=str(out_path),
+        template_url=url,
+        is_active=True,
+        uploaded_by_user_id=str(current_user.id),
+    )
+    await doc.insert()
+
+    await evt.set({"template_id": doc.id})
+    evt = await DeptEvent.get(evt.id)
+
+    return {
+        "message": "Template uploaded",
+        "template": {
+            "id": str(doc.id),
+            "template_url": doc.template_url,
+            "original_filename": doc.original_filename,
+        },
+        "event": _event_response(evt),
+    }
+
+
+@router.get("/dept/events/{event_id}/template")
+async def get_dept_event_template(
+    event_id: str,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department)
+
+    template_doc = None
+    if evt.template_id:
+        template_doc = await DeptTemplate.get(evt.template_id)
+
+    if not template_doc:
+        template_doc = await DeptTemplate.find_one(
+            DeptTemplate.department == department,
+            DeptTemplate.event_id == evt.id,
+            DeptTemplate.is_active == True,
+        )
+
+    if not template_doc:
+        return {"template": None}
+
+    return {
+        "template": {
+            "id": str(template_doc.id),
+            "template_url": template_doc.template_url,
+            "original_filename": template_doc.original_filename,
+        }
+    }
+
+
+@router.post("/dept/events/{event_id}/excel/headers")
+async def extract_dept_event_excel_headers(
+    event_id: str,
+    excel_file: UploadFile = File(...),
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    await _get_dept_event_or_404(event_id, department)
+
+    content = await excel_file.read()
+    headers = _parse_excel_headers(content)
+    return {"headers": headers}
+
+
+@router.get("/dept/events/{event_id}/mapping")
+async def get_dept_event_mapping(
+    event_id: str,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department)
+
+    return {
+        "selected_fields": evt.selected_fields,
+        "field_positions": evt.field_positions,
+        "mapping_configured": evt.mapping_configured,
+    }
+
+
+@router.post("/dept/events/{event_id}/mapping")
+async def save_dept_event_mapping(
+    event_id: str,
+    body: DeptEventFieldMappingRequest,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department)
+
+    selected = [str(f).strip() for f in body.selected_fields if str(f).strip()]
+    if not selected:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Select at least one field")
+
+    await evt.set({
+        "selected_fields": selected,
+        "field_positions": body.field_positions,
+        "mapping_configured": True,
+    })
+    evt = await DeptEvent.get(evt.id)
+    return {
+        "message": "Mapping saved",
+        "selected_fields": evt.selected_fields,
+        "field_positions": evt.field_positions,
+        "mapping_configured": evt.mapping_configured,
+    }
+
+
+@router.post("/dept/events/{event_id}/certificates/generate")
+async def generate_dept_event_certificates(
+    event_id: str,
+    excel_file: UploadFile = File(...),
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department)
+
+    if not evt.template_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload event template first")
+    if not evt.mapping_configured or not evt.selected_fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure field mapping first")
+
+    template_doc = await DeptTemplate.get(evt.template_id)
+    if not template_doc or not Path(template_doc.template_path).exists():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Template file not found for this event")
+
+    asset = await _get_or_create_dept_asset(department)
+    if not asset.logo_path or not asset.signature1_path:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department logo and signature are required")
+
+    content = await excel_file.read()
+    rows = _parse_excel_rows_dynamic(content)
+
+    dept_slug = _slugify(department)
+    year = datetime.utcnow().year
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+
+    generated = 0
+    cert_numbers: list[str] = []
+    participant_keys: set[str] = set()
+
+    for idx, row in enumerate(rows, start=1):
+        cert_number = f"DPT-{dept_slug[:4].upper()}-{timestamp}-{idx:03d}"
+        png_bytes = _render_dept_certificate_dynamic(
+            template_path=Path(template_doc.template_path),
+            row=row,
+            cert_number=cert_number,
+            selected_fields=evt.selected_fields,
+            field_positions=evt.field_positions,
+            logo_path=asset.logo_path,
+            sig1_path=asset.signature1_path,
+        )
+        png_url = save_cert_png(png_bytes, dept_slug, year, cert_number)
+
+        name = (row.get("Name") or row.get("Student Name") or "").strip() or "Unknown"
+        class_name = (row.get("Class") or row.get("Department") or row.get("Semester") or "").strip() or "-"
+        contribution = (row.get("Contribution") or row.get("Role") or row.get("Participation") or "").strip() or "Participant"
+
+        doc = DeptCertificate(
+            cert_number=cert_number,
+            department=department,
+            coordinator_user_id=str(current_user.id),
+            name=name,
+            class_name=class_name,
+            contribution=contribution,
+            png_url=png_url,
+            created_at=datetime.utcnow(),
+        )
+        await doc.insert()
+
+        participant_keys.add(f"{name.lower()}|{class_name.lower()}")
+        generated += 1
+        cert_numbers.append(cert_number)
+
+    await evt.set({
+        "participant_count": len(participant_keys),
+        "cert_count": generated,
+    })
+
+    return {
+        "generated": generated,
+        "total_rows": len(rows),
+        "message": f"Generated {generated} certificate(s) for event",
+        "cert_numbers": cert_numbers,
+    }
 
 
 @router.get("/dept/certificates/assets-status")
