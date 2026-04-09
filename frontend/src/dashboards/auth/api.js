@@ -148,10 +148,10 @@ export function useMe() {
 }
 
 
-// --- Password Reset Flow ---
-
+// --- Forgot password OTP flow ---
 export function useForgotPassword() {
   const addToast = useToastStore((s) => s.addToast)
+
   return useMutation({
     mutationFn: (username) => axiosInstance.post('/auth/forgot-password', { username }),
     onSuccess: (res) => {
@@ -160,14 +160,15 @@ export function useForgotPassword() {
     onError: (err) => {
       addToast({
         type: 'error',
-        message: err?.response?.data?.detail || 'Failed to send OTP. Try again later.'
+        message: err?.response?.data?.detail || 'Failed to send OTP. Try again later.',
       })
-    }
+    },
   })
 }
 
 export function useVerifyOTP() {
   const addToast = useToastStore((s) => s.addToast)
+
   return useMutation({
     mutationFn: ({ email, otp_code }) => axiosInstance.post('/auth/verify-otp', { email, otp_code }),
     onSuccess: (res) => {
@@ -176,14 +177,15 @@ export function useVerifyOTP() {
     onError: (err) => {
       addToast({
         type: 'error',
-        message: err?.response?.data?.detail || 'Invalid or expired OTP.'
+        message: err?.response?.data?.detail || 'Invalid or expired OTP.',
       })
-    }
+    },
   })
 }
 
 export function useResetPassword() {
   const addToast = useToastStore((s) => s.addToast)
+
   return useMutation({
     mutationFn: (payload) => axiosInstance.post('/auth/reset-password', payload),
     onSuccess: (res) => {
@@ -192,8 +194,8 @@ export function useResetPassword() {
     onError: (err) => {
       addToast({
         type: 'error',
-        message: err?.response?.data?.detail || 'Failed to reset password.'
+        message: err?.response?.data?.detail || 'Failed to reset password.',
       })
-    }
+    },
   })
 }

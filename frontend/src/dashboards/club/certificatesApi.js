@@ -54,6 +54,7 @@ export function useGenerateCerts(clubId, eventId) {
       qc.invalidateQueries({ queryKey: certKeys.list(clubId, eventId) })
       qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) })
       qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
       addToast({
         type: 'success',
         message:
@@ -88,6 +89,7 @@ export function useSendRemaining(clubId, eventId) {
     onSuccess: ({ data }) => {
       qc.invalidateQueries({ queryKey: certKeys.list(clubId, eventId) })
       qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
       addToast({
         type: 'success',
         message: `${data.queued ?? 0} email(s) queued for dispatch.`,
@@ -119,6 +121,7 @@ export function useResendCert(clubId, eventId) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: certKeys.list(clubId, eventId) })
       qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
       addToast({ type: 'success', message: 'Email re-queued.' })
     },
     onError: (err) => {

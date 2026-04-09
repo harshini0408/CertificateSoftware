@@ -90,16 +90,22 @@ async def club_dashboard(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
 
     # ── Stats ────────────────────────────────────────────────────────────────
-    total_events = await Event.find(Event.club_id == club_id).count()
+    all_events = await Event.find(Event.club_id == club_id).to_list()
+    event_ids = [ev.id for ev in all_events]
+    total_events = len(all_events)
 
-    total_certificates_issued = await Certificate.find(
-        Certificate.club_id == club_id,
-        Certificate.status != CertStatus.PENDING,
-    ).count()
+    if event_ids:
+        total_certificates_issued = await Certificate.find(
+            Certificate.event_id.in_(event_ids),
+            Certificate.status.in_([CertStatus.GENERATED, CertStatus.EMAILED]),
+        ).count()
 
-    total_participants = await Participant.find(
-        Participant.club_id == club_id,
-    ).count()
+        total_participants = await Participant.find(
+            Participant.event_id.in_(event_ids),
+        ).count()
+    else:
+        total_certificates_issued = 0
+        total_participants = 0
 
     # ── Recent events ────────────────────────────────────────────────────────
     recent_events_docs = await Event.find(
@@ -113,7 +119,7 @@ async def club_dashboard(
         ).count()
         c_count = await Certificate.find(
             Certificate.event_id == ev.id,
-            Certificate.status != CertStatus.PENDING,
+            Certificate.status.in_([CertStatus.GENERATED, CertStatus.EMAILED]),
         ).count()
         recent_events.append({
             "event_id": str(ev.id),

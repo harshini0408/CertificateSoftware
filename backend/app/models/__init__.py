@@ -65,5 +65,6 @@ __all__ = [
     "DeptEvent", "DeptEventStatus",
     "GuestSession",
     "RoleTemplatePreset",
+    "OTPRequest",
     "ALL_MODELS",
 ]

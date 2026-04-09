@@ -258,7 +258,7 @@ async def send_certificate_email(
 
 
 async def send_otp_email(recipient_email: str, otp_code: str) -> bool:
-    """Send a 4-digit OTP code to the user for password reset."""
+    """Send password-reset OTP email."""
     try:
         msg = MIMEMultipart()
         msg["To"] = recipient_email
@@ -274,8 +274,7 @@ async def send_otp_email(recipient_email: str, otp_code: str) -> bool:
 
         provider = get_email_provider()
         loop = asyncio.get_event_loop()
-        success = await loop.run_in_executor(None, provider.send, msg)
-        return success
+        return await loop.run_in_executor(None, provider.send, msg)
     except Exception as exc:
         logger.error("send_otp_email failed: %s", exc)
         return False

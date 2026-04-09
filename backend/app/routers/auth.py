@@ -13,8 +13,15 @@ from ..models.club import Club
 from ..models.dept_asset import DeptAsset
 from ..models.user_otp import OTPRequest
 from ..schemas.auth import (
-    LoginRequest, LoginResponse, MeResponse, PasswordChangeRequest, TokenResponse,
-    ForgotPasswordRequest, ForgotPasswordResponse, VerifyOTPRequest, ResetPasswordRequest
+    LoginRequest,
+    LoginResponse,
+    MeResponse,
+    PasswordChangeRequest,
+    TokenResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    VerifyOTPRequest,
+    ResetPasswordRequest,
 )
 from ..services.email_service import send_otp_email
 from ..services.auth_service import (
@@ -200,28 +207,25 @@ async def forgot_password(body: ForgotPasswordRequest):
     })
 
     if not user or not user.email:
-        # Don't reveal exact reason for security, but we need the email for the flow
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found or no registered email.")
 
     email = user.email.strip().lower()
     otp = f"{random.randint(1000, 9999)}"
     expires_at = datetime.utcnow() + timedelta(minutes=10)
 
-    # Clean up old OTPs for this email
     await OTPRequest.find(OTPRequest.email == email).delete()
 
     await OTPRequest(
         email=email,
         otp_code=otp,
-        expires_at=expires_at
+        expires_at=expires_at,
     ).insert()
 
     success = await send_otp_email(email, otp)
     if not success:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Failed to send OTP email")
 
-    # Mask email for feedback (e.g., example@gmail.com -> ex***e@gmail.com)
-    parts = email.split('@')
+    parts = email.split("@")
     name = parts[0]
     domain = parts[1]
     if len(name) > 2:
@@ -232,7 +236,7 @@ async def forgot_password(body: ForgotPasswordRequest):
 
     return ForgotPasswordResponse(
         message=f"OTP sent to your registered email: {masked_email}",
-        email=email
+        email=email,
     )
 
 
@@ -242,7 +246,7 @@ async def verify_otp(body: VerifyOTPRequest):
     otp_req = await OTPRequest.find_one(
         OTPRequest.email == body.email.strip().lower(),
         OTPRequest.otp_code == body.otp_code.strip(),
-        OTPRequest.expires_at > now
+        OTPRequest.expires_at > now,
     )
     if not otp_req:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired OTP")
@@ -259,7 +263,7 @@ async def reset_password(body: ResetPasswordRequest):
         OTPRequest.email == body.email.strip().lower(),
         OTPRequest.otp_code == body.otp_code.strip(),
         OTPRequest.expires_at > now,
-        OTPRequest.is_verified == True
+        OTPRequest.is_verified == True,
     )
     if not otp_req:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP verification required or session expired")
@@ -271,7 +275,5 @@ async def reset_password(body: ResetPasswordRequest):
     user.password_hash = hash_password(body.new_password)
     await user.save()
 
-    # Consume the OTP request
     await otp_req.delete()
-
     return TokenResponse(message="Password reset successfully")

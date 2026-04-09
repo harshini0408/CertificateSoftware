@@ -1,11 +1,9 @@
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 from beanie import Document, Indexed
 from pydantic import Field
+from pymongo import ASCENDING, IndexModel
 
-
-from pymongo import IndexModel, ASCENDING
 
 class OTPRequest(Document):
     """Stores temporary 4-digit OTPs for password reset requests."""
@@ -18,7 +16,7 @@ class OTPRequest(Document):
 
     class Settings:
         name = "otp_requests"
-        # TTL index to automatically delete expired OTPs after 10 minutes
         indexes = [
-            IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0)
+            # Expired OTPs are auto-deleted by MongoDB TTL monitor.
+            IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
         ]

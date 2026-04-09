@@ -14,6 +14,9 @@ import {
 } from './api'
 
 const DEFAULT_FIELD_POS = { x_percent: 50, y_percent: 50, font_size: 36 }
+const MANUAL_FIELD_OPTIONS = [
+  { id: '_date', label: 'Date' },
+]
 
 function toImageUrl(url) {
   if (!url) return null
@@ -127,7 +130,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
       const hdrs = data?.headers || []
       setHeaders(hdrs)
       setSelectedFields((prev) => {
-        const keep = prev.filter((f) => hdrs.includes(f))
+        const keep = prev.filter((f) => hdrs.includes(f) || f === '_date')
         return keep
       })
       addToast({ type: 'success', message: `${hdrs.length} field(s) extracted from Excel.` })
@@ -199,6 +202,21 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
             <p className="form-label">3) Choose Fields to Print</p>
             <div className="flex flex-wrap gap-2">
               {headers.length === 0 && <p className="text-xs text-gray-400">No fields yet. Extract headers from Excel first.</p>}
+              {MANUAL_FIELD_OPTIONS.map((opt) => {
+                const active = selectedFields.includes(opt.id)
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => toggleField(opt.id)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium border ${
+                      active ? 'bg-navy text-white border-navy' : 'bg-white text-gray-600 border-gray-300'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
               {headers.map((h) => {
                 const active = selectedFields.includes(h)
                 return (
@@ -229,7 +247,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
                     activePlacementKey === f ? 'bg-amber-50 text-amber-700 border-amber-500' : 'bg-white text-gray-600 border-gray-300'
                   }`}
                 >
-                  Place: {f}
+                  Place: {f === '_date' ? 'Date' : f}
                 </button>
               ))}
               {['_cert_number', '_logo', '_signature'].map((id) => {
@@ -289,7 +307,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
                   <PositionedTag
                     key={f}
                     id={f}
-                    label={f}
+                    label={f === '_date' ? 'Date' : f}
                     x={pos.x_percent}
                     y={pos.y_percent}
                     isActive={activePlacementKey === f}
