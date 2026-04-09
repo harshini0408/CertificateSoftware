@@ -11,6 +11,7 @@ import StatCard from '../../components/StatCard'
 import StatusBadge from '../../components/StatusBadge'
 import DataTable from '../../components/DataTable'
 import ConfirmModal from '../../components/ConfirmModal'
+import CertificateMappingTab from './CertificateMappingTab'
 
 import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../club/api'
 import { useUsers, useCreateUser, useUpdateUser, useDeactivateUser } from './usersApi'
@@ -669,6 +670,7 @@ export default function AdminDashboard() {
             {activeTab === 'overview' && <OverviewTab />}
             {activeTab === 'clubs' && <ClubsTab />}
             {activeTab === 'users' && <UsersTab />}
+            {activeTab === 'certificate-mapping' && <CertificateMappingTab />}
             {activeTab === 'certificates' && <CertificatesTab />}
             {activeTab === 'credit-rules' && <CreditRulesTab />}
           </div>

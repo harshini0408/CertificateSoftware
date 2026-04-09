@@ -7,6 +7,7 @@ export const adminKeys = {
   stats:     ()            => ['admin', 'stats'],
   clubs:     ()            => ['admin', 'clubs'],
   users:     ()            => ['admin', 'users'],
+  roleMappings: ()         => ['admin', 'role-mappings'],
   certs:     (filters, p) => ['admin', 'certificates', filters, p],
   scanLogs:  (filters, p) => ['admin', 'scan-logs', filters, p],
   creditRules: ()          => ['admin', 'credit-rules'],
@@ -315,6 +316,79 @@ export function useUpdateCreditRules() {
       addToast({
         type: 'error',
         message: err?.response?.data?.detail || 'Failed to update credit rules.',
+      })
+    },
+  })
+}
+
+// ── Role-Based Certificate Mapping ───────────────────────────────────────────
+export function useRoleMappings(includeInactive = true) {
+  return useQuery({
+    queryKey: [...adminKeys.roleMappings(), includeInactive],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/role-presets', {
+        params: includeInactive ? { include_inactive: true } : {},
+      })
+      return data
+    },
+  })
+}
+
+export function useCreateRoleMapping() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (payload) => axiosInstance.post('/role-presets', payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: adminKeys.roleMappings() })
+      addToast({ type: 'success', message: 'Certificate mapping created.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to create mapping.',
+      })
+    },
+  })
+}
+
+export function useUpdateRoleMapping() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ roleName, payload }) => axiosInstance.put(`/role-presets/${roleName}`, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: adminKeys.roleMappings() })
+      addToast({ type: 'success', message: 'Certificate mapping updated.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to update mapping.',
+      })
+    },
+  })
+}
+
+export function useSeedRoleMappings() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: () => axiosInstance.post('/role-presets/seed'),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: adminKeys.roleMappings() })
+      addToast({
+        type: 'success',
+        message: `Seed completed: ${data?.created ?? 0} created, ${data?.updated ?? 0} updated.`,
+      })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to seed mappings.',
       })
     },
   })

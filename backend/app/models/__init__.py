@@ -15,6 +15,7 @@ from .field_position import FieldPosition
 from .dept_asset import DeptAsset, DeptFieldPosition
 from .dept_certificate import DeptCertificate
 from .guest_session import GuestSession
+from .role_template_preset import RoleTemplatePreset
 
 ALL_MODELS = [
     Club,
@@ -34,6 +35,7 @@ ALL_MODELS = [
     DeptAsset,
     DeptCertificate,
     GuestSession,
+    RoleTemplatePreset,
 ]
 
 __all__ = [
@@ -53,5 +55,6 @@ __all__ = [
     "FieldPosition",    "DeptAsset", "DeptFieldPosition",
     "DeptCertificate",
     "GuestSession",
+    "RoleTemplatePreset",
     "ALL_MODELS",
 ]

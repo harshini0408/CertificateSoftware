@@ -99,7 +99,13 @@ async def upload_participants(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
     content = await file.read()
-    rows, errors = parse_participants_excel(content)
+    try:
+        rows, errors = parse_participants_excel(content)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Invalid Excel file. Please upload a valid .xlsx template. ({exc})",
+        )
 
     created = 0
     skipped = 0

@@ -93,6 +93,7 @@ function useNavItems() {
         { to: '/admin',                          icon: icons.dashboard,   label: 'Overview',      end: true },
         { to: '/admin?tab=clubs',                icon: icons.clubs,       label: 'Clubs' },
         { to: '/admin?tab=users',                icon: icons.users,       label: 'Users' },
+        { to: '/admin?tab=certificate-mapping',  icon: icons.template,    label: 'Certificate Mapping' },
         { to: '/admin?tab=certificates',         icon: icons.certificate, label: 'Certificates' },
         { to: '/admin?tab=credit-rules',         icon: icons.creditCard,  label: 'Credit Rules' },
       ]

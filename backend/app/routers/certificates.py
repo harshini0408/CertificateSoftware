@@ -14,11 +14,12 @@ from ..models.club import Club
 from ..models.event import Event
 from ..models.participant import Participant
 from ..models.field_position import FieldPosition
+from ..models.role_template_preset import RoleTemplatePreset
 from ..models.certificate import Certificate, CertStatus, CertSnapshot
 from ..models.email_log import EmailLog, EmailStatus
 from ..schemas.certificate import CertificateResponse, GenerateResponse
 from ..services.cert_number import generate_cert_number
-from ..services.png_generator import generate_certificate_pillow
+from ..services.png_generator import generate_certificate_pillow, generate_certificate_from_role_preset
 from ..services.storage_service import save_cert_png, storage_url_to_path, storage_path_to_url
 from ..services.email_service import send_certificate_email, get_daily_sent_count
 from ..services.credit_service import award_credits
@@ -62,15 +63,44 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         tmp_path = str(settings.storage_root / "tmp" / f"{cert.cert_number}.png")
         Path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Image-based Pillow pipeline for certificate generation
-        await generate_certificate_pillow(
-            event=event,
-            participant=participant,
-            output_path=tmp_path,
-            club_slug=club.slug,
-            cert_number=cert.cert_number,
-            cert_type=participant.cert_type or "participant",
+        role_name = participant.cert_type or "participant"
+        normalized_role = role_name.lower().replace(" ", "_").replace("-", "_")
+        preset = await RoleTemplatePreset.find_one(
+            RoleTemplatePreset.role_name == normalized_role,
+            RoleTemplatePreset.is_active == True,
         )
+
+        if preset:
+            assets = getattr(event, "assets", None)
+            logo_path = None
+            sig_path = None
+            if assets and getattr(assets, "logo_path", None):
+                lp = Path(assets.logo_path)
+                if lp.exists():
+                    logo_path = str(lp)
+            if assets and getattr(assets, "signature_path", None):
+                sp = Path(assets.signature_path)
+                if sp.exists():
+                    sig_path = str(sp)
+
+            await generate_certificate_from_role_preset(
+                role_name=role_name,
+                participant_fields=participant.fields or {},
+                output_path=tmp_path,
+                cert_number=cert.cert_number,
+                logo_path=logo_path,
+                sig_path=sig_path,
+            )
+        else:
+            # Fallback for manually configured per-event field positions.
+            await generate_certificate_pillow(
+                event=event,
+                participant=participant,
+                output_path=tmp_path,
+                club_slug=club.slug,
+                cert_number=cert.cert_number,
+                cert_type=role_name,
+            )
 
         png_bytes = Path(tmp_path).read_bytes()
         png_url = save_cert_png(png_bytes, club.slug, year, cert.cert_number)
@@ -205,7 +235,11 @@ async def generate_certificates(
     skipped_no_template = 0
     year = datetime.utcnow().year
 
-    # Field positions are the source of truth for image-template generation.
+    # Support both preset roles and manual field-position templates.
+    preset_docs = await RoleTemplatePreset.find(RoleTemplatePreset.is_active == True).to_list()
+    preset_roles = {p.role_name for p in preset_docs}
+
+    # Field positions remain the fallback source of truth.
     fp_docs = await FieldPosition.find(FieldPosition.event_id == event_id).to_list()
     fp_types = {fp.cert_type for fp in fp_docs if fp.template_filename}
     has_participant_fallback = "participant" in fp_types
@@ -215,8 +249,11 @@ async def generate_certificates(
             skipped_existing += 1
             continue
 
-        cert_type = p.cert_type
-        if cert_type not in fp_types and not has_participant_fallback:
+        cert_type = p.cert_type or "participant"
+        normalized_role = cert_type.lower().replace(" ", "_").replace("-", "_")
+        has_preset = normalized_role in preset_roles
+        has_manual = cert_type in fp_types or has_participant_fallback
+        if not has_preset and not has_manual:
             skipped_no_template += 1
             continue
 

@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosInstance from '../../utils/axiosInstance'
 import { useToastStore } from '../../store/uiStore'
+import { eventKeys } from './eventsApi'
+import { participantKeys } from './participantsApi'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const certKeys = {
@@ -50,6 +52,8 @@ export function useGenerateCerts(clubId, eventId) {
       ),
     onSuccess: ({ data }) => {
       qc.invalidateQueries({ queryKey: certKeys.list(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
       addToast({
         type: 'success',
         message:
@@ -83,6 +87,7 @@ export function useSendRemaining(clubId, eventId) {
       ),
     onSuccess: ({ data }) => {
       qc.invalidateQueries({ queryKey: certKeys.list(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
       addToast({
         type: 'success',
         message: `${data.queued ?? 0} email(s) queued for dispatch.`,
@@ -113,6 +118,7 @@ export function useResendCert(clubId, eventId) {
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: certKeys.list(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
       addToast({ type: 'success', message: 'Email re-queued.' })
     },
     onError: (err) => {

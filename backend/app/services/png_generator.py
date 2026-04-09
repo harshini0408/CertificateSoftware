@@ -14,7 +14,7 @@ Requirements
 import logging
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,57 @@ async def generate_certificate_pillow(
         participant.fields or {},
         fp.column_positions,
         fp.asset_positions or {},
+        logo_path,
+        sig_path,
+        output_path,
+        cert_number,
+    )
+
+
+async def generate_certificate_from_role_preset(
+    role_name: str,
+    participant_fields: dict,
+    output_path: str,
+    cert_number: str = "",
+    logo_path: str = None,
+    sig_path: str = None,
+) -> None:
+    """Generate certificate from RoleTemplatePreset without FieldPosition lookup."""
+    from ..models.role_template_preset import RoleTemplatePreset
+
+    normalized = (role_name or "participant").lower().replace(" ", "_").replace("-", "_")
+    preset = await RoleTemplatePreset.find_one(
+        RoleTemplatePreset.role_name == normalized,
+        RoleTemplatePreset.is_active == True,
+    )
+    if not preset:
+        raise ValueError(
+            f"No role preset found for role='{role_name}' (normalized='{normalized}')"
+        )
+
+    template_path = _CERT_TMPL_DIR / preset.template_filename
+    if not template_path.exists():
+        raise FileNotFoundError(f"Template PNG not found: {template_path}")
+
+    display_fields: Dict[str, str] = dict(participant_fields or {})
+    role_display_map = {
+        "organizer": "Organized",
+        "coordinator": "Coordinated",
+        "first_place": "First position",
+        "second_place": "Second position",
+        "third_place": "Third position",
+        "student_volunteer": "volunteered",
+        "paper_presenter": "paper",
+    }
+    if "Role" in display_fields:
+        display_fields["Role"] = role_display_map.get(normalized, display_fields["Role"])
+
+    await asyncio.to_thread(
+        _render_certificate_pillow,
+        template_path,
+        display_fields,
+        preset.column_positions,
+        preset.asset_positions or {},
         logo_path,
         sig_path,
         output_path,

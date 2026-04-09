@@ -10,11 +10,13 @@ import LoadingSpinner from '../../components/LoadingSpinner'
 import DataTable from '../../components/DataTable'
 import GuestWizard from '../../components/GuestWizard'
 import { useEvent, eventKeys } from './eventsApi'
+import { participantKeys } from './participantsApi'
+import { certKeys } from './certificatesApi'
 import { useToastStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
 
 import CertificateIssue from './CertificateIssue'
-import { BACKEND_URL } from '../../utils/axiosInstance'
+import axiosInstance, { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ─── Tab ids ──────────────────────────────────────────────────────────────────
 const TABS = ['overview', 'participants', 'certificates']
@@ -156,6 +158,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function ExcelUploadTab({ clubId, eventId }) {
   const addToast = useToastStore((s) => s.addToast)
+  const qc = useQueryClient()
   const [file, setFile] = useState(null)
   const [result, setResult] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -193,6 +196,14 @@ function ExcelUploadTab({ clubId, eventId }) {
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
+
+      // Keep all dependent screens in sync without manual page refresh.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) }),
+        qc.invalidateQueries({ queryKey: certKeys.list(clubId, eventId) }),
+        qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) }),
+      ])
+
       setResult(data)
       addToast({
         type: 'success',
@@ -202,7 +213,10 @@ function ExcelUploadTab({ clubId, eventId }) {
         addToast({ type: 'info', message: 'Participants imported. Proceed to Certificates.' })
       }
     } catch (err) {
-      const msg = err?.response?.data?.detail || 'Upload failed.'
+      const msg =
+        err?.response?.data?.detail ||
+        err?.message ||
+        'Upload failed.'
       addToast({ type: 'error', message: msg })
     } finally {
       setUploading(false)

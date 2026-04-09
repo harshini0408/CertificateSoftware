@@ -162,6 +162,21 @@ export function useImageTemplates() {
   })
 }
 
+// ── useRolePresets ───────────────────────────────────────────────────────────
+/**
+ * GET /role-presets
+ * Returns active role presets for auto role→template generation.
+ */
+export function useRolePresets() {
+  return useQuery({
+    queryKey: ['role-presets'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/role-presets')
+      return data
+    },
+  })
+}
+
 // ── useAllFieldPositions ──────────────────────────────────────────────────────
 /**
  * GET /clubs/:clubId/events/:eventId/field-positions

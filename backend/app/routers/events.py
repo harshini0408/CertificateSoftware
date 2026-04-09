@@ -19,7 +19,7 @@ from ..models.field_position import FieldPosition
 from ..schemas.event import EventCreate, EventUpdate, EventResponse
 from ..services.signature_service import process_signature, save_logo
 from ..services.storage_service import storage_path_to_url
-from ..services.excel_service import generate_excel_template, get_excel_template_filename
+from ..services.excel_service import generate_excel_template, get_active_role_names
 
 router = APIRouter(prefix="/clubs/{club_id}/events", tags=["Events"])
 settings = get_settings()
@@ -257,10 +257,10 @@ async def download_excel_template(club_id: PydanticObjectId, event_id: PydanticO
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
-    # Create generic template for image-based system
-    buf = generate_excel_template()
+    roles = await get_active_role_names()
+    buf = generate_excel_template(roles=roles)
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={get_excel_template_filename()}"},
+        headers={"Content-Disposition": "attachment; filename=certificate_template.xlsx"},
     )

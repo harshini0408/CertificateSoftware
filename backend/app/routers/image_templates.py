@@ -1,6 +1,7 @@
 """Router for image-based certificate templates and per-event, per-cert-type field positions."""
 
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from beanie import PydanticObjectId
@@ -23,8 +24,35 @@ router = APIRouter(tags=["Image Templates"])
 
 @router.get("/image-templates")
 async def list_image_templates():
-    """Return all active pre-built PNG certificate templates."""
+    """Return active PNG templates, deduplicated and limited to current files."""
     templates = await ImageTemplate.find(ImageTemplate.is_active == True).to_list()
+
+    template_dir = Path(__file__).resolve().parents[1] / "static" / "certificate_templates"
+    current_files = {p.name for p in template_dir.glob("*.png")} if template_dir.exists() else set()
+
+    # Keep only templates that still exist on disk and de-duplicate by filename.
+    unique_by_filename = {}
+    for t in sorted(templates, key=lambda x: x.created_at or datetime.min, reverse=True):
+        if current_files and t.filename not in current_files:
+            continue
+        if t.filename in unique_by_filename:
+            continue
+        unique_by_filename[t.filename] = t
+
+    # If DB is empty or stale, fallback directly to files on disk.
+    if not unique_by_filename and current_files:
+        return [
+            {
+                "id": f"file:{name}",
+                "filename": name,
+                "display_name": Path(name).stem.replace("_", " ").title(),
+                "preview_url": f"/static/certificate_templates/{name}",
+                "is_active": True,
+                "created_at": None,
+            }
+            for name in sorted(current_files)
+        ]
+
     return [
         {
             "id": str(t.id),
@@ -34,7 +62,7 @@ async def list_image_templates():
             "is_active": t.is_active,
             "created_at": t.created_at,
         }
-        for t in templates
+        for t in sorted(unique_by_filename.values(), key=lambda x: x.filename.lower())
     ]
 
 
