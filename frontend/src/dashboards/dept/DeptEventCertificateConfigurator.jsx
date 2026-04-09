@@ -1,12 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  useDraggable,
-} from '@dnd-kit/core'
-import { CSS } from '@dnd-kit/utilities'
+import { useEffect, useRef, useState } from 'react'
 
 import FileUpload from '../../components/FileUpload'
 import LoadingSpinner from '../../components/LoadingSpinner'
@@ -29,21 +21,21 @@ function toImageUrl(url) {
   return `${BACKEND_URL}${url}`
 }
 
-function DraggableTag({ id, label, x, y }) {
-  const { attributes, listeners, setNodeRef, transform } = useDraggable({ id })
-
+function PositionedTag({ id, label, x, y, isActive, onSelect }) {
   const style = {
     position: 'absolute',
     left: `${x}%`,
     top: `${y}%`,
-    transform: `${CSS.Translate.toString(transform)} translate(-50%, -50%)`,
-    cursor: 'grab',
+    transform: 'translate(-50%, -50%)',
+    cursor: 'pointer',
     zIndex: 10,
   }
 
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <div className="rounded border border-navy/50 bg-white/80 px-2 py-1 text-[10px] font-semibold text-navy shadow-sm">
+    <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(id) }}>
+      <div className={`rounded px-2 py-1 text-[10px] font-semibold shadow-sm ${
+        isActive ? 'border border-amber-500 bg-amber-50 text-amber-700' : 'border border-navy/50 bg-white/80 text-navy'
+      }`}>
         {label}
       </div>
     </div>
@@ -73,6 +65,8 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
   })
 
   const [extracting, setExtracting] = useState(false)
+  const [templateAspectRatio, setTemplateAspectRatio] = useState(2480 / 3508)
+  const [activePlacementKey, setActivePlacementKey] = useState('_cert_number')
 
   const templateUrl = toImageUrl(templateResp?.template?.template_url)
 
@@ -85,34 +79,32 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
     }))
   }, [mappingResp])
 
-  const allDraggableIds = useMemo(
-    () => [...selectedFields, '_cert_number', '_logo', '_signature'],
-    [selectedFields],
-  )
+  useEffect(() => {
+    const validKeys = [...selectedFields, '_cert_number', '_logo', '_signature']
+    if (!validKeys.includes(activePlacementKey)) {
+      setActivePlacementKey(validKeys[0] || '_cert_number')
+    }
+  }, [selectedFields, activePlacementKey])
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
-
-  const onDragEnd = (evt) => {
+  const placeAtClick = (evt) => {
     if (!containerRef.current) return
-    const { active, delta } = evt
-    const id = active?.id
-    if (!id) return
+    if (!activePlacementKey) {
+      addToast({ type: 'warning', message: 'Select a field first, then click on template to place it.' })
+      return
+    }
 
     const rect = containerRef.current.getBoundingClientRect()
-    const dx = (delta.x / rect.width) * 100
-    const dy = (delta.y / rect.height) * 100
+    const xPercent = ((evt.clientX - rect.left) / rect.width) * 100
+    const yPercent = ((evt.clientY - rect.top) / rect.height) * 100
 
-    setFieldPositions((prev) => {
-      const p = prev[id] || { ...DEFAULT_FIELD_POS }
-      return {
-        ...prev,
-        [id]: {
-          ...p,
-          x_percent: Math.max(0, Math.min(100, Number(p.x_percent || 50) + dx)),
-          y_percent: Math.max(0, Math.min(100, Number(p.y_percent || 50) + dy)),
-        },
-      }
-    })
+    setFieldPositions((prev) => ({
+      ...prev,
+      [activePlacementKey]: {
+        ...(prev[activePlacementKey] || { ...DEFAULT_FIELD_POS }),
+        x_percent: Math.max(0, Math.min(100, xPercent)),
+        y_percent: Math.max(0, Math.min(100, yPercent)),
+      },
+    }))
   }
 
   const handleUploadTemplate = async () => {
@@ -156,6 +148,8 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
       ...prev,
       [field]: prev[field] || { ...DEFAULT_FIELD_POS },
     }))
+
+    setActivePlacementKey(field)
   }
 
   const saveMapping = async () => {
@@ -178,7 +172,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-bold text-foreground">{event?.name} - Certificate Setup</h3>
-          <p className="text-xs text-gray-500">Upload template, map fields, drag positions, then generate certificates.</p>
+          <p className="text-xs text-gray-500">Upload template, map fields, select a target and click on preview to place it, then generate certificates.</p>
         </div>
         <button className="btn-secondary" onClick={onClose}>Close</button>
       </div>
@@ -223,6 +217,39 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
             </div>
           </div>
 
+          <div>
+            <p className="form-label">4) Select Field to Position, then click on template</p>
+            <div className="flex flex-wrap gap-2">
+              {selectedFields.map((f) => (
+                <button
+                  key={`place-${f}`}
+                  type="button"
+                  onClick={() => setActivePlacementKey(f)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium border ${
+                    activePlacementKey === f ? 'bg-amber-50 text-amber-700 border-amber-500' : 'bg-white text-gray-600 border-gray-300'
+                  }`}
+                >
+                  Place: {f}
+                </button>
+              ))}
+              {['_cert_number', '_logo', '_signature'].map((id) => {
+                const label = id === '_cert_number' ? 'Cert No' : id === '_logo' ? 'Logo' : 'Signature'
+                return (
+                  <button
+                    key={`place-${id}`}
+                    type="button"
+                    onClick={() => setActivePlacementKey(id)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium border ${
+                      activePlacementKey === id ? 'bg-amber-50 text-amber-700 border-amber-500' : 'bg-white text-gray-600 border-gray-300'
+                    }`}
+                  >
+                    Place: {label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="flex gap-2">
             <button className="btn-primary" onClick={saveMapping} disabled={saveMappingMutation.isPending || selectedFields.length === 0}>
               {saveMappingMutation.isPending ? 'Saving...' : 'Save Mapping'}
@@ -237,22 +264,56 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
           {!templateUrl ? (
             <div className="h-full flex items-center justify-center text-sm text-gray-400">Upload event template to start positioning.</div>
           ) : (
-            <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-              <div ref={containerRef} className="relative mx-auto w-full max-w-[420px] overflow-hidden rounded border bg-white" style={{ aspectRatio: '2480 / 3508' }}>
-                <img src={templateUrl} alt="Template preview" className="absolute inset-0 h-full w-full object-cover opacity-85" />
+            <div
+              ref={containerRef}
+              className="relative mx-auto w-full max-w-[620px] overflow-hidden rounded border bg-white cursor-crosshair"
+              style={{ aspectRatio: String(templateAspectRatio) }}
+              onClick={placeAtClick}
+              title="Click to place selected field"
+            >
+              <img
+                src={templateUrl}
+                alt="Template preview"
+                className="absolute inset-0 h-full w-full object-contain object-center"
+                onLoad={(e) => {
+                  const img = e.currentTarget
+                  if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                    setTemplateAspectRatio(img.naturalWidth / img.naturalHeight)
+                  }
+                }}
+              />
 
-                {selectedFields.map((f) => {
-                  const pos = fieldPositions[f] || DEFAULT_FIELD_POS
-                  return <DraggableTag key={f} id={f} label={f} x={pos.x_percent} y={pos.y_percent} />
-                })}
+              {selectedFields.map((f) => {
+                const pos = fieldPositions[f] || DEFAULT_FIELD_POS
+                return (
+                  <PositionedTag
+                    key={f}
+                    id={f}
+                    label={f}
+                    x={pos.x_percent}
+                    y={pos.y_percent}
+                    isActive={activePlacementKey === f}
+                    onSelect={setActivePlacementKey}
+                  />
+                )
+              })}
 
-                {['_cert_number', '_logo', '_signature'].map((id) => {
-                  const label = id === '_cert_number' ? 'Cert No' : id === '_logo' ? 'Logo' : 'Signature'
-                  const pos = fieldPositions[id] || DEFAULT_FIELD_POS
-                  return <DraggableTag key={id} id={id} label={label} x={pos.x_percent} y={pos.y_percent} />
-                })}
-              </div>
-            </DndContext>
+              {['_cert_number', '_logo', '_signature'].map((id) => {
+                const label = id === '_cert_number' ? 'Cert No' : id === '_logo' ? 'Logo' : 'Signature'
+                const pos = fieldPositions[id] || DEFAULT_FIELD_POS
+                return (
+                  <PositionedTag
+                    key={id}
+                    id={id}
+                    label={label}
+                    x={pos.x_percent}
+                    y={pos.y_percent}
+                    isActive={activePlacementKey === id}
+                    onSelect={setActivePlacementKey}
+                  />
+                )
+              })}
+            </div>
           )}
         </div>
       </div>

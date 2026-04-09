@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 
 import Navbar from '../../components/Navbar'
@@ -16,12 +16,14 @@ import { useAuthStore } from '../../store/authStore'
 import {
   useDeptDashboard,
   useDeptEvents,
+  useDeptEvent,
   useCreateDeptEvent,
   useDeptAssets,
   useUpdateDeptAssets,
 } from './api'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 import DeptEventCertificateConfigurator from './DeptEventCertificateConfigurator'
+import DeptCertificateIssue from './DeptCertificateIssue'
 
 const TABS = ['dashboard', 'events', 'settings']
 
@@ -82,10 +84,10 @@ function DashboardTab() {
 }
 
 function EventsTab() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { data: events, isLoading } = useDeptEvents()
   const createEvent = useCreateDeptEvent()
-  const [selectedEvent, setSelectedEvent] = useState(null)
 
   const {
     register,
@@ -120,13 +122,30 @@ function EventsTab() {
       event_date: values.event_date || null,
       semester: values.semester,
     }
-    await createEvent.mutateAsync(payload)
+    const created = await createEvent.mutateAsync(payload)
+    const eventId = created?.id || created?._id
     closeModal()
     reset()
+    if (eventId) {
+      navigate(`/dept/events/${eventId}`)
+    }
   }
 
   const eventColumns = [
-    { key: 'name', header: 'Event Name', sortable: true, searchKey: true },
+    {
+      key: 'name',
+      header: 'Event Name',
+      sortable: true,
+      searchKey: true,
+      render: (v, row) => (
+        <button
+          className="text-sm font-semibold text-navy hover:underline text-left"
+          onClick={() => navigate(`/dept/events/${row.id ?? row._id}`)}
+        >
+          {v}
+        </button>
+      ),
+    },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'semester', header: 'Semester', sortable: true },
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
@@ -137,7 +156,7 @@ function EventsTab() {
       header: 'Actions',
       searchKey: false,
       render: (_, row) => (
-        <button className="btn-secondary text-xs" onClick={() => setSelectedEvent(row)}>
+        <button className="btn-secondary text-xs" onClick={() => navigate(`/dept/events/${row.id ?? row._id}`)}>
           Configure & Generate
         </button>
       ),
@@ -217,13 +236,58 @@ function EventsTab() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
 
-      {selectedEvent && (
-        <DeptEventCertificateConfigurator
-          event={selectedEvent}
-          onClose={() => setSelectedEvent(null)}
-        />
-      )}
+function EventDetailView({ eventId }) {
+  const navigate = useNavigate()
+  const { data: event, isLoading } = useDeptEvent(eventId)
+  const [activeTab, setActiveTab] = useState('overview')
+
+  if (isLoading) {
+    return <LoadingSpinner fullPage label="Loading event..." />
+  }
+
+  if (!event) {
+    return (
+      <div className="space-y-4">
+        <button className="btn-secondary" onClick={() => navigate('/dept?tab=events')}>Back to Events</button>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          Event not found.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <button className="btn-secondary" onClick={() => navigate('/dept?tab=events')}>Back to Events</button>
+      <div className="card p-4">
+        <h1 className="text-2xl font-bold text-foreground">{event.name}</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          {event.event_date ? fmtDate(event.event_date) : 'No date'} | Semester {event.semester}
+        </p>
+      </div>
+
+      <div className="mb-2 flex gap-1 border-b border-gray-200 overflow-x-auto scrollbar-hide">
+        {['overview', 'certificates'].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`relative whitespace-nowrap shrink-0 px-4 py-2.5 text-sm font-medium transition-colors ${
+              activeTab === tab
+                ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
+                : 'text-gray-500 hover:text-navy'
+            }`}
+          >
+            {tab === 'overview' ? 'Overview' : 'Certificates'}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'overview' && <DeptEventCertificateConfigurator event={event} onClose={() => navigate('/dept?tab=events')} />}
+      {activeTab === 'certificates' && <DeptCertificateIssue event={event} />}
     </div>
   )
 }
@@ -393,6 +457,7 @@ function SettingsTab() {
 }
 
 export default function DeptCoordinatorDashboard() {
+  const { event_id: eventId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const requiresProfileSetup = useAuthStore((s) => s.requires_profile_setup)
   const { data: deptAssets } = useDeptAssets()
@@ -440,9 +505,15 @@ export default function DeptCoordinatorDashboard() {
               </div>
             )}
 
-            {activeTab === 'dashboard' && <DashboardTab />}
-            {activeTab === 'events' && <EventsTab />}
-            {activeTab === 'settings' && <SettingsTab />}
+            {eventId ? (
+              <EventDetailView eventId={eventId} />
+            ) : (
+              <>
+                {activeTab === 'dashboard' && <DashboardTab />}
+                {activeTab === 'events' && <EventsTab />}
+                {activeTab === 'settings' && <SettingsTab />}
+              </>
+            )}
           </div>
         </main>
       </div>

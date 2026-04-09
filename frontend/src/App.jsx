@@ -14,6 +14,8 @@ import VerifyPage from './pages/Verify'
 import TemplateSelector from './dashboards/club/TemplateSelector'
 import GuestDashboard from './dashboards/guest/GuestDashboard'
 import GuestHistory from './dashboards/guest/GuestHistory'
+import Footer from './components/Footer'
+import Authors from './Authors'
 
 // ── Role constants ─────────────────────────────────────────────────────────────
 const ROLES = {
@@ -34,6 +36,7 @@ export default function App() {
         {/* ── Public routes ──────────────────────────────────────────────── */}
         <Route path="/login" element={<Login />} />
         <Route path="/verify/:cert_number" element={<VerifyPage />} />
+        <Route path="/authors" element={<Authors />} />
 
         {/* ── Super admin ────────────────────────────────────────────────── */}
         <Route
@@ -100,6 +103,14 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/dept/events/:event_id"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.DEPT_COORD, ROLES.SUPER_ADMIN]}>
+              <DeptCoordinatorDashboard />
+            </ProtectedRoute>
+          }
+        />
 
         {/* ── Student ────────────────────────────────────────────────────── */}
         <Route
@@ -115,6 +126,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      <Footer />
     </>
   )
 }

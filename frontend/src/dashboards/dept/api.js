@@ -6,6 +6,9 @@ import { useAuthStore } from '../../store/authStore'
 export const deptKeys = {
   dashboard: () => ['dept', 'dashboard'],
   events: () => ['dept', 'events'],
+  event: (eventId) => ['dept', 'event', eventId],
+  eventCertificates: (eventId) => ['dept', 'event-certificates', eventId],
+  eventParticipantsPreview: (eventId) => ['dept', 'event-participants-preview', eventId],
   deptAssets: () => ['dept', 'assets'],
   eventTemplate: (eventId) => ['dept', 'event-template', eventId],
   eventMapping: (eventId) => ['dept', 'event-mapping', eventId],
@@ -31,6 +34,17 @@ export function useDeptEvents() {
       const { data } = await axiosInstance.get('/dept/events')
       return data
     },
+  })
+}
+
+export function useDeptEvent(eventId) {
+  return useQuery({
+    queryKey: deptKeys.event(eventId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/dept/events/${eventId}`)
+      return data
+    },
+    enabled: !!eventId,
   })
 }
 
@@ -135,6 +149,15 @@ export async function extractDeptExcelHeaders(eventId, file) {
   return data
 }
 
+export async function previewDeptExcelParticipants(eventId, file) {
+  const formData = new FormData()
+  formData.append('excel_file', file)
+  const { data } = await axiosInstance.post(`/dept/events/${eventId}/excel/preview`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
 export function useDeptEventMapping(eventId) {
   return useQuery({
     queryKey: deptKeys.eventMapping(eventId),
@@ -186,6 +209,57 @@ export function useGenerateDeptEventCertificates(eventId) {
     },
     onError: (err) => {
       addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to generate certificates.' })
+    },
+  })
+}
+
+export function useDeptEventCertificates(eventId, options = {}) {
+  const { refetchInterval } = options
+  return useQuery({
+    queryKey: deptKeys.eventCertificates(eventId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/dept/events/${eventId}/certificates`)
+      return data
+    },
+    enabled: !!eventId,
+    refetchInterval: refetchInterval ?? false,
+  })
+}
+
+export function useSendDeptEventCertificates(eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/send`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: deptKeys.eventCertificates(eventId) })
+      addToast({ type: 'success', message: data?.message || 'Certificates email send triggered.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to send certificates.' })
+    },
+  })
+}
+
+export function useSendSingleDeptEventCertificate(eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (certId) => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/${certId}/send`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: deptKeys.eventCertificates(eventId) })
+      addToast({ type: 'success', message: data?.message || 'Certificate email sent.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to send certificate email.' })
     },
   })
 }

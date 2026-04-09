@@ -14,6 +14,7 @@ class DeptEventStatus(str, Enum):
 
 class DeptEvent(Document):
     department: str
+    created_by_user_id: Optional[str] = None
     name: str
     event_date: Optional[datetime] = None
     semester: str

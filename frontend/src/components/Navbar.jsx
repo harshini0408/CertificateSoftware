@@ -107,7 +107,7 @@ function ChangePasswordForm({ onClose }) {
 }
 
 // ── Navbar ────────────────────────────────────────────────────────────────────
-export default function Navbar() {
+export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
   const navigate = useNavigate()
   const { user, role, clearAuth } = useAuthStore()
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
@@ -144,97 +144,117 @@ export default function Navbar() {
   const meta = roleMeta[role] ?? { label: role, cls: 'bg-gray-100 text-gray-600' }
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center border-b border-gray-200 bg-white px-4 shadow-sm">
-      {/* Sidebar hamburger */}
-      <button
-        id="navbar-sidebar-toggle"
-        aria-label="Toggle sidebar"
-        onClick={toggleSidebar}
-        className="mr-3 rounded p-1.5 text-navy hover:bg-navy/8 transition-colors"
-      >
-        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      </button>
+    <>
+      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center border-b border-gray-200 bg-white px-4 shadow-sm">
+        {/* Sidebar hamburger */}
+        <button
+          id="navbar-sidebar-toggle"
+          aria-label="Toggle sidebar"
+          onClick={toggleSidebar}
+          className="mr-3 rounded p-1.5 text-navy hover:bg-navy/8 transition-colors"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
 
-      {/* Brand */}
-      <div className="flex items-center gap-2 select-none">
-        <img src={logoImg} alt="Logo" className="h-8 w-8 object-contain" />
-        <span className="hidden sm:block text-sm font-semibold text-navy leading-tight">
-          PSG iTech<br />
-          <span className="font-normal text-xs text-gray-500">Certificate Platform</span>
-        </span>
-      </div>
-
-      <div className="ml-auto flex items-center gap-3">
-        {/* Role badge */}
-        <span className={`hidden sm:inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${meta.cls}`}>
-          {meta.label}
-        </span>
-
-        {/* User dropdown */}
-        <div className="relative" ref={dropdownRef}>
+        {/* Brand */}
+        {onBrandClick ? (
           <button
-            id="navbar-user-menu"
-            onClick={() => { setDropdownOpen((o) => !o); setShowChangePw(false) }}
-            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-navy hover:bg-navy/8 transition-colors"
+            type="button"
+            onClick={onBrandClick}
+            aria-label={brandAriaLabel}
+            className="flex items-center gap-2 select-none rounded px-1 py-0.5 hover:bg-navy/8 transition-colors"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-navy/10 text-navy font-bold text-xs uppercase">
-              {user ? user[0] : '?'}
+            <img src={logoImg} alt="Logo" className="h-8 w-8 object-contain" />
+            <span className="hidden sm:block text-sm font-semibold text-navy leading-tight text-left">
+              PSG iTech<br />
+              <span className="font-normal text-xs text-gray-500">Certificate Platform</span>
             </span>
-            <span className="hidden sm:block max-w-[140px] truncate">{user ?? 'User'}</span>
-            <svg className={`h-4 w-4 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
           </button>
+        ) : (
+          <div className="flex items-center gap-2 select-none">
+            <img src={logoImg} alt="Logo" className="h-8 w-8 object-contain" />
+            <span className="hidden sm:block text-sm font-semibold text-navy leading-tight">
+              PSG iTech<br />
+              <span className="font-normal text-xs text-gray-500">Certificate Platform</span>
+            </span>
+          </div>
+        )}
 
-          {/* Dropdown panel */}
-          {dropdownOpen && (
-            <div className="absolute right-0 mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-modal z-50">
-              {/* User info header */}
-              <div className="border-b border-gray-100 px-4 py-3">
-                <p className="text-sm font-semibold text-foreground">{user ?? 'User'}</p>
-                <span className={`mt-0.5 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>
-                  {meta.label}
-                </span>
-              </div>
+        <div className="ml-auto flex items-center gap-3">
+          {/* Role badge */}
+          <span className={`hidden sm:inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${meta.cls}`}>
+            {meta.label}
+          </span>
 
-              {/* Change password section */}
-              <div className="px-4 py-3">
-                {!showChangePw ? (
+          {/* User dropdown */}
+          <div className="relative" ref={dropdownRef}>
+            <button
+              id="navbar-user-menu"
+              onClick={() => { setDropdownOpen((o) => !o); setShowChangePw(false) }}
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-navy hover:bg-navy/8 transition-colors"
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-navy/10 text-navy font-bold text-xs uppercase">
+                {user ? user[0] : '?'}
+              </span>
+              <span className="hidden sm:block max-w-[140px] truncate">{user ?? 'User'}</span>
+              <svg className={`h-4 w-4 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {/* Dropdown panel */}
+            {dropdownOpen && (
+              <div className="absolute right-0 mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-modal z-50">
+                {/* User info header */}
+                <div className="border-b border-gray-100 px-4 py-3">
+                  <p className="text-sm font-semibold text-foreground">{user ?? 'User'}</p>
+                  <span className={`mt-0.5 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${meta.cls}`}>
+                    {meta.label}
+                  </span>
+                </div>
+
+                {/* Change password section */}
+                <div className="px-4 py-3">
+                  {!showChangePw ? (
+                    <button
+                      id="navbar-change-password"
+                      onClick={() => setShowChangePw(true)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-2 text-sm text-navy hover:bg-navy/8 transition-colors"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                      </svg>
+                      Change Password
+                    </button>
+                  ) : (
+                    <ChangePasswordForm onClose={() => setShowChangePw(false)} />
+                  )}
+                </div>
+
+                {/* Logout */}
+                <div className="border-t border-gray-100 px-4 py-2">
                   <button
-                    id="navbar-change-password"
-                    onClick={() => setShowChangePw(true)}
-                    className="flex w-full items-center gap-2 rounded px-2 py-2 text-sm text-navy hover:bg-navy/8 transition-colors"
+                    id="navbar-logout"
+                    onClick={() => logoutMutation.mutate()}
+                    disabled={logoutMutation.isPending}
+                    className="flex w-full items-center gap-2 rounded px-2 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                     </svg>
-                    Change Password
+                    {logoutMutation.isPending ? 'Logging out…' : 'Log out'}
                   </button>
-                ) : (
-                  <ChangePasswordForm onClose={() => setShowChangePw(false)} />
-                )}
+                </div>
               </div>
-
-              {/* Logout */}
-              <div className="border-t border-gray-100 px-4 py-2">
-                <button
-                  id="navbar-logout"
-                  onClick={() => logoutMutation.mutate()}
-                  disabled={logoutMutation.isPending}
-                  className="flex w-full items-center gap-2 rounded px-2 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
-                  {logoutMutation.isPending ? 'Logging out…' : 'Log out'}
-                </button>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      {/* Spacer keeps content from being hidden behind fixed header */}
+      <div className="h-14 shrink-0" />
+    </>
   )
 }

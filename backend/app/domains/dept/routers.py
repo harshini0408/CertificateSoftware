@@ -21,6 +21,8 @@ from ...models.dept_event import DeptEvent, DeptEventStatus
 from ...models.dept_template import DeptTemplate
 from ...services.signature_service import process_signature, save_logo
 from ...services.storage_service import save_cert_png
+from ...services.storage_service import storage_url_to_path
+from ...services.email_service import send_certificate_email
 from ...config import get_settings
 
 router = APIRouter(tags=["Department"])
@@ -173,6 +175,22 @@ def _parse_excel_rows_dynamic(file_bytes: bytes) -> list[dict[str, str]]:
     if not parsed:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid rows found in Excel")
     return parsed
+
+
+def _pick_email_from_row(row: dict[str, str]) -> Optional[str]:
+    candidate_keys = ["Email", "E-mail", "Mail", "Student Email", "Participant Email"]
+    lower_map = {k.lower(): v for k, v in row.items()}
+
+    for k in candidate_keys:
+        v = row.get(k)
+        if isinstance(v, str) and "@" in v:
+            return v.strip()
+
+    for k, v in lower_map.items():
+        if "mail" in k and isinstance(v, str) and "@" in v:
+            return v.strip()
+
+    return None
 
 
 def _load_font(size: int):
@@ -409,9 +427,18 @@ async def get_dept_dashboard(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
+    user_id = str(current_user.id)
 
-    events = await DeptEvent.find(DeptEvent.department == department).sort(-DeptEvent.created_at).to_list()
-    certs = await DeptCertificate.find(DeptCertificate.department == department).to_list()
+    events = await DeptEvent.find(
+        DeptEvent.department == department,
+        DeptEvent.created_by_user_id == user_id,
+    ).sort(-DeptEvent.created_at).to_list()
+
+    event_ids = [str(evt.id) for evt in events]
+    certs = await DeptCertificate.find(
+        DeptCertificate.department == department,
+        DeptCertificate.event_id.in_(event_ids),
+    ).to_list() if event_ids else []
 
     participants = {f"{(c.name or '').strip().lower()}|{(c.class_name or '').strip().lower()}" for c in certs if c.name}
 
@@ -433,8 +460,22 @@ async def list_dept_events(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
-    events = await DeptEvent.find(DeptEvent.department == department).sort(-DeptEvent.created_at).to_list()
+    user_id = str(current_user.id)
+    events = await DeptEvent.find(
+        DeptEvent.department == department,
+        DeptEvent.created_by_user_id == user_id,
+    ).sort(-DeptEvent.created_at).to_list()
     return [_event_response(evt) for evt in events]
+
+
+@router.get("/dept/events/{event_id}")
+async def get_dept_event(
+    event_id: str,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
+    return _event_response(evt)
 
 
 @router.post("/dept/events", status_code=201)
@@ -452,6 +493,7 @@ async def create_dept_event(
 
     evt = DeptEvent(
         department=department,
+        created_by_user_id=str(current_user.id),
         name=name,
         event_date=body.event_date,
         semester=semester,
@@ -463,12 +505,12 @@ async def create_dept_event(
     return _event_response(evt)
 
 
-async def _get_dept_event_or_404(event_id: str, department: str) -> DeptEvent:
+async def _get_dept_event_or_404(event_id: str, department: str, user_id: str) -> DeptEvent:
     try:
         evt = await DeptEvent.get(event_id)
     except Exception:
         evt = None
-    if not evt or evt.department != department:
+    if not evt or evt.department != department or evt.created_by_user_id != user_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Department event not found")
     return evt
 
@@ -488,7 +530,7 @@ async def upload_dept_event_template(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only PNG or JPEG files are accepted")
 
     department = _normalize_department(current_user.department)
-    evt = await _get_dept_event_or_404(event_id, department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     file_bytes = await template_file.read()
     try:
@@ -552,7 +594,7 @@ async def get_dept_event_template(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
-    evt = await _get_dept_event_or_404(event_id, department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     template_doc = None
     if evt.template_id:
@@ -584,11 +626,44 @@ async def extract_dept_event_excel_headers(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
-    await _get_dept_event_or_404(event_id, department)
+    await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     content = await excel_file.read()
     headers = _parse_excel_headers(content)
     return {"headers": headers}
+
+
+@router.post("/dept/events/{event_id}/excel/preview")
+async def preview_dept_event_excel_rows(
+    event_id: str,
+    excel_file: UploadFile = File(...),
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    await _get_dept_event_or_404(event_id, department, str(current_user.id))
+
+    content = await excel_file.read()
+    rows = _parse_excel_rows_dynamic(content)
+
+    preview = []
+    for idx, row in enumerate(rows[:300], start=1):
+        preview.append(
+            {
+                "id": str(idx),
+                "name": (row.get("Name") or row.get("Student Name") or row.get("Participant") or "").strip(),
+                "email": _pick_email_from_row(row) or "",
+                "reg_no": (row.get("Reg No") or row.get("Registration Number") or row.get("Roll No") or "").strip(),
+                "source": "excel",
+                "verified": True,
+                "raw": row,
+            }
+        )
+
+    return {
+        "total_rows": len(rows),
+        "preview_count": len(preview),
+        "participants": preview,
+    }
 
 
 @router.get("/dept/events/{event_id}/mapping")
@@ -597,7 +672,7 @@ async def get_dept_event_mapping(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
-    evt = await _get_dept_event_or_404(event_id, department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     return {
         "selected_fields": evt.selected_fields,
@@ -613,7 +688,7 @@ async def save_dept_event_mapping(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
-    evt = await _get_dept_event_or_404(event_id, department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     selected = [str(f).strip() for f in body.selected_fields if str(f).strip()]
     if not selected:
@@ -640,7 +715,7 @@ async def generate_dept_event_certificates(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
-    evt = await _get_dept_event_or_404(event_id, department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     if not evt.template_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload event template first")
@@ -687,9 +762,11 @@ async def generate_dept_event_certificates(
             cert_number=cert_number,
             department=department,
             coordinator_user_id=str(current_user.id),
+            event_id=str(evt.id),
             name=name,
             class_name=class_name,
             contribution=contribution,
+            participant_email=_pick_email_from_row(row),
             png_url=png_url,
             created_at=datetime.utcnow(),
         )
@@ -710,6 +787,130 @@ async def generate_dept_event_certificates(
         "message": f"Generated {generated} certificate(s) for event",
         "cert_numbers": cert_numbers,
     }
+
+
+@router.get("/dept/events/{event_id}/certificates")
+async def list_dept_event_certificates(
+    event_id: str,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
+
+    certs = await DeptCertificate.find(
+        DeptCertificate.department == department,
+        DeptCertificate.event_id == str(evt.id),
+    ).sort(-DeptCertificate.created_at).to_list()
+
+    return [
+        {
+            "id": str(c.id),
+            "cert_number": c.cert_number,
+            "participant_name": c.name,
+            "participant_email": c.participant_email,
+            "cert_type": "participant",
+            "status": "emailed" if c.emailed_at else ("failed" if c.email_error else "generated"),
+            "generated_at": c.created_at,
+            "emailed_at": c.emailed_at,
+            "failure_reason": c.email_error,
+            "png_url": c.png_url,
+        }
+        for c in certs
+    ]
+
+
+@router.post("/dept/events/{event_id}/certificates/send")
+async def send_dept_event_certificates(
+    event_id: str,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
+
+    certs = await DeptCertificate.find(
+        DeptCertificate.department == department,
+        DeptCertificate.event_id == str(evt.id),
+    ).to_list()
+
+    sendable = [c for c in certs if not c.emailed_at and c.participant_email and c.png_url]
+    if not sendable:
+        return {"queued": 0, "sent": 0, "failed": 0, "message": "No pending certificates to send."}
+
+    sent = 0
+    failed = 0
+    for cert in sendable:
+        local_path = storage_url_to_path(cert.png_url)
+        if not local_path or not Path(local_path).exists():
+            cert.email_error = "Certificate file not found"
+            await cert.save()
+            failed += 1
+            continue
+
+        ok = await send_certificate_email(
+            recipient_email=cert.participant_email,
+            recipient_name=cert.name,
+            cert_number=cert.cert_number,
+            event_name=evt.name,
+            club_name=department,
+            png_path=local_path,
+        )
+        if ok:
+            cert.emailed_at = datetime.utcnow()
+            cert.email_error = None
+            sent += 1
+        else:
+            cert.email_error = "Email delivery failed"
+            failed += 1
+        await cert.save()
+
+    return {
+        "queued": len(sendable),
+        "sent": sent,
+        "failed": failed,
+        "message": f"Sent {sent} email(s); {failed} failed.",
+    }
+
+
+@router.post("/dept/events/{event_id}/certificates/{cert_id}/send")
+async def send_single_dept_event_certificate(
+    event_id: str,
+    cert_id: str,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
+
+    cert = await DeptCertificate.get(cert_id)
+    if not cert or cert.department != department or cert.event_id != str(evt.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found for this event")
+
+    if not cert.participant_email:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No recipient email available for this certificate")
+
+    local_path = storage_url_to_path(cert.png_url)
+    if not local_path or not Path(local_path).exists():
+        cert.email_error = "Certificate file not found"
+        await cert.save()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate file not found")
+
+    ok = await send_certificate_email(
+        recipient_email=cert.participant_email,
+        recipient_name=cert.name,
+        cert_number=cert.cert_number,
+        event_name=evt.name,
+        club_name=department,
+        png_path=local_path,
+    )
+
+    if ok:
+        cert.emailed_at = datetime.utcnow()
+        cert.email_error = None
+        await cert.save()
+        return {"message": "Certificate email sent successfully."}
+
+    cert.email_error = "Email delivery failed"
+    await cert.save()
+    raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to send certificate email")
 
 
 @router.get("/dept/certificates/assets-status")
