@@ -31,7 +31,7 @@ function useDebounce(value, delay = 300) {
   const [debounced, setDebounced] = useState(value)
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(t)
+  return () => clearTimeout(t)
   }, [value, delay])
   return debounced
 }
@@ -67,7 +67,7 @@ function Modal({ isOpen, onClose, title, children, wide = false }) {
     const h = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h)
     document.body.style.overflow = 'hidden'
-    return () => { window.removeEventListener('keydown', h); document.body.style.overflow = '' }
+  return () => { window.removeEventListener('keydown', h); document.body.style.overflow = '' }
   }, [isOpen, onClose])
 
   if (!isOpen) return null
@@ -219,7 +219,6 @@ function NewClubModal({ isOpen, onClose }) {
       },
     })
   }
-
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="New Club">
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -483,7 +482,6 @@ function NewUserModal({ isOpen, onClose }) {
       },
     })
   }
-
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={step === 1 ? 'New User — Select Role' : `New User — ${roleLabel[selectedRole]}`} wide>
       {step === 1 ? (
@@ -740,7 +738,6 @@ function CertificatesTab() {
       )
     )},
   ]
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -840,7 +837,6 @@ function CreditRulesTab() {
   const handleSaveAll = () => {
     updateRules.mutate(localRules)
   }
-
   return (
     <div className="space-y-6">
       <div>
@@ -923,7 +919,6 @@ function OverviewTab() {
   ]
 
   const hasChartData = chartData.some(d => d.count > 0)
-
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-foreground">Platform Overview</h1>
@@ -1017,7 +1012,6 @@ function ClubsTab() {
         </div>
     )},
   ]
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1057,7 +1051,6 @@ function BulkImportModal({ isOpen, onClose }) {
       onSuccess: ({ data }) => setResult(data),
     })
   }
-
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Bulk Import Students" wide>
       {!result ? (
@@ -1218,7 +1211,6 @@ function UsersTab() {
       </div>
     )},
   ]
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">

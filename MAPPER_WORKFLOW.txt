@@ -1,0 +1,173 @@
+"""
+TEMPLATE MAPPER WORKFLOW DOCUMENTATION
+
+This document describes the complete flow of the new interactive Template Mapper UI.
+
+===============================================================================
+USER WORKFLOW
+===============================================================================
+
+1. SUPERADMIN NAVIGATION
+   - Superadmin clicks "Template Visual Mapper" in the dashboard
+   - Frontend navigates to CertificateConfigurator component
+   - Component lists all PNG templates from /api/certificate-config/templates
+
+2. TEMPLATE SELECTION
+   - Superadmin clicks on a template thumbnail
+   - Frontend loads that template and shows TemplateMapper
+   - TemplateMapper displays the certificate PNG image
+
+3. ADDING FIELDS
+   - Click "Add New Field" button in the sidebar
+   - An input field appears (Superadmin types field name)
+   - Field name must match Excel column headers exactly (e.g., "Name", "Date", "Role")
+   - Click "Confirm" button
+   - UI prompts: "Click on the certificate to set the position for '[Field Name]'"
+
+4. CLICKING ON CERTIFICATE
+   - Superadmin clicks anywhere on the certificate image
+   - Frontend captures X, Y pixel coordinates relative to the image
+   - Coordinates are automatically populated in the field entry
+   - Field shows green indicator: X and Y values displayed
+
+5. REPEATING FOR MORE FIELDS
+   - Click "Add New Field" again
+   - Repeat steps 3-4 for each field
+   - Can add unlimited fields
+
+6. SAVING CONFIGURATION
+   - Once all fields are mapped, click "Save Configuration"
+   - Frontend validates all fields have names and coordinates
+   - Frontend sends POST to /api/certificate-config/save with payload:
+     {
+       "template_name": "Class_Representative.png",
+       "fields": [
+         {"field_name": "Name", "x": 150, "y": 200},
+         {"field_name": "Date", "x": 600, "y": 300},
+         {"field_name": "Role", "x": 400, "y": 350}
+       ]
+     }
+   - Backend saves to MongoDB: CertificateTemplateConfig collection
+   - Success message shown
+
+===============================================================================
+API ENDPOINTS
+===============================================================================
+
+1. GET /api/certificate-config/templates
+   Description: List all PNG templates available for mapping
+   Response: ["Class_Representative.png", "Department_Head.png", ...]
+   
+2. GET /api/certificate-config/config/{template_name}
+   Description: Retrieve existing configuration for a template
+   Response (if exists): {
+     "Name": {"x": 150, "y": 200},
+     "Date": {"x": 600, "y": 300}
+   }
+   Response (if new): {}
+
+3. POST /api/certificate-config/save
+   Description: Save or update template configuration
+   Request Body: {
+     "template_name": "Class_Representative.png",
+     "fields": [
+       {"field_name": "Name", "x": 150, "y": 200},
+       {"field_name": "Date", "x": 600, "y": 300}
+     ]
+   }
+   Response: {"message": "Configuration saved", "fields_count": 2}
+
+===============================================================================
+FRONTEND COMPONENT FLOW
+===============================================================================
+
+CertificateConfigurator.jsx
+├─ Fetches: GET /api/certificate-config/templates
+├─ Displays: Grid of template thumbnails
+└─ On Click: Sets selectedTemplate state
+   └─ Renders: TemplateMapper
+
+TemplateMapper.jsx
+├─ Props: templateName, onSave
+├─ On Mount:
+│  ├─ Sets imageUrl (URL to certificate PNG)
+│  └─ Calls: GET /api/certificate-config/config/{templateName}
+│     └─ Loads existing configuration if any
+│
+├─ State:
+│  ├─ fields: Array of {id, field_name, x, y}
+│  ├─ pendingFieldId: Currently being configured field
+│  ├─ fieldNameInput: User's text input for field name
+│  ├─ saving: Boolean for save button loading state
+│  └─ error: Error message if any
+│
+├─ Actions:
+│  ├─ addNewField()
+│  │  └─ Creates field with {id, field_name: "", x: null, y: null}
+│  │  └─ Sets pendingFieldId to trigger "name input" mode
+│  │
+│  ├─ confirmFieldName()
+│  │  └─ Sets field_name on the pending field
+│  │  └─ Clears pendingFieldId
+│  │  └─ Sets mode to "waiting for click" on image
+│  │
+│  ├─ handleImageClick()
+│  │  └─ Only works if pendingFieldId is set
+│  │  └─ Calculates X, Y from mouse event
+│  │  └─ Updates the pending field with X, Y
+│  │  └─ Clears pendingFieldId (field is complete)
+│  │
+│  ├─ removeField(id)
+│  │  └─ Deletes field from array
+│  │
+│  └─ handleSave()
+│     └─ Validates all fields are complete
+│     └─ POST /api/certificate-config/save
+│     └─ Shows success/error alert
+│
+└─ UI:
+   ├─ Left side: Certificate image with clickable area
+   │  ├─ Shows field markers (green dots + labels)
+   │  ├─ Shows pending click indicator if waiting
+   │  └─ Shows empty state if no fields
+   │
+   └─ Right sidebar:
+      ├─ Field list (shows all added fields)
+      ├─ Current field status (has coordinates? yes/no)
+      ├─ "Add New Field" button
+      │  └─ Shows input field + "Confirm/Cancel" when clicked
+      └─ "Save Configuration" button
+
+===============================================================================
+DATABASE MODEL (MongoDB)
+===============================================================================
+
+Collection: certificate_template_configs
+
+Document structure:
+{
+  "_id": ObjectId(...),
+  "template_name": "Class_Representative.png" (unique indexed),
+  "fields": [
+    {"field_name": "Name", "x": 150, "y": 200},
+    {"field_name": "Date", "x": 600, "y": 300},
+    {"field_name": "Role", "x": 400, "y": 350}
+  ]
+}
+
+===============================================================================
+GENERATION INTEGRATION
+===============================================================================
+
+When a certificate is generated (backend/app/services/png_generator.py):
+
+1. Fetch template config: get_template_config(template_filename)
+2. If config exists:
+   └─ Use pixel coordinates from UI mapping
+3. Else:
+   └─ Fall back to FieldPosition presets (percentage-based)
+
+This ensures UI-mapped configurations take priority over hardcoded presets.
+
+===============================================================================
+"""

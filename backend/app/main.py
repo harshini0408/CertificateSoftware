@@ -159,9 +159,11 @@ from .domains.guest.routers import router as guest_router
 from .domains.dept.routers import router as dept_router
 from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
 from .domains.superadmin.routers import router as superadmin_router
+from .certificate_config.routes import router as cert_config_router
 
 app.include_router(auth.router)
 app.include_router(superadmin_router)
+app.include_router(cert_config_router, prefix="/api")
 app.include_router(club_router)
 app.include_router(club_coordinator_router)
 app.include_router(events.router)
@@ -197,7 +199,3 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
     }
-
-from .domains.dept.routers import router as dept_router
-from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
-from .domains.superadmin.routers import router as superadmin_router

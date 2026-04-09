@@ -61,41 +61,46 @@ async def generate_certificate_pillow(
     cert_number: str = "",
     cert_type: str = "participant",
 ) -> None:
-    """Overlay text, logo, and signature on a PNG template using Pillow.
-
-    Parameters
-    ----------
-    event:
-        The ``Event`` document (must have ``template_filename`` set).
-    participant:
-        The ``Participant`` document (``fields`` dict contains column data).
-    output_path:
-        Absolute path where the final certificate PNG should be saved.
-    club_slug:
-        Used only for log messages.
-    """
+    """Overlay text, logo, and signature on a PNG template using Pillow."""
     from PIL import Image, ImageDraw
     from ..models.field_position import FieldPosition
+    from ..models.role_template_preset import RoleTemplatePreset
 
-    # ── 1. Fetch field positions for this specific cert_type ──────────────────
-    fp = await FieldPosition.find_one(
-        FieldPosition.event_id == event.id,
-        FieldPosition.cert_type == cert_type,
-    )
-    if not fp:
-        # Fallback: try "participant" positions if this cert_type has none
-        fp = await FieldPosition.find_one(
-            FieldPosition.event_id == event.id,
-            FieldPosition.cert_type == "participant",
-        )
-    if not fp:
+    role_val = str((participant.fields or {}).get("Role", "")) or getattr(participant, "role", "") or "participant"
+    normalized_role = role_val.lower().replace(" ", "_").replace("-", "_")
+    
+    presets = await RoleTemplatePreset.find(RoleTemplatePreset.template_filename == event.template_filename).to_list()
+    preset = None
+    if presets:
+        for p in presets:
+            if p.role_name == normalized_role:
+                preset = p
+                break
+        if not preset:
+            preset = presets[0]
+
+    column_positions = {}
+    asset_positions = {}
+    template_filename = event.template_filename
+    
+    if preset:
+        column_positions = preset.column_positions or {}
+        asset_positions = preset.asset_positions or {}
+    else:
+        fp = await FieldPosition.find_one(FieldPosition.event_id == event.id, FieldPosition.cert_type == cert_type)
+        if not fp: fp = await FieldPosition.find_one(FieldPosition.event_id == event.id, FieldPosition.cert_type == "participant")
+        if fp:
+            column_positions = getattr(fp, "column_positions", {}) or {}
+            asset_positions = getattr(fp, "asset_positions", {}) or {}
+
+    if not preset and not column_positions:
         raise ValueError(
             f"No field positions found for event {event.id}, cert_type='{cert_type}'. "
             "Coordinator must configure field positions in the Template Selector before generating."
         )
 
     # ── 2. Load template PNG from FieldPosition (per cert_type) ──────────────
-    template_filename = fp.template_filename
+    template_filename = template_filename
     if not template_filename:
         raise ValueError(
             f"No template_filename in FieldPosition for cert_type='{cert_type}'. "
@@ -126,8 +131,8 @@ async def generate_certificate_pillow(
         _render_certificate_pillow,
         template_path,
         participant.fields or {},
-        fp.column_positions,
-        fp.asset_positions or {},
+        column_positions,
+        asset_positions or {},
         logo_path,
         sig_path,
         output_path,
