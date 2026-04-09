@@ -111,7 +111,7 @@ export default function Footer() {
 
                 <div className="container">
                 <div className="footer-bottom-only d-flex flex-column align-items-center text-center small">
-                    <span className="text-muted">© {year} Yukta. All rights reserved.</span>
+                    <span className="text-muted">© {year}. All rights reserved.</span>
 
                     <button
                         ref={textRef}
