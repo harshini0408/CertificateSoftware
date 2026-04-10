@@ -35,5 +35,8 @@ class User(Document):
     batch: Optional[str] = None                        # student only  e.g. "2022-2026"
     section: Optional[str] = None                      # student only
 
+    otp_code: Optional[str] = None
+    otp_expires_at: Optional[datetime] = None
+
     class Settings:
         name = "users"

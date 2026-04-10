@@ -1,4 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import random
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Cookie, status
 from jose import JWTError
@@ -9,7 +11,19 @@ from ..models.user import User
 from ..models.user import UserRole
 from ..models.club import Club
 from ..models.dept_asset import DeptAsset
-from ..schemas.auth import LoginRequest, LoginResponse, MeResponse, PasswordChangeRequest, TokenResponse
+from ..models.user_otp import OTPRequest
+from ..schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    MeResponse,
+    PasswordChangeRequest,
+    TokenResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    VerifyOTPRequest,
+    ResetPasswordRequest,
+)
+from ..services.email_service import send_otp_email
 from ..services.auth_service import (
     authenticate_user,
     blacklist_token,
@@ -176,3 +190,90 @@ async def me(current_user: User = Depends(get_current_user)):
         department=current_user.department,
         requires_profile_setup=requires_profile_setup,
     )
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+async def forgot_password(body: ForgotPasswordRequest):
+    identifier = (body.username or "").strip()
+    if not identifier:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Username or Faculty ID is required")
+
+    escaped = re.escape(identifier)
+    user = await User.find_one({
+        "$or": [
+            {"username": {"$regex": f"^{escaped}$", "$options": "i"}},
+            {"email": {"$regex": f"^{escaped}$", "$options": "i"}},
+        ]
+    })
+
+    if not user or not user.email:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found or no registered email.")
+
+    email = user.email.strip().lower()
+    otp = f"{random.randint(1000, 9999)}"
+    expires_at = datetime.utcnow() + timedelta(minutes=10)
+
+    await OTPRequest.find(OTPRequest.email == email).delete()
+
+    await OTPRequest(
+        email=email,
+        otp_code=otp,
+        expires_at=expires_at,
+    ).insert()
+
+    success = await send_otp_email(email, otp)
+    if not success:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Failed to send OTP email")
+
+    parts = email.split("@")
+    name = parts[0]
+    domain = parts[1]
+    if len(name) > 2:
+        masked_name = name[0] + "*" * (len(name) - 2) + name[-1]
+    else:
+        masked_name = name[0] + "*"
+    masked_email = f"{masked_name}@{domain}"
+
+    return ForgotPasswordResponse(
+        message=f"OTP sent to your registered email: {masked_email}",
+        email=email,
+    )
+
+
+@router.post("/verify-otp", response_model=TokenResponse)
+async def verify_otp(body: VerifyOTPRequest):
+    now = datetime.utcnow()
+    otp_req = await OTPRequest.find_one(
+        OTPRequest.email == body.email.strip().lower(),
+        OTPRequest.otp_code == body.otp_code.strip(),
+        OTPRequest.expires_at > now,
+    )
+    if not otp_req:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired OTP")
+
+    otp_req.is_verified = True
+    await otp_req.save()
+    return TokenResponse(message="OTP verified successfully")
+
+
+@router.post("/reset-password", response_model=TokenResponse)
+async def reset_password(body: ResetPasswordRequest):
+    now = datetime.utcnow()
+    otp_req = await OTPRequest.find_one(
+        OTPRequest.email == body.email.strip().lower(),
+        OTPRequest.otp_code == body.otp_code.strip(),
+        OTPRequest.expires_at > now,
+        OTPRequest.is_verified == True,
+    )
+    if not otp_req:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP verification required or session expired")
+
+    user = await User.find_one(User.email == body.email.strip().lower())
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+
+    user.password_hash = hash_password(body.new_password)
+    await user.save()
+
+    await otp_req.delete()
+    return TokenResponse(message="Password reset successfully")

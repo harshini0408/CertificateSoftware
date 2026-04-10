@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useLogin } from './api'
+import ForgotPasswordModal from './ForgotPasswordModal'
 import { useAuthStore } from '../../store/authStore'
 import { Navigate } from 'react-router-dom'
 import LoadingSpinner from '../../components/LoadingSpinner'
@@ -62,6 +63,7 @@ export default function Login() {
   const event_id = useAuthStore((s) => s.event_id)
 
   const [showPassword, setShowPassword] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
 
   const loginMutation = useLogin()
 
@@ -88,7 +90,6 @@ export default function Login() {
   }
 
   const busy = isSubmitting || loginMutation.isPending
-  const adminMail = '24z108@psgitech.ac.in,24z158@psgitech.ac.in'
 
   return (
     <div className="relative min-h-dvh flex items-center justify-center px-4 py-12 overflow-hidden">
@@ -251,12 +252,13 @@ export default function Login() {
           {/* Footer note */}
           <p className="mt-6 text-center text-xs text-gray-400">
             Forgot your password?{' '}
-            <a
-              href={`mailto:${adminMail}`}
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
               className="font-medium text-navy/70 hover:text-navy underline-offset-2 hover:underline"
             >
-              Contact your administrator.
-            </a>
+              Reset with OTP.
+            </button>
           </p>
         </div>
 
@@ -265,6 +267,11 @@ export default function Login() {
           PSG Institute of Technology and Applied Research
         </p>
       </div>
+
+      <ForgotPasswordModal
+        isOpen={showForgotPassword}
+        onClose={() => setShowForgotPassword(false)}
+      />
     </div>
   )
 }

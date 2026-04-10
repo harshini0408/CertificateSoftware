@@ -293,6 +293,7 @@ def _render_dept_certificate_dynamic(
     field_positions: Dict[str, Dict[str, float]],
     logo_path: Optional[str],
     sig1_path: Optional[str],
+    event_date: Optional[datetime] = None,
 ) -> bytes:
     img = Image.open(str(template_path)).convert("RGBA")
     draw = ImageDraw.Draw(img)
@@ -306,7 +307,13 @@ def _render_dept_certificate_dynamic(
         y = float(pos.get("y_percent", 50.0))
         font_size = int(float(pos.get("font_size", 36)))
         font = _load_font(max(1, font_size))
-        value = (row.get(field) or "").strip()
+
+        if field == "_date":
+            dt = event_date or datetime.utcnow()
+            value = dt.strftime("%d-%m-%Y")
+        else:
+            value = (row.get(field) or "").strip()
+
         if value:
             draw.text((w * x / 100, h * y / 100), value, fill=(28, 35, 70, 255), font=font, anchor="mm")
 
@@ -751,6 +758,7 @@ async def generate_dept_event_certificates(
             field_positions=evt.field_positions,
             logo_path=asset.logo_path,
             sig1_path=asset.signature1_path,
+            event_date=evt.event_date,
         )
         png_url = save_cert_png(png_bytes, dept_slug, year, cert_number)
 

@@ -18,6 +18,7 @@ from .dept_event import DeptEvent, DeptEventStatus
 from .dept_template import DeptTemplate
 from .guest_session import GuestSession
 from .role_template_preset import RoleTemplatePreset
+from .user_otp import OTPRequest
 from ..certificate_config.model import CertificateTemplateConfig
 
 ALL_MODELS = [
@@ -41,6 +42,7 @@ ALL_MODELS = [
     DeptTemplate,
     GuestSession,
     RoleTemplatePreset,
+    OTPRequest,
     CertificateTemplateConfig,
 ]
 
@@ -63,5 +65,6 @@ __all__ = [
     "DeptEvent", "DeptEventStatus",
     "GuestSession",
     "RoleTemplatePreset",
+    "OTPRequest",
     "ALL_MODELS",
 ]

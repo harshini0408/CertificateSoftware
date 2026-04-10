@@ -76,6 +76,7 @@ export function useCreateEvent(clubId) {
 
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
       addToast({ type: 'success', message: 'Event created successfully.' })
     },
 
@@ -135,6 +136,7 @@ export function useDeleteEvent(clubId) {
 
     onSuccess: (_data, eventId) => {
       qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
       qc.removeQueries({ queryKey: eventKeys.detail(clubId, eventId) })
       addToast({ type: 'success', message: 'Event deleted.' })
     },

@@ -37,3 +37,23 @@ class PasswordChangeRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     message: str = "ok"
+
+
+class ForgotPasswordRequest(BaseModel):
+    username: str
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    email: str
+
+
+class VerifyOTPRequest(BaseModel):
+    email: str
+    otp_code: str = Field(..., min_length=4, max_length=4)
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp_code: str = Field(..., min_length=4, max_length=4)
+    new_password: str = Field(..., min_length=4)

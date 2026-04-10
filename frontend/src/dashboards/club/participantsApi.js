@@ -63,6 +63,7 @@ export function useUploadExcel(clubId, eventId) {
       qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) })
       // Also invalidate columns (backend derives them from uploaded data)
       qc.invalidateQueries({ queryKey: participantKeys.columns(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
       addToast({
         type: 'success',
         message: `${data.created ?? 0} participant(s) imported.`,
@@ -94,6 +95,7 @@ export function useAddParticipant(clubId, eventId) {
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
       addToast({ type: 'success', message: 'Participant added.' })
     },
     onError: (err) => {
@@ -120,6 +122,7 @@ export function useVerifyParticipant(clubId, eventId) {
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
       addToast({ type: 'success', message: 'Registration verified.' })
     },
     onError: () => {
