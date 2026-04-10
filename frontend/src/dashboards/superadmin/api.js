@@ -72,27 +72,6 @@ export function useCreateAdminClub() {
   })
 }
 
-// ── useToggleClub ─────────────────────────────────────────────────────────────
-/**
- * PATCH /admin/clubs/:club_id/toggle-active
- */
-export function useToggleClub() {
-  const qc = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-
-  return useMutation({
-    mutationFn: (clubId) =>
-      axiosInstance.patch(`/admin/clubs/${clubId}/toggle-active`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: adminKeys.clubs() })
-      addToast({ type: 'success', message: 'Club status updated.' })
-    },
-    onError: () => {
-      addToast({ type: 'error', message: 'Failed to update club.' })
-    },
-  })
-}
-
 // ── useAdminUsers ─────────────────────────────────────────────────────────────
 /**
  * GET /admin/users
@@ -153,27 +132,6 @@ export function useResetUserPassword() {
     },
     onError: () => {
       addToast({ type: 'error', message: 'Password reset failed.' })
-    },
-  })
-}
-
-// ── useToggleUser ─────────────────────────────────────────────────────────────
-/**
- * PATCH /admin/users/:user_id/toggle-active
- */
-export function useToggleUser() {
-  const qc = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-
-  return useMutation({
-    mutationFn: (userId) =>
-      axiosInstance.patch(`/admin/users/${userId}/toggle-active`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: adminKeys.users() })
-      addToast({ type: 'success', message: 'User status updated.' })
-    },
-    onError: () => {
-      addToast({ type: 'error', message: 'Failed to update user.' })
     },
   })
 }

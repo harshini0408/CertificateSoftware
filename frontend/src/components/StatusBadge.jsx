@@ -18,18 +18,19 @@ const statusMap = {
 
   // Event statuses
   draft:      { label: 'Draft',      cls: 'bg-gray-100  text-gray-600   ring-gray-200' },
-  active:     { label: 'Active',     cls: 'bg-green-50  text-green-700  ring-green-200' },
   closed:     { label: 'Closed',     cls: 'bg-blue-50   text-blue-700   ring-blue-200' },
 
   // User / club statuses
   verified:   { label: 'Verified',   cls: 'bg-green-50  text-green-700  ring-green-200' },
   unverified: { label: 'Unverified', cls: 'bg-amber-50  text-amber-700  ring-amber-200' },
-  inactive:   { label: 'Inactive',   cls: 'bg-gray-100  text-gray-500   ring-gray-200' },
   suspended:  { label: 'Suspended',  cls: 'bg-red-50    text-red-700    ring-red-200' },
 }
 
 export default function StatusBadge({ status = '', size = 'md' }) {
   const key = status.toLowerCase().trim()
+  if (key === 'active' || key === 'inactive') {
+    return null
+  }
   const config = statusMap[key] ?? {
     label: status,
     cls: 'bg-gray-100 text-gray-600 ring-gray-200',

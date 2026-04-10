@@ -2,6 +2,7 @@ import hashlib
 from typing import List
 
 from beanie import PydanticObjectId
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 
 from ...core.dependencies import get_current_user, require_club_access, require_role
@@ -17,6 +18,30 @@ from ...services.storage_service import storage_path_to_url
 
 router = APIRouter(prefix="/clubs", tags=["Clubs"])
 coordinator_router = APIRouter(prefix="/coordinator", tags=["Coordinator"])
+
+
+def _issued_status_candidates() -> list[str]:
+    return [
+        CertStatus.GENERATED.value,
+        CertStatus.EMAILED.value,
+        "GENERATED",
+        "EMAILED",
+        "CertStatus.GENERATED",
+        "CertStatus.EMAILED",
+    ]
+
+
+async def _count_event_certificates(event_id: PydanticObjectId) -> int:
+    oid = ObjectId(str(event_id))
+    issued_count = await Certificate.find({
+        "$or": [{"event_id": oid}, {"event_id": str(event_id)}],
+        "status": {"$in": _issued_status_candidates()},
+    }).count()
+    if issued_count > 0:
+        return issued_count
+    return await Certificate.find({
+        "$or": [{"event_id": oid}, {"event_id": str(event_id)}],
+    }).count()
 
 
 # ── Helper builders ──────────────────────────────────────────────────────────
@@ -95,10 +120,9 @@ async def club_dashboard(
     total_events = len(all_events)
 
     if event_ids:
-        total_certificates_issued = await Certificate.find(
-            Certificate.event_id.in_(event_ids),
-            Certificate.status.in_([CertStatus.GENERATED, CertStatus.EMAILED]),
-        ).count()
+        total_certificates_issued = 0
+        for event_id in event_ids:
+            total_certificates_issued += await _count_event_certificates(event_id)
 
         total_participants = await Participant.find(
             Participant.event_id.in_(event_ids),
@@ -117,10 +141,7 @@ async def club_dashboard(
         p_count = await Participant.find(
             Participant.event_id == ev.id,
         ).count()
-        c_count = await Certificate.find(
-            Certificate.event_id == ev.id,
-            Certificate.status.in_([CertStatus.GENERATED, CertStatus.EMAILED]),
-        ).count()
+        c_count = await _count_event_certificates(ev.id)
         recent_events.append({
             "event_id": str(ev.id),
             "name": ev.name,

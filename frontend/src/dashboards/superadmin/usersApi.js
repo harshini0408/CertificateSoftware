@@ -91,24 +91,3 @@ export function useUpdateUser() {
   })
 }
 
-// ── useDeactivateUser ─────────────────────────────────────────────────────────
-/**
- * DELETE /admin/users/{user_id}
- * Soft delete: sets is_active=False
- */
-export function useDeactivateUser() {
-  const qc = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-
-  return useMutation({
-    mutationFn: (userId) => axiosInstance.delete(`/admin/users/${userId}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['users'] })
-      addToast({ type: 'success', message: 'User deactivated.' })
-    },
-    onError: (err) => {
-      const msg = err?.response?.data?.detail || 'Failed to deactivate user.'
-      addToast({ type: 'error', message: msg })
-    },
-  })
-}

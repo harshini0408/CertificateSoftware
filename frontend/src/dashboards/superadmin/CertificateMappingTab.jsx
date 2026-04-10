@@ -33,7 +33,6 @@ function toFormState(preset) {
       display_label: '',
       template_filename: '',
       display_width: 1905,
-      is_active: true,
       column_positions: {},
       asset_positions: {},
     }
@@ -43,7 +42,6 @@ function toFormState(preset) {
     display_label: preset.display_label || '',
     template_filename: preset.template_filename || '',
     display_width: asNumber(preset.display_width, 1905),
-    is_active: !!preset.is_active,
     column_positions: { ...(preset.column_positions || {}) },
     asset_positions: { ...(preset.asset_positions || {}) },
   }
@@ -223,7 +221,7 @@ export default function CertificateMappingTab() {
       column_positions: form.column_positions || {},
       asset_positions: Object.keys(form.asset_positions || {}).length > 0 ? form.asset_positions : null,
       display_width: asNumber(form.display_width, 1905),
-      is_active: !!form.is_active,
+      is_active: true,
     }
 
     if (!payload.role_name) {
@@ -351,16 +349,7 @@ export default function CertificateMappingTab() {
               </div>
             </div>
             
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <input
-                  id="mapping-active"
-                  type="checkbox"
-                  checked={form.is_active}
-                  onChange={(e) => handleChange('is_active', e.target.checked)}
-                />
-                <label htmlFor="mapping-active" className="text-sm font-medium text-gray-700">Mapping Active</label>
-              </div>
+            <div className="flex items-center justify-end">
               <button className="btn-primary" onClick={handleSave} disabled={busy}>
                 {busy ? 'Saving…' : selectedPreset ? 'Update Mapping' : 'Create Mapping'}
               </button>

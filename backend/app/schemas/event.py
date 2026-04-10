@@ -34,6 +34,7 @@ class EventResponse(BaseModel):
     assets: dict = Field(default_factory=dict)
     mapping_confirmed: bool = False
     participant_count: int = 0
+    cert_count: int = 0
     created_at: datetime
 
     class Config:

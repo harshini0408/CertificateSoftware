@@ -11,14 +11,19 @@ import LoadingSpinner from '../../components/LoadingSpinner'
 import ConfirmModal from '../../components/ConfirmModal'
 import FileUpload from '../../components/FileUpload'
 import { useClubDashboard, useClubAssets, useUpdateClubAssets } from './api'
-import { useCreateEvent, useDeleteEvent } from './eventsApi'
+import { useCreateEvent, useDeleteEvent, useEvents } from './eventsApi'
 import { useAuthStore } from '../../store/authStore'
 import { useChangePassword } from '../auth/api'
 import axiosInstance from '../../utils/axiosInstance'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ── Tab ids ───────────────────────────────────────────────────────────────────
-const TABS = ['dashboard', 'events', 'settings']
+const TABS = ['events', 'settings']
+
+const TAB_LABELS = {
+  events: 'Club Dashboard',
+  settings: 'Settings',
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDate(iso) {
@@ -30,18 +35,24 @@ function fmtDate(iso) {
 const Icon = {
   events: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
   certs: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>,
-  participants: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Dashboard tab
 // ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab({ clubId, dashboard, isLoading }) {
-  if (isLoading) return <LoadingSpinner fullPage label="Loading dashboard…" />
+  const { data: events, isLoading: eventsLoading } = useEvents(clubId)
+  if (isLoading || eventsLoading) return <LoadingSpinner fullPage label="Loading dashboard…" />
 
-  const stats = dashboard?.stats || {}
   const club = dashboard?.club || {}
-  const recentEvents = dashboard?.recent_events || []
+  const eventRows = Array.isArray(events) ? events : []
+  const totalEvents = eventRows.length
+  const totalCertificatesIssued = eventRows.reduce((sum, event) => sum + Number(event?.cert_count ?? 0), 0)
+  const recentEvents = [...eventRows].sort((a, b) => {
+    const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0
+    const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0
+    return bTime - aTime
+  })
 
   const eventColumns = [
     { key: 'name', header: 'Event', sortable: true },
@@ -57,14 +68,12 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold text-foreground">{club.name || 'Club Dashboard'}</h1>
         <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold text-navy">{club.slug}</span>
-        <StatusBadge status={club.is_active ? 'Active' : 'Inactive'} size="sm" />
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard label="Total Events" value={stats.total_events ?? 0} icon={Icon.events} accent="navy" />
-        <StatCard label="Certificates Issued" value={stats.total_certificates_issued ?? 0} icon={Icon.certs} accent="green" />
-        <StatCard label="Total Participants" value={stats.total_participants ?? 0} icon={Icon.participants} accent="blue" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
+        <StatCard label="Total Events" value={totalEvents} icon={Icon.events} accent="navy" />
+        <StatCard label="Certificates Issued" value={totalCertificatesIssued} icon={Icon.certs} accent="green" />
       </div>
 
       {/* Recent events */}
@@ -77,7 +86,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
           data={recentEvents}
           isLoading={false}
           emptyMessage="No events yet. Create your first event."
-          rowKey="event_id"
+          rowKey="id"
         />
       </div>
 
@@ -382,7 +391,6 @@ function SettingsTab({ club, clubId, clubLoading }) {
             ['Club Name', club?.name],
             ['Slug', club?.slug],
             ['Contact Email', club?.contact_email],
-            ['Status', club?.is_active ? 'Active' : 'Inactive'],
             ['Created', fmtDate(club?.created_at)],
           ].map(([label, value]) => (
             <div key={label} className="flex items-center justify-between px-5 py-4">
@@ -531,10 +539,10 @@ export default function ClubDashboard() {
 
   const activeTab = TABS.includes(searchParams.get('tab'))
     ? searchParams.get('tab')
-    : 'dashboard'
+    : 'events'
 
   const setTab = (tab) =>
-    setSearchParams(tab === 'dashboard' ? {} : { tab }, { replace: true })
+    setSearchParams({ tab }, { replace: true })
 
   const { data: dashboard, isLoading: dashLoading } = useClubDashboard(effectiveClubId)
   const club = dashboard?.club || null
@@ -594,7 +602,7 @@ export default function ClubDashboard() {
                     }
                   `}
                 >
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  {TAB_LABELS[tab] || tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </button>
               ))}
             </div>
@@ -606,9 +614,6 @@ export default function ClubDashboard() {
               </div>
             )}
 
-            {activeTab === 'dashboard' && (
-              <DashboardTab clubId={effectiveClubId} dashboard={dashboard} isLoading={dashLoading} />
-            )}
             {activeTab === 'events' && <EventsTab clubId={effectiveClubId} />}
             {activeTab === 'settings' && (
               <SettingsTab club={club} clubId={effectiveClubId} clubLoading={dashLoading} />

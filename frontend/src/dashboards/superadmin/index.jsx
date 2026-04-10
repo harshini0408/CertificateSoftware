@@ -14,7 +14,7 @@ import ConfirmModal from '../../components/ConfirmModal'
 import CertificateMappingTab from './CertificateMappingTab'
 
 import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../club/api'
-import { useUsers, useCreateUser, useUpdateUser, useDeactivateUser } from './usersApi'
+import { useUsers, useCreateUser, useUpdateUser } from './usersApi'
 import {
   useAdminStats,
   useAdminClubs,
@@ -126,7 +126,6 @@ function ClubDetailPanel({ clubId, onClose, onEdit }) {
               <h3 className="text-xl font-bold text-foreground">{club.name}</h3>
               <div className="mt-1 flex items-center gap-2">
                 <span className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold text-navy">{club.slug}</span>
-                <StatusBadge status={club.is_active ? 'Active' : 'Inactive'} size="sm" />
               </div>
             </div>
             <dl className="space-y-3 text-sm">
@@ -280,8 +279,7 @@ function NewClubModal({ isOpen, onClose }) {
 // EDIT CLUB MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 function EditClubModal({ isOpen, onClose, club }) {
-  const [form, setForm] = useState({ name: '', contact_email: '', is_active: true, coordinator_username: '' })
-  const [showConfirm, setShowConfirm] = useState(false)
+  const [form, setForm] = useState({ name: '', contact_email: '', coordinator_username: '' })
   const updateClub = useUpdateClub()
   const updateUser = useUpdateUser()
   const { data: clubUsers } = useClubUsers(club?.id)
@@ -297,7 +295,6 @@ function EditClubModal({ isOpen, onClose, club }) {
         ...prev,
         name: club.name,
         contact_email: club.contact_email || '',
-        is_active: club.is_active,
       }))
     }
   }, [club])
@@ -311,18 +308,15 @@ function EditClubModal({ isOpen, onClose, club }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.is_active && club?.is_active) { setShowConfirm(true); return }
     doSave()
   }
 
   const doSave = async () => {
-    setShowConfirm(false)
     try {
       await updateClub.mutateAsync({
         clubId: club.id,
         name: form.name,
         contact_email: form.contact_email,
-        is_active: form.is_active,
       })
 
       if (coordinator && form.coordinator_username && form.coordinator_username !== coordinator.username) {
@@ -340,7 +334,6 @@ function EditClubModal({ isOpen, onClose, club }) {
 
   if (!club) return null
   return (
-    <>
       <Modal isOpen={isOpen} onClose={onClose} title="Edit Club">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -370,13 +363,6 @@ function EditClubModal({ isOpen, onClose, club }) {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-3">
-            <label className="form-label mb-0">Active</label>
-            <button type="button" onClick={() => setForm((f) => ({ ...f, is_active: !f.is_active }))}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.is_active ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-          </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn-primary min-w-[120px]" disabled={updateClub.isPending || updateUser.isPending}>
@@ -385,16 +371,6 @@ function EditClubModal({ isOpen, onClose, club }) {
           </div>
         </form>
       </Modal>
-      <ConfirmModal
-        isOpen={showConfirm}
-        onClose={() => setShowConfirm(false)}
-        onConfirm={doSave}
-        title="Deactivate Club?"
-        message="Deactivating this club will lock out all its coordinators and guests. This action can be reversed. Continue?"
-        confirmLabel="Deactivate"
-        isLoading={updateClub.isPending || updateUser.isPending}
-      />
-    </>
   )
 }
 
@@ -411,11 +387,11 @@ const roles = [
 function NewUserModal({ isOpen, onClose }) {
   const [step, setStep] = useState(1)
   const [selectedRole, setSelectedRole] = useState('')
-  const [form, setForm] = useState({ username: '', name: '', email: '', password: '', is_active: true, club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' })
+  const [form, setForm] = useState({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
   const createUser = useCreateUser()
-  const { data: clubsList } = useClubs({ is_active: true })
+  const { data: clubsList } = useClubs()
   const { data: eventsList, isFetching: fetchingEvents } = useEvents(
     selectedRole === 'guest' && form.club_id ? form.club_id : null
   )
@@ -425,7 +401,7 @@ function NewUserModal({ isOpen, onClose }) {
     setErrors((e) => ({ ...e, [field]: undefined }))
   }
 
-  const resetModal = () => { setStep(1); setSelectedRole(''); setForm({ username: '', name: '', email: '', password: '', is_active: true, club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' }); setErrors({}) }
+  const resetModal = () => { setStep(1); setSelectedRole(''); setForm({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' }); setErrors({}) }
 
   const handleClose = () => { onClose(); resetModal() }
 
@@ -457,7 +433,6 @@ function NewUserModal({ isOpen, onClose }) {
       email: form.email.trim().toLowerCase(),
       password: form.password,
       role: selectedRole,
-      is_active: form.is_active,
     }
 
     if (selectedRole === 'club_coordinator') {
@@ -564,14 +539,6 @@ function NewUserModal({ isOpen, onClose }) {
             </div>
           )}
 
-          <div className="flex items-center gap-3">
-            <label className="form-label mb-0">Active</label>
-            <button type="button" onClick={() => handleChange('is_active', !form.is_active)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.is_active ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-          </div>
-
           <div className="flex justify-between pt-2">
             <button type="button" className="btn-secondary" onClick={() => { setStep(1); setErrors({}) }}>← Back</button>
             <button type="submit" className="btn-primary min-w-[120px]" disabled={createUser.isPending}>
@@ -588,28 +555,20 @@ function NewUserModal({ isOpen, onClose }) {
 // EDIT USER MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 function EditUserModal({ isOpen, onClose, user }) {
-  const [form, setForm] = useState({ name: '', email: '', is_active: true })
-  const [showConfirm, setShowConfirm] = useState(false)
+  const [form, setForm] = useState({ name: '', email: '' })
   const updateUser = useUpdateUser()
 
   useEffect(() => {
-    if (user) setForm({ name: user.name, email: user.email, is_active: user.is_active })
+    if (user) setForm({ name: user.name, email: user.email })
   }, [user])
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.is_active && user?.is_active) { setShowConfirm(true); return }
-    doSave()
-  }
-
-  const doSave = () => {
-    setShowConfirm(false)
     updateUser.mutate({ userId: user.id, ...form }, { onSuccess: onClose })
   }
 
   if (!user) return null
   return (
-    <>
       <Modal isOpen={isOpen} onClose={onClose} title="Edit User">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -628,13 +587,6 @@ function EditUserModal({ isOpen, onClose, user }) {
             <label className="form-label">Email</label>
             <input type="email" className="form-input" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
           </div>
-          <div className="flex items-center gap-3">
-            <label className="form-label mb-0">Active</label>
-            <button type="button" onClick={() => setForm((f) => ({ ...f, is_active: !f.is_active }))}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.is_active ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-          </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn-primary min-w-[120px]" disabled={updateUser.isPending}>
@@ -643,10 +595,6 @@ function EditUserModal({ isOpen, onClose, user }) {
           </div>
         </form>
       </Modal>
-      <ConfirmModal isOpen={showConfirm} onClose={() => setShowConfirm(false)} onConfirm={doSave}
-        title="Deactivate User?" message="Deactivating this user will prevent them from logging in. Their data will be preserved. Continue?"
-        confirmLabel="Deactivate" isLoading={updateUser.isPending} />
-    </>
   )
 }
 
@@ -928,7 +876,6 @@ function OverviewTab() {
   const clubCols = [
     { key: 'name', header: 'Name', sortable: true },
     { key: 'slug', header: 'Slug', render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span> },
-    { key: 'is_active', header: 'Status', render: (v) => <StatusBadge status={v ? 'Active' : 'Inactive'} size="sm" /> },
     { key: 'created_at', header: 'Created', render: (v) => fmtDate(v) },
   ]
 
@@ -991,37 +938,27 @@ function OverviewTab() {
 // ── CLUBS TAB ─────────────────────────────────────────────────────────────────
 function ClubsTab() {
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
   const debouncedSearch = useDebounce(search)
   const filters = useMemo(() => {
     const f = {}
     if (debouncedSearch) f.search = debouncedSearch
-    if (statusFilter === 'active') f.is_active = true
-    if (statusFilter === 'inactive') f.is_active = false
     return f
-  }, [debouncedSearch, statusFilter])
+  }, [debouncedSearch])
   const { data: clubs, isLoading } = useClubs(filters)
 
   const [showNew, setShowNew] = useState(false)
   const [editClub, setEditClub] = useState(null)
   const [detailClubId, setDetailClubId] = useState(null)
-  const updateClub = useUpdateClub()
 
   const columns = [
     { key: 'name', header: 'Name', sortable: true, render: (v) => <span className="font-semibold">{v}</span> },
     { key: 'slug', header: 'Slug', render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span> },
     { key: 'contact_email', header: 'Email', sortable: true },
-    { key: 'is_active', header: 'Status', render: (v) => <StatusBadge status={v ? 'Active' : 'Inactive'} size="sm" /> },
     { key: 'created_at', header: 'Created', sortable: true, render: (v) => fmtDate(v) },
     { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <button title="Edit" onClick={() => setEditClub(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-          </button>
-          <button title={row.is_active ? 'Deactivate' : 'Activate'}
-            onClick={() => updateClub.mutate({ clubId: row.id, is_active: !row.is_active })}
-            className={`rounded p-1 transition-colors ${row.is_active ? 'text-gray-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}>
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={row.is_active ? 'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636' : 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'} /></svg>
           </button>
         </div>
     )},
@@ -1034,11 +971,6 @@ function ClubsTab() {
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <input type="search" placeholder="Search clubs…" value={search} onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="form-input w-36">
-          <option value="">All</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </select>
       </div>
       <DataTable columns={columns} data={clubs || []} isLoading={isLoading} emptyMessage="No clubs found. Create your first club." onRowClick={(row) => setDetailClubId(row.id)} />
       <NewClubModal isOpen={showNew} onClose={() => setShowNew(false)} />
@@ -1173,24 +1105,19 @@ function BulkImportModal({ isOpen, onClose }) {
 function UsersTab() {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
   const debouncedSearch = useDebounce(search)
   const filters = useMemo(() => {
     const f = {}
     if (debouncedSearch) f.search = debouncedSearch
     if (roleFilter) f.role = roleFilter
-    if (statusFilter === 'active') f.is_active = true
-    if (statusFilter === 'inactive') f.is_active = false
     return f
-  }, [debouncedSearch, roleFilter, statusFilter])
+  }, [debouncedSearch, roleFilter])
   const { data: users, isLoading } = useUsers(filters)
   const { data: clubs } = useClubs()
 
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [editUser, setEditUser] = useState(null)
-  const deactivateUser = useDeactivateUser()
-  const [confirmUser, setConfirmUser] = useState(null)
 
   const clubMap = useMemo(() => {
     const m = {}
@@ -1211,17 +1138,11 @@ function UsersTab() {
     { key: 'username', header: 'Username', render: (v) => <span className="font-mono text-xs">{v}</span> },
     { key: 'role', header: 'Role', render: (v) => <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[v] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>{roleLabel[v] || v}</span> },
     { key: '_scope', header: 'Scope', searchKey: false, render: (_, row) => <span className="text-xs text-gray-500">{getScope(row)}</span> },
-    { key: 'is_active', header: 'Status', render: (v) => <StatusBadge status={v ? 'Active' : 'Inactive'} size="sm" /> },
     { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
         <button title="Edit" onClick={() => setEditUser(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
         </button>
-        {row.role !== 'super_admin' && row.is_active && (
-          <button title="Deactivate" onClick={() => setConfirmUser(row)} className="rounded p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
-          </button>
-        )}
       </div>
     )},
   ]
@@ -1248,20 +1169,11 @@ function UsersTab() {
           <option value="student">Student</option>
           <option value="guest">Guest</option>
         </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="form-input w-36">
-          <option value="">All</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </select>
       </div>
       <DataTable columns={columns} data={users || []} isLoading={isLoading} emptyMessage="No users found matching your filters." />
       <BulkImportModal isOpen={showBulkImport} onClose={() => setShowBulkImport(false)} />
       <NewUserModal isOpen={showNew} onClose={() => setShowNew(false)} />
       <EditUserModal isOpen={!!editUser} onClose={() => setEditUser(null)} user={editUser} />
-      <ConfirmModal isOpen={!!confirmUser} onClose={() => setConfirmUser(null)}
-        onConfirm={() => { deactivateUser.mutate(confirmUser.id, { onSuccess: () => setConfirmUser(null) }) }}
-        title="Deactivate User?" message={`Deactivating "${confirmUser?.name}" will prevent them from logging in. Their data will be preserved.`}
-        confirmLabel="Deactivate" isLoading={deactivateUser.isPending} />
     </div>
   )
 }

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from beanie import PydanticObjectId
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
@@ -13,7 +14,7 @@ from ..models.user import User
 from ..models.club import Club
 from ..models.event import Event, EventStatus, EventAssets
 from ..models.template import Template
-from ..models.certificate import Certificate
+from ..models.certificate import Certificate, CertStatus
 from ..models.participant import Participant
 from ..models.field_position import FieldPosition
 from ..schemas.event import EventCreate, EventUpdate, EventResponse
@@ -23,6 +24,33 @@ from ..services.excel_service import generate_excel_template, get_active_role_na
 
 router = APIRouter(prefix="/clubs/{club_id}/events", tags=["Events"])
 settings = get_settings()
+
+
+def _issued_status_candidates() -> list[str]:
+    return [
+        CertStatus.GENERATED.value,
+        CertStatus.EMAILED.value,
+        "GENERATED",
+        "EMAILED",
+        "CertStatus.GENERATED",
+        "CertStatus.EMAILED",
+    ]
+
+
+async def _count_event_certificates(event_id: PydanticObjectId) -> int:
+    oid = ObjectId(str(event_id))
+    # Primary path: issued certs only (generated/emailed).
+    issued_count = await Certificate.find({
+        "$or": [{"event_id": oid}, {"event_id": str(event_id)}],
+        "status": {"$in": _issued_status_candidates()},
+    }).count()
+    if issued_count > 0:
+        return issued_count
+
+    # Fallback for legacy docs where status serialization differed.
+    return await Certificate.find({
+        "$or": [{"event_id": oid}, {"event_id": str(event_id)}],
+    }).count()
 
 
 def _assets_complete(assets: EventAssets) -> bool:
@@ -46,7 +74,7 @@ async def _get_latest_event_with_assets(club_id: PydanticObjectId) -> Optional[E
     return None
 
 
-def _event_response(e: Event) -> EventResponse:
+def _event_response(e: Event, cert_count: int = 0) -> EventResponse:
     return EventResponse(
         id=str(e.id), club_id=str(e.club_id), name=e.name,
         description=e.description, event_date=e.event_date,
@@ -55,6 +83,7 @@ def _event_response(e: Event) -> EventResponse:
         assets=e.assets.model_dump(),
         mapping_confirmed=e.mapping_confirmed,
         participant_count=e.participant_count,
+        cert_count=cert_count,
         created_at=e.created_at,
     )
 
@@ -62,7 +91,11 @@ def _event_response(e: Event) -> EventResponse:
 @router.get("", response_model=List[EventResponse])
 async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_club_access)):
     events = await Event.find(Event.club_id == club_id).to_list()
-    return [_event_response(e) for e in events]
+    responses = []
+    for e in events:
+        cert_count = await _count_event_certificates(e.id)
+        responses.append(_event_response(e, cert_count=cert_count))
+    return responses
 
 
 @router.post("", response_model=EventResponse, status_code=201)
@@ -167,7 +200,8 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         await event.set(updates)
         event = await Event.get(event_id)
 
-    return _event_response(event)
+    cert_count = await _count_event_certificates(event.id)
+    return _event_response(event, cert_count=cert_count)
 
 
 @router.put("/{event_id}", response_model=EventResponse)
