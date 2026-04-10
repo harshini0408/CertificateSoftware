@@ -57,7 +57,6 @@ function DashboardTab() {
   const eventColumns = [
     { key: 'name', header: 'Event', sortable: true },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
-    { key: 'semester', header: 'Semester', sortable: true },
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
     { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
     { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
@@ -102,7 +101,6 @@ function EventsTab() {
     defaultValues: {
       name: '',
       event_date: '',
-      semester: '',
     },
   })
 
@@ -124,7 +122,6 @@ function EventsTab() {
     const payload = {
       name: values.name,
       event_date: values.event_date || null,
-      semester: values.semester,
     }
     const created = await createEvent.mutateAsync(payload)
     const eventId = created?.id || created?._id
@@ -151,7 +148,6 @@ function EventsTab() {
       ),
     },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
-    { key: 'semester', header: 'Semester', sortable: true },
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
     { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
     { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
@@ -209,27 +205,6 @@ function EventsTab() {
                 <input id="event_date" type="date" className="form-input" {...register('event_date')} />
               </div>
 
-              <div>
-                <label className="form-label" htmlFor="semester">Semester *</label>
-                <select
-                  id="semester"
-                  className={`form-input ${errors.semester ? 'form-input-error' : ''}`}
-                  defaultValue=""
-                  {...register('semester', { required: 'Semester is required' })}
-                >
-                  <option value="" disabled>Select semester</option>
-                  <option value="I">I</option>
-                  <option value="II">II</option>
-                  <option value="III">III</option>
-                  <option value="IV">IV</option>
-                  <option value="V">V</option>
-                  <option value="VI">VI</option>
-                  <option value="VII">VII</option>
-                  <option value="VIII">VIII</option>
-                </select>
-                {errors.semester && <p className="form-error">{errors.semester.message}</p>}
-              </div>
-
               <div className="pt-2 flex justify-end gap-3">
                 <button type="button" onClick={closeModal} className="btn-secondary">Cancel</button>
                 <button type="submit" disabled={isSubmitting || createEvent.isPending} className="btn-primary">
@@ -248,6 +223,10 @@ function EventDetailView({ eventId }) {
   const navigate = useNavigate()
   const { data: event, isLoading } = useDeptEvent(eventId)
   const [activeTab, setActiveTab] = useState('overview')
+  const [certificateFlowContext, setCertificateFlowContext] = useState({
+    excelFile: null,
+    previewRow: null,
+  })
 
   if (isLoading) {
     return <LoadingSpinner fullPage label="Loading event..." />
@@ -270,7 +249,7 @@ function EventDetailView({ eventId }) {
       <div className="card p-4">
         <h1 className="text-2xl font-bold text-foreground">{event.name}</h1>
         <p className="mt-1 text-sm text-gray-500">
-          {event.event_date ? fmtDate(event.event_date) : 'No date'} | Semester {event.semester}
+          {event.event_date ? fmtDate(event.event_date) : 'No date'}
         </p>
       </div>
 
@@ -290,8 +269,29 @@ function EventDetailView({ eventId }) {
         ))}
       </div>
 
-      {activeTab === 'overview' && <DeptEventCertificateConfigurator event={event} onClose={() => navigate('/dept?tab=events')} />}
-      {activeTab === 'certificates' && <DeptCertificateIssue event={event} />}
+      {activeTab === 'overview' && (
+        <DeptEventCertificateConfigurator
+          event={event}
+          onClose={(action) => {
+            if (action?.nextTab === 'certificates') {
+              setCertificateFlowContext({
+                excelFile: action.excelFile || null,
+                previewRow: action.previewRow || null,
+              })
+              setActiveTab('certificates')
+              return
+            }
+            navigate('/dept?tab=events')
+          }}
+        />
+      )}
+      {activeTab === 'certificates' && (
+        <DeptCertificateIssue
+          event={event}
+          excelFileFromOverview={certificateFlowContext.excelFile}
+          previewRowFromOverview={certificateFlowContext.previewRow}
+        />
+      )}
     </div>
   )
 }

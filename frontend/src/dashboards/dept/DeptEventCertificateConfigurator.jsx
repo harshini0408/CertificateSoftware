@@ -8,9 +8,9 @@ import {
   useDeptEventTemplate,
   useUploadDeptEventTemplate,
   extractDeptExcelHeaders,
+  previewDeptExcelParticipants,
   useDeptEventMapping,
   useSaveDeptEventMapping,
-  useGenerateDeptEventCertificates,
   useDeptAssets,
 } from './api'
 
@@ -25,7 +25,7 @@ function toImageUrl(url) {
   return `${BACKEND_URL}${url}`
 }
 
-function PositionedTag({ id, label, x, y, isActive, onSelect }) {
+function PositionedTag({ id, label, x, y, isActive, onSelect, fontSize }) {
   const style = {
     position: 'absolute',
     left: `${x}%`,
@@ -37,9 +37,15 @@ function PositionedTag({ id, label, x, y, isActive, onSelect }) {
 
   return (
     <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(id) }}>
-      <div className={`rounded px-2 py-1 text-[10px] font-semibold shadow-sm ${
+      <div
+        className={`rounded px-2 py-1 font-semibold shadow-sm ${
         isActive ? 'border border-amber-500 bg-amber-50 text-amber-700' : 'border border-navy/50 bg-white/80 text-navy'
-      }`}>
+      }`}
+        style={{
+          fontSize: `${Math.max(10, Math.min(42, Number(fontSize || 24) * 0.45))}px`,
+          lineHeight: 1.1,
+        }}
+      >
         {label}
       </div>
     </div>
@@ -57,7 +63,6 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
 
   const uploadTemplateMutation = useUploadDeptEventTemplate(event?.id)
   const saveMappingMutation = useSaveDeptEventMapping(event?.id)
-  const generateMutation = useGenerateDeptEventCertificates(event?.id)
 
   const [templateFile, setTemplateFile] = useState(null)
   const [excelFile, setExcelFile] = useState(null)
@@ -67,17 +72,31 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
   const [enabledAssetKeys, setEnabledAssetKeys] = useState([])
 
   const [extracting, setExtracting] = useState(false)
+  const [previewRow, setPreviewRow] = useState(null)
   const [templateAspectRatio, setTemplateAspectRatio] = useState(2480 / 3508)
   const [activePlacementKey, setActivePlacementKey] = useState(null)
 
   const templateUrl = toImageUrl(templateResp?.template?.template_url)
+
+  const getPreviewValue = (fieldId) => {
+    if (fieldId === '_cert_number') return 'CERT-0001'
+    if (fieldId === '_date') return event?.event_date ? new Date(event.event_date).toLocaleDateString('en-IN') : 'Date'
+    if (fieldId === '_logo') return 'Logo'
+    if (fieldId === '_signature') return 'Signature'
+    if (!previewRow) return fieldId
+
+    const raw = previewRow[fieldId]
+    const value = raw == null ? '' : String(raw).trim()
+    return value || fieldId
+  }
 
   useEffect(() => {
     if (!mappingResp) return
     setSelectedFields(mappingResp.selected_fields || [])
     const incoming = mappingResp.field_positions || {}
     setFieldPositions((prev) => ({ ...prev, ...incoming }))
-    setEnabledAssetKeys(['_cert_number', '_logo', '_signature'].filter((k) => !!incoming[k]))
+    // Asset placement is now opt-in per click, so don't auto-enable saved asset keys.
+    setEnabledAssetKeys([])
   }, [mappingResp])
 
   useEffect(() => {
@@ -87,7 +106,26 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
     }
   }, [selectedFields, enabledAssetKeys, activePlacementKey])
 
-  const activateAssetKey = (id) => {
+  const toggleAssetKey = (id) => {
+    const isEnabled = enabledAssetKeys.includes(id)
+    const isActive = activePlacementKey === id
+
+    if (isEnabled && isActive) {
+      setEnabledAssetKeys((prev) => prev.filter((k) => k !== id))
+      setFieldPositions((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      setActivePlacementKey(null)
+      return
+    }
+
+    if (isEnabled) {
+      setActivePlacementKey(id)
+      return
+    }
+
     if (id === '_logo' && !deptAssets?.has_logo) {
       addToast({ type: 'error', message: 'Update the logo first in Settings.' })
       return
@@ -149,6 +187,8 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
       const data = await extractDeptExcelHeaders(event.id, excelFile)
       const hdrs = data?.headers || []
       setHeaders(hdrs)
+      const preview = await previewDeptExcelParticipants(event.id, excelFile)
+      setPreviewRow(preview?.participants?.[0]?.raw || null)
       setSelectedFields((prev) => {
         const keep = prev.filter((f) => hdrs.includes(f) || f === '_date')
         return keep
@@ -159,6 +199,18 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
     } finally {
       setExtracting(false)
     }
+  }
+
+  const updateFontSize = (fieldId, nextSize) => {
+    if (!fieldId) return
+    const safeSize = Math.max(8, Math.min(120, Number(nextSize) || 24))
+    setFieldPositions((prev) => ({
+      ...prev,
+      [fieldId]: {
+        ...(prev[fieldId] || { ...DEFAULT_FIELD_POS }),
+        font_size: safeSize,
+      },
+    }))
   }
 
   const toggleField = (field) => {
@@ -175,19 +227,19 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
     setActivePlacementKey(field)
   }
 
-  const saveMapping = async () => {
-    await saveMappingMutation.mutateAsync({
+  const buildMappingPayload = () => {
+    const activeKeys = new Set([...selectedFields, ...enabledAssetKeys])
+    const filteredPositions = Object.fromEntries(
+      Object.entries(fieldPositions).filter(([key]) => activeKeys.has(key)),
+    )
+    return {
       selected_fields: selectedFields,
-      field_positions: fieldPositions,
-    })
+      field_positions: filteredPositions,
+    }
   }
 
-  const generateCertificates = async () => {
-    if (!excelFile) {
-      addToast({ type: 'warning', message: 'Upload Excel file to generate certificates.' })
-      return
-    }
-    await generateMutation.mutateAsync(excelFile)
+  const saveMapping = async () => {
+    await saveMappingMutation.mutateAsync(buildMappingPayload())
   }
 
   return (
@@ -195,7 +247,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-bold text-foreground">{event?.name} - Certificate Setup</h3>
-          <p className="text-xs text-gray-500">Upload template, map fields, select a target and click on preview to place it, then generate certificates.</p>
+          <p className="text-xs text-gray-500">Upload template, map fields, select a target and click on preview to place it, then continue to Certificates for preview and generation.</p>
         </div>
         <button className="btn-secondary" onClick={onClose}>Close</button>
       </div>
@@ -272,13 +324,18 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
               ))}
               {['_cert_number', '_logo', '_signature'].map((id) => {
                 const label = id === '_cert_number' ? 'Cert No' : id === '_logo' ? 'Logo' : 'Signature'
+                const enabled = enabledAssetKeys.includes(id)
                 return (
                   <button
                     key={`place-${id}`}
                     type="button"
-                    onClick={() => activateAssetKey(id)}
+                    onClick={() => toggleAssetKey(id)}
                     className={`rounded-full px-3 py-1 text-xs font-medium border ${
-                      activePlacementKey === id ? 'bg-amber-50 text-amber-700 border-amber-500' : 'bg-white text-gray-600 border-gray-300'
+                      activePlacementKey === id
+                        ? 'bg-amber-50 text-amber-700 border-amber-500'
+                        : enabled
+                          ? 'bg-navy/10 text-navy border-navy/30'
+                          : 'bg-white text-gray-600 border-gray-300'
                     }`}
                   >
                     Place: {label}
@@ -286,14 +343,59 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
                 )
               })}
             </div>
+            {activePlacementKey && (
+              <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+                <p className="text-xs font-medium text-gray-600 mb-2">Font Size</p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={8}
+                    max={120}
+                    value={Number(fieldPositions[activePlacementKey]?.font_size || 24)}
+                    onChange={(e) => updateFontSize(activePlacementKey, e.target.value)}
+                    className="w-full"
+                  />
+                  <input
+                    type="number"
+                    min={8}
+                    max={120}
+                    value={Number(fieldPositions[activePlacementKey]?.font_size || 24)}
+                    onChange={(e) => updateFontSize(activePlacementKey, e.target.value)}
+                    className="form-input w-20 text-center"
+                  />
+                </div>
+              </div>
+            )}
+            {previewRow && (
+              <p className="mt-2 text-xs text-gray-500">
+                Showing preview using the first extracted row.
+              </p>
+            )}
           </div>
 
           <div className="flex gap-2">
             <button className="btn-primary" onClick={saveMapping} disabled={saveMappingMutation.isPending || selectedFields.length === 0}>
               {saveMappingMutation.isPending ? 'Saving...' : 'Save Mapping'}
             </button>
-            <button className="btn-primary" onClick={generateCertificates} disabled={generateMutation.isPending || !excelFile}>
-              {generateMutation.isPending ? 'Generating...' : 'Generate Certificates'}
+            <button
+              className="btn-primary"
+              onClick={async () => {
+                if (!excelFile || !previewRow) {
+                  addToast({ type: 'warning', message: 'Upload Excel and extract fields first.' })
+                  return
+                }
+                await saveMappingMutation.mutateAsync(buildMappingPayload())
+                if (typeof onClose === 'function') {
+                  onClose({
+                    nextTab: 'certificates',
+                    excelFile,
+                    previewRow,
+                  })
+                }
+              }}
+              disabled={saveMappingMutation.isPending || !excelFile || !previewRow || selectedFields.length === 0}
+            >
+              Continue to Certificates
             </button>
           </div>
         </div>
@@ -327,9 +429,10 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
                   <PositionedTag
                     key={f}
                     id={f}
-                    label={f === '_date' ? 'Date' : f}
+                    label={getPreviewValue(f)}
                     x={pos.x_percent}
                     y={pos.y_percent}
+                    fontSize={pos.font_size}
                     isActive={activePlacementKey === f}
                     onSelect={setActivePlacementKey}
                   />
@@ -337,7 +440,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
               })}
 
               {enabledAssetKeys.map((id) => {
-                const label = id === '_cert_number' ? 'Cert No' : id === '_logo' ? 'Logo' : 'Signature'
+                const label = getPreviewValue(id)
                 const pos = fieldPositions[id] || DEFAULT_FIELD_POS
                 return (
                   <PositionedTag
@@ -346,6 +449,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
                     label={label}
                     x={pos.x_percent}
                     y={pos.y_percent}
+                    fontSize={pos.font_size}
                     isActive={activePlacementKey === id}
                     onSelect={setActivePlacementKey}
                   />

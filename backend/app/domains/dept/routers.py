@@ -51,7 +51,7 @@ class DeptBatchDownloadRequest(BaseModel):
 class DeptEventCreateRequest(BaseModel):
     name: str
     event_date: Optional[datetime] = None
-    semester: str
+    semester: Optional[str] = ""
 
 
 class DeptEventFieldMappingRequest(BaseModel):
@@ -333,15 +333,16 @@ def _render_dept_certificate_dynamic(
         if value:
             draw.text((w * x / 100, h * y / 100), value, fill=(28, 35, 70, 255), font=font, anchor="mm")
 
-    cert_pos = field_positions.get("_cert_number") or {"x_percent": 82.0, "y_percent": 5.0, "font_size": 24}
-    cert_font = _load_font(max(1, int(float(cert_pos.get("font_size", 24)))))
-    draw.text(
-        (w * float(cert_pos.get("x_percent", 82.0)) / 100, h * float(cert_pos.get("y_percent", 5.0)) / 100),
-        cert_number,
-        fill=(44, 61, 127, 255),
-        font=cert_font,
-        anchor="lm",
-    )
+    cert_pos = field_positions.get("_cert_number")
+    if cert_pos:
+        cert_font = _load_font(max(1, int(float(cert_pos.get("font_size", 24)))))
+        draw.text(
+            (w * float(cert_pos.get("x_percent", 82.0)) / 100, h * float(cert_pos.get("y_percent", 5.0)) / 100),
+            cert_number,
+            fill=(44, 61, 127, 255),
+            font=cert_font,
+            anchor="lm",
+        )
 
     def _paste_scaled(path: Optional[str], field_id: str, def_x: float, def_y: float, max_w_ratio: float, max_h_ratio: float):
         if not path:
@@ -364,8 +365,10 @@ def _render_dept_certificate_dynamic(
         except Exception:
             return
 
-    _paste_scaled(logo_path, "_logo", 0.12, 0.12, 0.16, 0.16)
-    _paste_scaled(sig1_path, "_signature", 0.18, 0.84, 0.2, 0.1)
+    if field_positions.get("_logo"):
+        _paste_scaled(logo_path, "_logo", 0.12, 0.12, 0.16, 0.16)
+    if field_positions.get("_signature"):
+        _paste_scaled(sig1_path, "_signature", 0.18, 0.84, 0.2, 0.1)
 
     out = BytesIO()
     if img.mode == "RGBA":
@@ -511,8 +514,6 @@ async def create_dept_event(
     semester = (body.semester or "").strip()
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Event name is required")
-    if not semester:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Semester is required")
 
     evt = DeptEvent(
         department=department,

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import DataTable from '../../components/DataTable'
 import StatusBadge from '../../components/StatusBadge'
 import LoadingSpinner from '../../components/LoadingSpinner'
@@ -10,6 +11,7 @@ import {
   useDeptAssets,
   useDeptEventTemplate,
   useDeptEventMapping,
+  useGenerateDeptEventCertificates,
 } from './api'
 
 function PreflightItem({ ok, label }) {
@@ -31,7 +33,31 @@ function PreflightItem({ ok, label }) {
   )
 }
 
-export default function DeptCertificateIssue({ event }) {
+function toImageUrl(url) {
+  if (!url) return null
+  if (url.startsWith('http') || url.startsWith('blob:')) return url
+  return `${BACKEND_URL}${url}`
+}
+
+function PreviewTag({ label, x, y, fontSize }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: `${x}%`,
+        top: `${y}%`,
+        transform: 'translate(-50%, -50%)',
+        fontSize: `${Math.max(10, Math.min(42, Number(fontSize || 24) * 0.45))}px`,
+        lineHeight: 1.1,
+      }}
+      className="rounded border border-navy/50 bg-white/80 px-2 py-1 font-semibold text-navy shadow-sm"
+    >
+      {label}
+    </div>
+  )
+}
+
+export default function DeptCertificateIssue({ event, excelFileFromOverview = null, previewRowFromOverview = null }) {
   const addToast = useToastStore((s) => s.addToast)
 
   const { data: certs, isLoading: certsLoading } = useDeptEventCertificates(event?.id)
@@ -39,17 +65,60 @@ export default function DeptCertificateIssue({ event }) {
   const { data: eventTemplate } = useDeptEventTemplate(event?.id)
   const { data: mapping } = useDeptEventMapping(event?.id)
 
+  const [excelFile, setExcelFile] = useState(excelFileFromOverview)
+  const [previewRow, setPreviewRow] = useState(previewRowFromOverview)
+
+  useEffect(() => {
+    if (excelFileFromOverview) setExcelFile(excelFileFromOverview)
+  }, [excelFileFromOverview])
+
+  useEffect(() => {
+    if (previewRowFromOverview) setPreviewRow(previewRowFromOverview)
+  }, [previewRowFromOverview])
+
   const sendMutation = useSendDeptEventCertificates(event?.id)
   const sendSingleMutation = useSendSingleDeptEventCertificate(event?.id)
+  const generateMutation = useGenerateDeptEventCertificates(event?.id)
 
   const pendingEmailCount = (certs ?? []).filter((c) => c.status === 'generated').length
 
-  const hasParticipants = (event?.participant_count ?? 0) > 0 || (certs?.length ?? 0) > 0
-  const hasAssets = !!(assets?.has_logo && assets?.has_signature)
+  const hasParticipants = !!excelFile || (event?.participant_count ?? 0) > 0 || (certs?.length ?? 0) > 0
+  const requiresLogo = !!mapping?.field_positions?._logo
+  const requiresSignature = !!mapping?.field_positions?._signature
+  const hasAssets = (!requiresLogo || !!assets?.has_logo) && (!requiresSignature || !!assets?.has_signature)
   const hasTemplate = !!eventTemplate?.template
   const hasMapping = !!mapping?.mapping_configured
 
   const allReady = hasParticipants && hasAssets && hasTemplate && hasMapping
+
+  const firstGenerated = (certs || []).find((c) => !!c.png_url)
+  const templateUrl = toImageUrl(eventTemplate?.template?.template_url)
+  const templateAspectRatio = 2480 / 3508
+
+  const getPreviewValue = (fieldId) => {
+    if (fieldId === '_date') return event?.event_date ? new Date(event.event_date).toLocaleDateString('en-IN') : 'Date'
+    if (fieldId === '_cert_number') return 'CERT-0001'
+    if (fieldId === '_logo') return 'Logo'
+    if (fieldId === '_signature') return 'Signature'
+    if (!previewRow) return fieldId
+    const value = previewRow[fieldId]
+    return value == null || String(value).trim() === '' ? fieldId : String(value)
+  }
+
+  const previewPlacementKeys = useMemo(() => {
+    const selected = mapping?.selected_fields || []
+    const positions = mapping?.field_positions || {}
+    const mappedSpecial = ['_cert_number', '_logo', '_signature'].filter((k) => !!positions[k])
+    return [...selected, ...mappedSpecial]
+  }, [mapping])
+
+  const handleGenerate = async () => {
+    if (!excelFile) {
+      addToast({ type: 'warning', message: 'Go to Overview and click Continue to Certificates after extracting fields.' })
+      return
+    }
+    await generateMutation.mutateAsync(excelFile)
+  }
 
   const certColumns = [
     {
@@ -123,9 +192,62 @@ export default function DeptCertificateIssue({ event }) {
     <div className="space-y-6">
       <div className="card p-5">
         <p className="text-sm text-gray-600">
-          Generation setup is handled in the <span className="font-semibold text-foreground">Overview</span> tab.
-          This tab is only for reviewing generated certificates and sending emails.
+          Use this tab to preview the first participant certificate, generate certificates, and send emails.
         </p>
+      </div>
+
+      <div className="card p-5">
+        <p className="text-sm font-semibold text-foreground mb-3">Filled Certificate Preview</p>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            {firstGenerated?.png_url ? (
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <img
+                  src={`${BACKEND_URL}${firstGenerated.png_url}`}
+                  alt="Generated certificate preview"
+                  className="w-full rounded"
+                />
+                <p className="mt-2 text-xs text-gray-500">Showing first generated certificate preview.</p>
+              </div>
+            ) : templateUrl ? (
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="relative mx-auto w-full max-w-[820px] overflow-hidden rounded border" style={{ aspectRatio: String(templateAspectRatio) }}>
+                  <img src={templateUrl} alt="Certificate template preview" className="absolute inset-0 h-full w-full object-contain object-center" />
+                  {!!previewRow && previewPlacementKeys.map((key) => {
+                    const pos = mapping?.field_positions?.[key]
+                    if (!pos) return null
+                    return (
+                      <PreviewTag
+                        key={key}
+                        label={getPreviewValue(key)}
+                        x={Number(pos.x_percent || 50)}
+                        y={Number(pos.y_percent || 50)}
+                        fontSize={Number(pos.font_size || 24)}
+                      />
+                    )
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  {previewRow ? 'Showing first participant from the Overview step.' : 'No preview data yet. Go to Overview, extract fields, and continue to Certificates.'}
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-6 text-sm text-gray-500">
+                Upload template and mapping in Overview first.
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              Participant Excel is taken from the Overview step.
+            </div>
+            <button className="btn-primary w-full" onClick={handleGenerate} disabled={generateMutation.isPending || !excelFile || !allReady}>
+              {generateMutation.isPending ? 'Generating...' : 'Generate Certificates'}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="card p-5">
@@ -134,7 +256,7 @@ export default function DeptCertificateIssue({ event }) {
             <p className="text-sm font-semibold text-foreground mb-3">Pre-flight Checklist</p>
             <div className="space-y-2">
               <PreflightItem ok={hasParticipants} label="Participants imported" />
-              <PreflightItem ok={hasAssets} label="Logo & signature uploaded" />
+              <PreflightItem ok={hasAssets} label={requiresLogo || requiresSignature ? 'Required assets uploaded' : 'No assets required by current mapping'} />
               <PreflightItem ok={hasTemplate} label="Event template uploaded" />
               <PreflightItem ok={hasMapping} label="Field mapping configured" />
             </div>
