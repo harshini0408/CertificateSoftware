@@ -14,6 +14,7 @@ Requirements
 import logging
 import asyncio
 import re
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -29,6 +30,24 @@ def _normalize_field_key(value: str) -> str:
     txt = str(value or "").strip().lower().replace("_", " ")
     txt = re.sub(r"[^a-z0-9]+", " ", txt)
     return " ".join(txt.split())
+
+
+def _format_print_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+
+    text = str(value).strip()
+    if text.endswith(" 00:00:00") and re.match(r"^\d{4}-\d{2}-\d{2} 00:00:00$", text):
+        return text.split(" ")[0]
+    if re.match(r"^-?\d+\.0$", text):
+        return text[:-2]
+    return text
 
 # ── Static paths ──────────────────────────────────────────────────────────────
 _STATIC_DIR    = Path(__file__).parent.parent / "static"
@@ -256,7 +275,7 @@ def _render_certificate_pillow(
                     if value_raw is not None:
                         break
 
-        value = str(value_raw or "")
+        value = _format_print_value(value_raw)
         if not value:
             continue
 

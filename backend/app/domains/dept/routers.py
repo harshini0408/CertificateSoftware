@@ -28,6 +28,22 @@ from ...config import get_settings
 router = APIRouter(tags=["Department"])
 
 
+def _clean_text_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+
+    txt = str(value).strip()
+    if txt.endswith(" 00:00:00") and re.match(r"^\d{4}-\d{2}-\d{2} 00:00:00$", txt):
+        return txt.split(" ")[0]
+    if re.match(r"^-?\d+\.0$", txt):
+        return txt[:-2]
+    return txt
+
+
 class DeptBatchDownloadRequest(BaseModel):
     cert_numbers: list[str]
 
@@ -168,7 +184,7 @@ def _parse_excel_rows_dynamic(file_bytes: bytes) -> list[dict[str, str]]:
             if not h:
                 continue
             val = row[i] if i < len(row) else None
-            rec[h] = "" if val is None else str(val).strip()
+            rec[h] = _clean_text_value(val)
         parsed.append(rec)
 
     wb.close()
@@ -312,7 +328,7 @@ def _render_dept_certificate_dynamic(
             dt = event_date or datetime.utcnow()
             value = dt.strftime("%d-%m-%Y")
         else:
-            value = (row.get(field) or "").strip()
+            value = _clean_text_value(row.get(field))
 
         if value:
             draw.text((w * x / 100, h * y / 100), value, fill=(28, 35, 70, 255), font=font, anchor="mm")
@@ -745,10 +761,53 @@ async def generate_dept_event_certificates(
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
     generated = 0
+    skipped = 0
     cert_numbers: list[str] = []
+    skipped_emails: list[str] = []
     participant_keys: set[str] = set()
 
+    existing_certs = await DeptCertificate.find(
+        DeptCertificate.department == department,
+        DeptCertificate.event_id == str(evt.id),
+    ).to_list()
+    existing_emails = {
+        str(c.participant_email).strip().lower()
+        for c in existing_certs
+        if c.participant_email and str(c.participant_email).strip()
+    }
+    seen_upload_emails: set[str] = set()
+
+    def _normalize_email(value: Optional[str]) -> str:
+        return (value or "").strip().lower()
+
     for idx, row in enumerate(rows, start=1):
+        participant_email = _normalize_email(_pick_email_from_row(row))
+        if not participant_email:
+            skipped += 1
+            skipped_emails.append("<missing-email>")
+            continue
+
+        if participant_email in existing_emails or participant_email in seen_upload_emails:
+            skipped += 1
+            skipped_emails.append(participant_email)
+            continue
+
+        existing_for_email = await DeptCertificate.find_one({
+            "department": department,
+            "event_id": str(evt.id),
+            "participant_email": {
+                "$regex": f"^{re.escape(participant_email)}$",
+                "$options": "i",
+            },
+        })
+        if existing_for_email:
+            skipped += 1
+            skipped_emails.append(participant_email)
+            existing_emails.add(participant_email)
+            continue
+
+        seen_upload_emails.add(participant_email)
+
         cert_number = f"DPT-{dept_slug[:4].upper()}-{timestamp}-{idx:03d}"
         png_bytes = _render_dept_certificate_dynamic(
             template_path=Path(template_doc.template_path),
@@ -774,11 +833,13 @@ async def generate_dept_event_certificates(
             name=name,
             class_name=class_name,
             contribution=contribution,
-            participant_email=_pick_email_from_row(row),
+            participant_email=participant_email,
             png_url=png_url,
             created_at=datetime.utcnow(),
         )
         await doc.insert()
+
+        existing_emails.add(participant_email)
 
         participant_keys.add(f"{name.lower()}|{class_name.lower()}")
         generated += 1
@@ -791,9 +852,11 @@ async def generate_dept_event_certificates(
 
     return {
         "generated": generated,
+        "skipped": skipped,
         "total_rows": len(rows),
-        "message": f"Generated {generated} certificate(s) for event",
+        "message": f"Generated {generated} certificate(s) for event; skipped {skipped} duplicate email row(s).",
         "cert_numbers": cert_numbers,
+        "skipped_emails": skipped_emails,
     }
 
 

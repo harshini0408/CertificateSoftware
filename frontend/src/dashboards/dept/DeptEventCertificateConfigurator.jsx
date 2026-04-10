@@ -11,6 +11,7 @@ import {
   useDeptEventMapping,
   useSaveDeptEventMapping,
   useGenerateDeptEventCertificates,
+  useDeptAssets,
 } from './api'
 
 const DEFAULT_FIELD_POS = { x_percent: 50, y_percent: 50, font_size: 36 }
@@ -52,6 +53,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
 
   const { data: templateResp } = useDeptEventTemplate(event?.id)
   const { data: mappingResp } = useDeptEventMapping(event?.id)
+  const { data: deptAssets } = useDeptAssets()
 
   const uploadTemplateMutation = useUploadDeptEventTemplate(event?.id)
   const saveMappingMutation = useSaveDeptEventMapping(event?.id)
@@ -61,33 +63,51 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
   const [excelFile, setExcelFile] = useState(null)
   const [headers, setHeaders] = useState([])
   const [selectedFields, setSelectedFields] = useState([])
-  const [fieldPositions, setFieldPositions] = useState({
-    _cert_number: { x_percent: 82, y_percent: 5, font_size: 24 },
-    _logo: { x_percent: 12, y_percent: 12, font_size: 24 },
-    _signature: { x_percent: 18, y_percent: 84, font_size: 24 },
-  })
+  const [fieldPositions, setFieldPositions] = useState({})
+  const [enabledAssetKeys, setEnabledAssetKeys] = useState([])
 
   const [extracting, setExtracting] = useState(false)
   const [templateAspectRatio, setTemplateAspectRatio] = useState(2480 / 3508)
-  const [activePlacementKey, setActivePlacementKey] = useState('_cert_number')
+  const [activePlacementKey, setActivePlacementKey] = useState(null)
 
   const templateUrl = toImageUrl(templateResp?.template?.template_url)
 
   useEffect(() => {
     if (!mappingResp) return
     setSelectedFields(mappingResp.selected_fields || [])
-    setFieldPositions((prev) => ({
-      ...prev,
-      ...(mappingResp.field_positions || {}),
-    }))
+    const incoming = mappingResp.field_positions || {}
+    setFieldPositions((prev) => ({ ...prev, ...incoming }))
+    setEnabledAssetKeys(['_cert_number', '_logo', '_signature'].filter((k) => !!incoming[k]))
   }, [mappingResp])
 
   useEffect(() => {
-    const validKeys = [...selectedFields, '_cert_number', '_logo', '_signature']
+    const validKeys = [...selectedFields, ...enabledAssetKeys]
     if (!validKeys.includes(activePlacementKey)) {
-      setActivePlacementKey(validKeys[0] || '_cert_number')
+      setActivePlacementKey(validKeys[0] || null)
     }
-  }, [selectedFields, activePlacementKey])
+  }, [selectedFields, enabledAssetKeys, activePlacementKey])
+
+  const activateAssetKey = (id) => {
+    if (id === '_logo' && !deptAssets?.has_logo) {
+      addToast({ type: 'error', message: 'Update the logo first in Settings.' })
+      return
+    }
+    if (id === '_signature' && !deptAssets?.has_signature) {
+      addToast({ type: 'error', message: 'Update the signature first in Settings.' })
+      return
+    }
+
+    setEnabledAssetKeys((prev) => (prev.includes(id) ? prev : [...prev, id]))
+    setFieldPositions((prev) => ({
+      ...prev,
+      [id]: prev[id] || (id === '_cert_number'
+        ? { x_percent: 82, y_percent: 5, font_size: 24 }
+        : id === '_logo'
+          ? { x_percent: 12, y_percent: 12, font_size: 24 }
+          : { x_percent: 18, y_percent: 84, font_size: 24 }),
+    }))
+    setActivePlacementKey(id)
+  }
 
   const placeAtClick = (evt) => {
     if (!containerRef.current) return
@@ -256,7 +276,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
                   <button
                     key={`place-${id}`}
                     type="button"
-                    onClick={() => setActivePlacementKey(id)}
+                    onClick={() => activateAssetKey(id)}
                     className={`rounded-full px-3 py-1 text-xs font-medium border ${
                       activePlacementKey === id ? 'bg-amber-50 text-amber-700 border-amber-500' : 'bg-white text-gray-600 border-gray-300'
                     }`}
@@ -316,7 +336,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
                 )
               })}
 
-              {['_cert_number', '_logo', '_signature'].map((id) => {
+              {enabledAssetKeys.map((id) => {
                 const label = id === '_cert_number' ? 'Cert No' : id === '_logo' ? 'Logo' : 'Signature'
                 const pos = fieldPositions[id] || DEFAULT_FIELD_POS
                 return (

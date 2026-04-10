@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 
 from ..models.certificate import Certificate
 from ..models.credit_rule import CreditRule
@@ -13,21 +14,29 @@ async def award_credits(certificate: Certificate) -> None:
     """
     cert_type_raw = (certificate.snapshot.cert_type or "").strip()
     cert_type_normalized = cert_type_raw.lower().replace("-", "_").replace(" ", "_")
+    cert_type_spaced = cert_type_normalized.replace("_", " ")
     cert_type_display = cert_type_normalized.replace("_", " ").title() if cert_type_normalized else cert_type_raw
 
     rule = await CreditRule.find_one({
-        "cert_type": {
-            "$in": [
+        "$or": [
+            {"cert_type": {"$in": [
                 cert_type_raw,
                 cert_type_normalized,
+                cert_type_spaced,
                 cert_type_display,
-            ]
-        }
+            ]}},
+            {"cert_type": {"$regex": f"^{re.escape(cert_type_raw)}$", "$options": "i"}},
+            {"cert_type": {"$regex": f"^{re.escape(cert_type_normalized)}$", "$options": "i"}},
+            {"cert_type": {"$regex": f"^{re.escape(cert_type_spaced)}$", "$options": "i"}},
+        ]
     })
     if not rule or rule.points <= 0:
         return
 
-    email = certificate.snapshot.email
+    email = (certificate.snapshot.email or "").strip().lower()
+    if not email:
+        return
+
     credit_doc = await StudentCredit.find_one(
         StudentCredit.student_email == email,
     )
@@ -42,6 +51,8 @@ async def award_credits(certificate: Certificate) -> None:
     )
 
     if credit_doc:
+        if any(h.cert_number == certificate.cert_number for h in credit_doc.credit_history):
+            return
         credit_doc.total_credits += rule.points
         credit_doc.credit_history.append(entry)
         credit_doc.last_updated = datetime.utcnow()

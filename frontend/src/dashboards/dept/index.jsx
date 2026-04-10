@@ -11,7 +11,6 @@ import FileUpload from '../../components/FileUpload'
 import LoadingSpinner from '../../components/LoadingSpinner'
 
 import { useChangePassword } from '../auth/api'
-import { useAuthStore } from '../../store/authStore'
 
 import {
   useDeptDashboard,
@@ -25,7 +24,12 @@ import { BACKEND_URL } from '../../utils/axiosInstance'
 import DeptEventCertificateConfigurator from './DeptEventCertificateConfigurator'
 import DeptCertificateIssue from './DeptCertificateIssue'
 
-const TABS = ['dashboard', 'events', 'settings']
+const TABS = ['events', 'settings']
+
+const TAB_LABELS = {
+  events: 'Department Dashboard',
+  settings: 'Settings',
+}
 
 function fmtDate(iso) {
   if (!iso) return '-'
@@ -459,22 +463,12 @@ function SettingsTab() {
 export default function DeptCoordinatorDashboard() {
   const { event_id: eventId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
-  const requiresProfileSetup = useAuthStore((s) => s.requires_profile_setup)
-  const { data: deptAssets } = useDeptAssets()
 
-  const needsAssetSetup = requiresProfileSetup || (deptAssets ? (!deptAssets.has_logo || !deptAssets.has_signature) : false)
-
-  const activeTab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'dashboard'
+  const activeTab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'events'
 
   const setTab = (tab) => {
-    setSearchParams(tab === 'dashboard' ? {} : { tab }, { replace: true })
+    setSearchParams({ tab }, { replace: true })
   }
-
-  useEffect(() => {
-    if (needsAssetSetup && activeTab !== 'settings') {
-      setSearchParams({ tab: 'settings' }, { replace: true })
-    }
-  }, [needsAssetSetup, activeTab, setSearchParams])
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -494,22 +488,15 @@ export default function DeptCoordinatorDashboard() {
                       : 'text-gray-500 hover:text-navy'
                   }`}
                 >
-                  {tab}
+                  {TAB_LABELS[tab] || tab}
                 </button>
               ))}
             </div>
-
-            {needsAssetSetup && (
-              <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                First login setup pending. Please upload department logo and coordinator signature in Settings.
-              </div>
-            )}
 
             {eventId ? (
               <EventDetailView eventId={eventId} />
             ) : (
               <>
-                {activeTab === 'dashboard' && <DashboardTab />}
                 {activeTab === 'events' && <EventsTab />}
                 {activeTab === 'settings' && <SettingsTab />}
               </>

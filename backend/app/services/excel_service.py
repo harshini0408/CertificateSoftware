@@ -19,6 +19,7 @@ from io import BytesIO
 import importlib
 from pathlib import Path
 import re
+from datetime import date, datetime
 from typing import Any, Dict, List, Tuple
 
 # ── Column aliases for cert_type detection ────────────────────────────────────
@@ -85,6 +86,18 @@ def _extract_email_from_cell(cell: Any) -> str:
             return target_candidate
 
     return ""
+
+
+def _cell_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
 
 
 def get_excel_template_filename() -> str:
@@ -252,9 +265,7 @@ def parse_participants_excel(
         # Map row to headers
         for col_idx, cell in enumerate(row):
             if col_idx < len(headers) and headers[col_idx]:
-                record[headers[col_idx]] = (
-                    str(cell.value).strip() if cell is not None and cell.value is not None else ""
-                )
+                record[headers[col_idx]] = _cell_to_text(cell.value if cell is not None else None)
 
         # Extract important fields
         email = ""
@@ -270,13 +281,13 @@ def parse_participants_excel(
 
         for idx in reg_col_indexes:
             if idx < len(row) and row[idx] is not None and row[idx].value is not None:
-                reg_no = str(row[idx].value).strip()
+                reg_no = _cell_to_text(row[idx].value)
                 if reg_no:
                     break
 
         for idx in name_col_indexes:
             if idx < len(row) and row[idx] is not None and row[idx].value is not None:
-                student_name = str(row[idx].value).strip()
+                student_name = _cell_to_text(row[idx].value)
                 if student_name:
                     break
 
@@ -312,10 +323,10 @@ def parse_participants_excel(
 
         # Extract Role → cert_type
         if cert_type_col_idx >= 0 and cert_type_col_idx < len(row):
-            raw_role = (
-                str(row[cert_type_col_idx].value).strip()
-                if row[cert_type_col_idx] is not None and row[cert_type_col_idx].value is not None
-                else ""
+            raw_role = _cell_to_text(
+                row[cert_type_col_idx].value
+                if row[cert_type_col_idx] is not None
+                else None
             )
         else:
             raw_role = ""

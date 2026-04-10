@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
@@ -12,6 +13,10 @@ from ...models.club import Club
 from ...services.storage_service import storage_url_to_path
 
 router = APIRouter(tags=["Student"])
+
+
+def _norm_email(value: str | None) -> str:
+    return (value or "").strip().lower()
 
 
 # ── /students/me ─────────────────────────────────────────────────────────
@@ -34,25 +39,32 @@ async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT
 
 @router.get("/students/me/credits")
 async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT))):
-    credit_doc = await StudentCredit.find_one(
-        StudentCredit.student_email == current_user.email
-    )
-    if not credit_doc:
+    email = _norm_email(current_user.email)
+    credit_docs = await StudentCredit.find({
+        "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
+    }).to_list()
+    if not credit_docs:
         return {"total_credits": 0, "breakdown": [], "credit_history": []}
+
+    all_history = []
+    for doc in credit_docs:
+        all_history.extend(doc.credit_history or [])
 
     # Build breakdown by cert_type
     breakdown = {}
-    for entry in credit_doc.credit_history:
+    for entry in all_history:
         ct = entry.cert_type
         if ct not in breakdown:
             breakdown[ct] = {"cert_type": ct, "count": 0, "credits": 0}
         breakdown[ct]["count"] += 1
         breakdown[ct]["credits"] += entry.points_awarded
 
+    total_credits = sum(entry.points_awarded for entry in all_history)
+
     return {
-        "total_credits": credit_doc.total_credits,
+        "total_credits": total_credits,
         "breakdown": list(breakdown.values()),
-        "credit_history": [e.model_dump() for e in credit_doc.credit_history],
+        "credit_history": [e.model_dump() for e in all_history],
     }
 
 
@@ -60,12 +72,16 @@ async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT
 
 @router.get("/students/me/credits/history")
 async def get_credits_history(current_user: User = Depends(require_role(UserRole.STUDENT))):
-    credit_doc = await StudentCredit.find_one(
-        StudentCredit.student_email == current_user.email
-    )
-    if not credit_doc:
+    email = _norm_email(current_user.email)
+    credit_docs = await StudentCredit.find({
+        "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
+    }).to_list()
+    if not credit_docs:
         return []
-    return [e.model_dump() for e in credit_doc.credit_history]
+    all_history = []
+    for doc in credit_docs:
+        all_history.extend(doc.credit_history or [])
+    return [e.model_dump() for e in all_history]
 
 
 # ── /students/me/certificates ────────────────────────────────────────────
@@ -76,9 +92,10 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
 
     Matches by email in snapshot, since participants may not have a user_id link.
     """
-    certs = await Certificate.find(
-        {"snapshot.email": current_user.email}
-    ).to_list()
+    email = _norm_email(current_user.email)
+    certs = await Certificate.find({
+        "snapshot.email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
+    }).to_list()
 
     results = []
     for c in certs:
@@ -102,9 +119,10 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
 @router.get("/students/{student_id}/credits")
 async def get_student_credits(student_id: str):
     """Fetch credits for a specific student by email (preferred) or registration number."""
-    credit_doc = await StudentCredit.find_one(
-        StudentCredit.student_email == student_id
-    )
+    student_id_norm = _norm_email(student_id)
+    credit_doc = await StudentCredit.find_one({
+        "student_email": {"$regex": f"^{re.escape(student_id_norm)}$", "$options": "i"}
+    })
     if not credit_doc:
         credit_doc = await StudentCredit.find_one(
             StudentCredit.registration_number == student_id
