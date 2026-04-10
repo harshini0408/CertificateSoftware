@@ -79,6 +79,7 @@ export default function Login() {
       super_admin:      '/admin',
       club_coordinator: `/club/${club_id}`,
       dept_coordinator: '/dept',
+      tutor: '/tutor',
       student:          '/student',
       guest:            `/club/${club_id}/events/${event_id}`,
     }

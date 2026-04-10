@@ -17,6 +17,8 @@ const roleRedirect = (data) => {
       return `/club/${data.club_id}`
     case 'dept_coordinator':
       return '/dept'
+    case 'tutor':
+      return '/tutor'
     case 'student':
       return '/student'
     case 'guest':

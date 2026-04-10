@@ -9,14 +9,14 @@ class UserCreate(BaseModel):
         ...,
         min_length=3,
         max_length=50,
-        pattern=r"^[a-zA-Z0-9_]+$",
-        description="Letters, numbers, and underscores only.",
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="Letters, numbers, underscores, and hyphens only.",
     )
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(..., min_length=8)
     role: Literal[
-        "club_coordinator", "dept_coordinator", "student", "guest"
+        "club_coordinator", "dept_coordinator", "tutor", "student", "guest"
     ]
     is_active: bool = True
 
@@ -43,6 +43,19 @@ class UserCreate(BaseModel):
             if not self.department:
                 raise ValueError("department is required for dept_coordinator role")
 
+        elif role == "tutor":
+            missing = []
+            if not self.department:
+                missing.append("department")
+            if not self.batch:
+                missing.append("batch")
+            if not self.section:
+                missing.append("section")
+            if missing:
+                raise ValueError(
+                    f"Missing required fields for tutor role: {', '.join(missing)}"
+                )
+
         elif role == "student":
             missing = []
             if not self.department:
@@ -66,7 +79,7 @@ class UserUpdate(BaseModel):
         None,
         min_length=3,
         max_length=50,
-        pattern=r"^[a-zA-Z0-9_]+$",
+        pattern=r"^[a-zA-Z0-9_-]+$",
     )
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     email: Optional[EmailStr] = None

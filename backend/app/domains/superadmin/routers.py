@@ -1,12 +1,14 @@
 import secrets
 import string
 import io
+import re
 from datetime import datetime
 from typing import List, Optional
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import File, UploadFile
+from pydantic import BaseModel
 
 from ...core.dependencies import require_role
 from ...core.security import hash_password
@@ -25,6 +27,64 @@ from ...schemas.user import UserCreate, UserUpdate, UserResponse
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 _admin = Depends(require_role(UserRole.SUPER_ADMIN))
+
+
+class TutorStudentItem(BaseModel):
+    name: str
+    email: str
+    registration_number: str
+
+
+class TutorStudentAssignRequest(BaseModel):
+    students: List[TutorStudentItem]
+
+
+async def _assign_student_to_tutor(
+    *,
+    tutor: User,
+    name: str,
+    email: str,
+    registration_number: str,
+) -> None:
+    email_norm = email.strip().lower()
+    reg_norm = registration_number.strip()
+    if not email_norm or not reg_norm:
+        raise ValueError("email and registration_number are required")
+
+    existing = await StudentCredit.find_one(
+        StudentCredit.student_email == email_norm,
+    )
+
+    if existing:
+        updates = {
+            "tutor_email": tutor.email,
+            "last_updated": datetime.utcnow(),
+        }
+        if not existing.student_name and name.strip():
+            updates["student_name"] = name.strip()
+        if not existing.registration_number:
+            updates["registration_number"] = reg_norm
+        if not existing.department and tutor.department:
+            updates["department"] = tutor.department
+        if not existing.batch and tutor.batch:
+            updates["batch"] = tutor.batch
+        if not existing.section and tutor.section:
+            updates["section"] = tutor.section
+        await existing.set(updates)
+        return
+
+    await StudentCredit(
+        student_email=email_norm,
+        tutor_email=tutor.email,
+        registration_number=reg_norm,
+        student_name=name.strip(),
+        department=tutor.department,
+        batch=tutor.batch,
+        section=tutor.section,
+        total_credits=0,
+        credit_history=[],
+        last_updated=datetime.utcnow(),
+    ).insert()
 
 
 # ── Helper: Build UserResponse from User document ────────────────────────────
@@ -236,7 +296,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
         club_id=club_oid,
         event_id=event_oid,
         department=body.department.strip() if body.department and body.role not in ["guest", "club_coordinator"] else None,
-        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
+        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor"] else None,
         batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
         section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
     )
@@ -270,8 +330,10 @@ async def bulk_import_students(
 ):
     """Import multiple students from an .xlsx file.
 
-    Expected columns (case-insensitive, in any order):
-      name, email, username, password, department, registration_number, batch, section
+        Expected columns (case-insensitive, in any order):
+            name, email, username, password, department, registration_number, batch, section
+        Optional:
+            tutor_email  (used to map imported students to tutor accounts)
 
     Returns: { created: int, skipped: int, errors: [ { row: int, reason: str } ] }
     """
@@ -325,6 +387,7 @@ async def bulk_import_students(
         reg_no    = col(row_vals, "registration_number")
         batch     = col(row_vals, "batch")
         section   = col(row_vals, "section")
+        tutor_email = col(row_vals, "tutor_email").lower()
 
         try:
             # Validate required fields
@@ -373,6 +436,7 @@ async def bulk_import_students(
             if not existing_credit:
                 await StudentCredit(
                     student_email=email,
+                    tutor_email=tutor_email or None,
                     registration_number=reg_no,
                     student_name=name,
                     department=dept,
@@ -382,6 +446,8 @@ async def bulk_import_students(
                     credit_history=[],
                     last_updated=datetime.utcnow(),
                 ).insert()
+            elif tutor_email and existing_credit.tutor_email != tutor_email:
+                await existing_credit.set({"tutor_email": tutor_email, "last_updated": datetime.utcnow()})
 
             created += 1
 
@@ -391,6 +457,117 @@ async def bulk_import_students(
             errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
 
     return {"created": created, "skipped": skipped, "errors": errors}
+
+
+@router.post("/tutors/{tutor_id}/students")
+async def assign_tutor_students(
+    tutor_id: PydanticObjectId,
+    body: TutorStudentAssignRequest,
+    _user: User = _admin,
+):
+    tutor = await User.get(tutor_id)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tutor not found")
+
+    created_or_updated = 0
+    errors = []
+    for idx, item in enumerate(body.students, start=1):
+        try:
+            await _assign_student_to_tutor(
+                tutor=tutor,
+                name=item.name,
+                email=item.email,
+                registration_number=item.registration_number,
+            )
+            created_or_updated += 1
+        except Exception as exc:
+            errors.append({"row": idx, "reason": str(exc)})
+
+    return {
+        "assigned": created_or_updated,
+        "errors": errors,
+    }
+
+
+@router.post("/tutors/{tutor_id}/students/import")
+async def bulk_import_tutor_students(
+    tutor_id: PydanticObjectId,
+    file: UploadFile = File(...),
+    _user: User = _admin,
+):
+    tutor = await User.get(tutor_id)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tutor not found")
+
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only .xlsx files are accepted")
+
+    import openpyxl
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not parse the Excel file. Ensure it is a valid .xlsx.")
+
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel file is empty or has no header row")
+
+    raw_headers = [str(h).strip() if h is not None else "" for h in header_row]
+    norm_headers = [re.sub(r"[^a-z0-9]", "", h.lower()) for h in raw_headers]
+
+    def idx_for(*aliases: str) -> int:
+        for alias in aliases:
+            alias_norm = re.sub(r"[^a-z0-9]", "", alias.lower())
+            if alias_norm in norm_headers:
+                return norm_headers.index(alias_norm)
+        return -1
+
+    name_idx = idx_for("name", "student_name")
+    email_idx = idx_for("email", "student_email")
+    reg_idx = idx_for("registration number", "registration_number", "reg_no", "registrationno")
+
+    if name_idx < 0 or email_idx < 0 or reg_idx < 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Missing required columns: name, email, registration number",
+        )
+
+    assigned = 0
+    skipped = 0
+    errors = []
+
+    for row_idx, row_vals in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if all(v is None or str(v).strip() == "" for v in row_vals):
+            continue
+
+        name = str(row_vals[name_idx]).strip() if name_idx < len(row_vals) and row_vals[name_idx] is not None else ""
+        email = str(row_vals[email_idx]).strip().lower() if email_idx < len(row_vals) and row_vals[email_idx] is not None else ""
+        reg_no = str(row_vals[reg_idx]).strip() if reg_idx < len(row_vals) and row_vals[reg_idx] is not None else ""
+
+        if not name or not email or not reg_no:
+            skipped += 1
+            errors.append({"row": row_idx, "reason": "Missing name/email/registration number"})
+            continue
+
+        try:
+            await _assign_student_to_tutor(
+                tutor=tutor,
+                name=name,
+                email=email,
+                registration_number=reg_no,
+            )
+            assigned += 1
+        except Exception as exc:
+            skipped += 1
+            errors.append({"row": row_idx, "reason": str(exc)})
+
+    return {
+        "assigned": assigned,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 
 @router.get("/users", response_model=List[UserResponse])

@@ -9,6 +9,7 @@ import AdminDashboard from './dashboards/superadmin'
 import ClubDashboard from './dashboards/club'
 import EventDetail from './dashboards/club/EventDetail'
 import DeptCoordinatorDashboard from './dashboards/dept'
+import TutorDashboard from './dashboards/tutor'
 import StudentDashboard from './dashboards/student'
 import VerifyPage from './pages/Verify'
 import TemplateSelector from './dashboards/club/TemplateSelector'
@@ -22,6 +23,7 @@ const ROLES = {
   SUPER_ADMIN: 'super_admin',
   CLUB_COORD: 'club_coordinator',
   DEPT_COORD: 'dept_coordinator',
+  TUTOR: 'tutor',
   STUDENT: 'student',
   GUEST: 'guest',
 }
@@ -108,6 +110,16 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.DEPT_COORD, ROLES.SUPER_ADMIN]}>
               <DeptCoordinatorDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Student ────────────────────────────────────────────────────── */}
+        <Route
+          path="/tutor"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.TUTOR]}>
+              <TutorDashboard />
             </ProtectedRoute>
           }
         />

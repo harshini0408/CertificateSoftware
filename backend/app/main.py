@@ -155,6 +155,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
 from .routers import auth, events, participants, templates, certificates, verify, image_templates
 from .routers.role_presets import router as role_presets_router
 from .domains.student.routers import router as student_router
+from .domains.tutor.routers import router as tutor_router
 from .domains.guest.routers import router as guest_router
 from .domains.dept.routers import router as dept_router
 from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
@@ -172,6 +173,7 @@ app.include_router(templates.router)
 app.include_router(certificates.router)
 app.include_router(verify.router)
 app.include_router(student_router)
+app.include_router(tutor_router)
 app.include_router(dept_router)
 app.include_router(image_templates.router)
 app.include_router(guest_router)

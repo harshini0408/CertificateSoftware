@@ -101,7 +101,6 @@ function useNavItems() {
     case 'club_coordinator':
       return [
         { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard, label: 'Dashboard', end: true },
-        { to: `/club/${effectiveClubId}?tab=events`,           icon: icons.calendar,  label: 'Events' },
         { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
       ]
 
@@ -114,13 +113,17 @@ function useNavItems() {
     case 'dept_coordinator':
       return [
         { to: '/dept',                   icon: icons.dashboard, label: 'Dashboard', end: true },
-        { to: '/dept?tab=events',        icon: icons.calendar,  label: 'Events' },
         { to: '/dept?tab=settings',      icon: icons.settings,  label: 'Settings' },
       ]
 
     case 'student':
       return [
         { to: '/student', icon: icons.certificate, label: 'My Certificates', end: true },
+      ]
+
+    case 'tutor':
+      return [
+        { to: '/tutor', icon: icons.student, label: 'Dashboard', end: true },
       ]
 
     default:

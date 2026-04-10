@@ -91,3 +91,44 @@ export function useUpdateUser() {
   })
 }
 
+export function useAssignTutorStudents() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ tutorId, students }) =>
+      axiosInstance.post(`/admin/tutors/${tutorId}/students`, { students }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Tutor students assigned.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to assign tutor students.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useBulkImportTutorStudents() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ tutorId, file }) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      return axiosInstance.post(`/admin/tutors/${tutorId}/students/import`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Tutor student import completed.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to import tutor students.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+

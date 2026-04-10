@@ -10,6 +10,7 @@ class UserRole(str, Enum):
     SUPER_ADMIN = "super_admin"
     CLUB_COORDINATOR = "club_coordinator"
     DEPT_COORDINATOR = "dept_coordinator"
+    TUTOR = "tutor"
     STUDENT = "student"
     GUEST = "guest"
 

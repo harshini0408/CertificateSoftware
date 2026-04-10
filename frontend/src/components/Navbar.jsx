@@ -14,6 +14,7 @@ const roleMeta = {
   super_admin:      { label: 'Super Admin',      cls: 'bg-purple-100 text-purple-700' },
   club_coordinator: { label: 'Club Coordinator', cls: 'bg-blue-100 text-blue-700' },
   dept_coordinator: { label: 'Dept Coordinator', cls: 'bg-teal-100 text-teal-700' },
+  tutor:            { label: 'Tutor',            cls: 'bg-indigo-100 text-indigo-700' },
   student:          { label: 'Student',           cls: 'bg-green-100 text-green-700' },
   guest:            { label: 'Guest',             cls: 'bg-gray-100 text-gray-600' },
 }

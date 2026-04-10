@@ -14,6 +14,8 @@ const roleHomePath = (role, store) => {
       return `/club/${store.club_id}`
     case 'dept_coordinator':
       return '/dept'
+    case 'tutor':
+      return '/tutor'
     case 'student':
       return '/student'
     case 'guest':

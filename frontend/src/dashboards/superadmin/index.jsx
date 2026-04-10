@@ -14,7 +14,7 @@ import ConfirmModal from '../../components/ConfirmModal'
 import CertificateMappingTab from './CertificateMappingTab'
 
 import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../club/api'
-import { useUsers, useCreateUser, useUpdateUser } from './usersApi'
+import { useUsers, useCreateUser, useUpdateUser, useAssignTutorStudents, useBulkImportTutorStudents } from './usersApi'
 import {
   useAdminStats,
   useAdminClubs,
@@ -46,6 +46,7 @@ function fmtDate(iso) {
 const roleBadge = {
   club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
   dept_coordinator: 'bg-purple-50 text-purple-700 ring-purple-200',
+  tutor: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   student: 'bg-green-50 text-green-700 ring-green-200',
   guest: 'bg-amber-50 text-amber-700 ring-amber-200',
   super_admin: 'bg-red-50 text-red-700 ring-red-200',
@@ -53,6 +54,7 @@ const roleBadge = {
 const roleLabel = {
   club_coordinator: 'Club Coordinator',
   dept_coordinator: 'Dept Coordinator',
+  tutor: 'Tutor',
   student: 'Student',
   guest: 'Guest',
   super_admin: 'Super Admin',
@@ -380,6 +382,7 @@ function EditClubModal({ isOpen, onClose, club }) {
 const roles = [
   { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
   { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
+  { value: 'tutor', label: 'Tutor', icon: '🧑‍🏫', desc: 'Manages one class of students' },
   { value: 'student', label: 'Student', icon: '📚', desc: 'Has certificates & credits' },
   { value: 'guest', label: 'Guest', icon: '🎟️', desc: 'Limited access account' },
 ]
@@ -388,9 +391,14 @@ function NewUserModal({ isOpen, onClose }) {
   const [step, setStep] = useState(1)
   const [selectedRole, setSelectedRole] = useState('')
   const [form, setForm] = useState({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' })
+  const [tutorStudents, setTutorStudents] = useState([])
+  const [studentDraft, setStudentDraft] = useState({ name: '', email: '', registration_number: '' })
+  const [tutorImportFile, setTutorImportFile] = useState(null)
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
   const createUser = useCreateUser()
+  const assignTutorStudents = useAssignTutorStudents()
+  const bulkImportTutorStudents = useBulkImportTutorStudents()
   const { data: clubsList } = useClubs()
   const { data: eventsList, isFetching: fetchingEvents } = useEvents(
     selectedRole === 'guest' && form.club_id ? form.club_id : null
@@ -401,7 +409,15 @@ function NewUserModal({ isOpen, onClose }) {
     setErrors((e) => ({ ...e, [field]: undefined }))
   }
 
-  const resetModal = () => { setStep(1); setSelectedRole(''); setForm({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' }); setErrors({}) }
+  const resetModal = () => {
+    setStep(1)
+    setSelectedRole('')
+    setForm({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' })
+    setTutorStudents([])
+    setStudentDraft({ name: '', email: '', registration_number: '' })
+    setTutorImportFile(null)
+    setErrors({})
+  }
 
   const handleClose = () => { onClose(); resetModal() }
 
@@ -409,11 +425,16 @@ function NewUserModal({ isOpen, onClose }) {
     const errs = {}
     if (!form.name.trim()) errs.name = 'Required'
     if (!form.username.trim()) errs.username = 'Required'
-    else if (!/^[a-zA-Z0-9_]+$/.test(form.username)) errs.username = 'Letters, numbers, underscores only'
+    else if (!/^[a-zA-Z0-9_-]+$/.test(form.username)) errs.username = 'Letters, numbers, underscores, hyphens only'
     if (!form.email.trim()) errs.email = 'Required'
     if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
     if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
+    if (selectedRole === 'tutor') {
+      if (!form.department) errs.department = 'Required'
+      if (!form.batch) errs.batch = 'Required'
+      if (!form.section) errs.section = 'Required'
+    }
     if (selectedRole === 'student') {
       if (!form.department) errs.department = 'Required'
       if (!form.registration_number) errs.registration_number = 'Required'
@@ -423,7 +444,30 @@ function NewUserModal({ isOpen, onClose }) {
     return errs
   }
 
-  const handleSubmit = (e) => {
+  const handleAddTutorStudent = () => {
+    const name = studentDraft.name.trim()
+    const email = studentDraft.email.trim().toLowerCase()
+    const registration_number = studentDraft.registration_number.trim()
+
+    if (!name || !email || !registration_number) {
+      setErrors((prev) => ({ ...prev, tutor_students: 'Name, Email and Registration Number are required.' }))
+      return
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setErrors((prev) => ({ ...prev, tutor_students: 'Enter a valid student email.' }))
+      return
+    }
+    if (tutorStudents.some((s) => s.email.toLowerCase() === email)) {
+      setErrors((prev) => ({ ...prev, tutor_students: 'Student email already added in this list.' }))
+      return
+    }
+
+    setTutorStudents((prev) => [...prev, { name, email, registration_number }])
+    setStudentDraft({ name: '', email: '', registration_number: '' })
+    setErrors((prev) => ({ ...prev, tutor_students: undefined }))
+  }
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
     const errs = validateStep2()
     if (Object.keys(errs).length) { setErrors(errs); return }
@@ -438,24 +482,38 @@ function NewUserModal({ isOpen, onClose }) {
     if (selectedRole === 'club_coordinator') {
       payload.club_id = form.club_id
     }
-    if (selectedRole === 'dept_coordinator' || selectedRole === 'student') {
+    if (selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') {
       payload.department = form.department.trim()
     }
-    if (selectedRole === 'student') {
-      payload.registration_number = form.registration_number.trim()
+    if (selectedRole === 'student' || selectedRole === 'tutor') {
       payload.batch = form.batch.trim()
       payload.section = form.section.trim()
     }
+    if (selectedRole === 'student') {
+      payload.registration_number = form.registration_number.trim()
+    }
 
-    createUser.mutate(payload, {
-      onSuccess: handleClose,
-      onError: (err) => {
-        const d = err?.response?.data?.detail || ''
-        if (d.toLowerCase().includes('username')) setErrors({ username: d })
-        else if (d.toLowerCase().includes('email')) setErrors({ email: d })
-        else if (d.toLowerCase().includes('registration')) setErrors({ registration_number: d })
-      },
-    })
+    try {
+      const createdResp = await createUser.mutateAsync(payload)
+      const createdUser = createdResp?.data || createdResp
+      const tutorId = createdUser?.id
+
+      if (selectedRole === 'tutor' && tutorId) {
+        if (tutorStudents.length > 0) {
+          await assignTutorStudents.mutateAsync({ tutorId, students: tutorStudents })
+        }
+        if (tutorImportFile) {
+          await bulkImportTutorStudents.mutateAsync({ tutorId, file: tutorImportFile })
+        }
+      }
+
+      handleClose()
+    } catch (err) {
+      const d = err?.response?.data?.detail || ''
+      if (d.toLowerCase().includes('username')) setErrors({ username: d })
+      else if (d.toLowerCase().includes('email')) setErrors({ email: d })
+      else if (d.toLowerCase().includes('registration')) setErrors({ registration_number: d })
+    }
   }
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={step === 1 ? 'New User — Select Role' : `New User — ${roleLabel[selectedRole]}`} wide>
@@ -512,12 +570,67 @@ function NewUserModal({ isOpen, onClose }) {
               {errors.club_id && <p className="form-error">{errors.club_id}</p>}
             </div>
           )}
-          {(selectedRole === 'dept_coordinator' || selectedRole === 'student') && (
+          {(selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') && (
             <div>
               <label className="form-label">Department *</label>
               <input className={`form-input ${errors.department ? 'form-input-error' : ''}`} value={form.department} onChange={(e) => handleChange('department', e.target.value)} placeholder="CSE" />
               {errors.department && <p className="form-error">{errors.department}</p>}
             </div>
+          )}
+          {selectedRole === 'tutor' && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">Batch *</label>
+                  <input className={`form-input ${errors.batch ? 'form-input-error' : ''}`} value={form.batch} onChange={(e) => handleChange('batch', e.target.value)} placeholder="2024-2028" />
+                  {errors.batch && <p className="form-error">{errors.batch}</p>}
+                </div>
+                <div>
+                  <label className="form-label">Section *</label>
+                  <input className={`form-input ${errors.section ? 'form-input-error' : ''}`} value={form.section} onChange={(e) => handleChange('section', e.target.value)} placeholder="A" />
+                  {errors.section && <p className="form-error">{errors.section}</p>}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 p-3">
+                <p className="text-sm font-semibold text-foreground">Assign Students To This Tutor (Optional)</p>
+                <p className="mt-1 text-xs text-gray-500">You can add students manually and/or bulk import .xlsx with columns: name, email, registration number.</p>
+
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <input className="form-input" placeholder="Student name" value={studentDraft.name} onChange={(e) => setStudentDraft((p) => ({ ...p, name: e.target.value }))} />
+                  <input className="form-input" placeholder="Student email" value={studentDraft.email} onChange={(e) => setStudentDraft((p) => ({ ...p, email: e.target.value }))} />
+                  <input className="form-input" placeholder="Registration number" value={studentDraft.registration_number} onChange={(e) => setStudentDraft((p) => ({ ...p, registration_number: e.target.value }))} />
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <button type="button" className="btn-secondary" onClick={handleAddTutorStudent}>+ Add Student</button>
+                </div>
+
+                {errors.tutor_students && <p className="form-error mt-1">{errors.tutor_students}</p>}
+
+                {tutorStudents.length > 0 && (
+                  <div className="mt-3 max-h-36 overflow-auto rounded border border-gray-100">
+                    {tutorStudents.map((s, idx) => (
+                      <div key={`${s.email}-${idx}`} className="flex items-center justify-between border-b border-gray-100 px-2 py-1.5 text-xs last:border-b-0">
+                        <span className="truncate">{s.name} • {s.email} • {s.registration_number}</span>
+                        <button
+                          type="button"
+                          className="text-red-600 hover:underline"
+                          onClick={() => setTutorStudents((prev) => prev.filter((_, i) => i !== idx))}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mt-3">
+                  <label className="form-label">Bulk Import Students (.xlsx)</label>
+                  <input type="file" accept=".xlsx" className="form-input" onChange={(e) => setTutorImportFile(e.target.files?.[0] || null)} />
+                  {tutorImportFile && <p className="mt-1 text-xs text-gray-500">Selected: {tutorImportFile.name}</p>}
+                </div>
+              </div>
+            </>
           )}
           {selectedRole === 'student' && (
             <div className="grid grid-cols-3 gap-4">
@@ -541,8 +654,8 @@ function NewUserModal({ isOpen, onClose }) {
 
           <div className="flex justify-between pt-2">
             <button type="button" className="btn-secondary" onClick={() => { setStep(1); setErrors({}) }}>← Back</button>
-            <button type="submit" className="btn-primary min-w-[120px]" disabled={createUser.isPending}>
-              {createUser.isPending ? <LoadingSpinner size="sm" label="" /> : 'Create User'}
+            <button type="submit" className="btn-primary min-w-[120px]" disabled={createUser.isPending || assignTutorStudents.isPending || bulkImportTutorStudents.isPending}>
+              {(createUser.isPending || assignTutorStudents.isPending || bulkImportTutorStudents.isPending) ? <LoadingSpinner size="sm" label="" /> : 'Create User'}
             </button>
           </div>
         </form>
@@ -1008,7 +1121,7 @@ function BulkImportModal({ isOpen, onClose }) {
               (case-insensitive, in any order):
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {['name','email','username','password','department','registration_number','batch','section'].map(col => (
+              {['name','email','username','password','department','registration_number','batch','section','tutor_email'].map(col => (
                 <span key={col} className="inline-block rounded bg-blue-100 px-2 py-0.5 font-mono text-[11px] text-blue-800">{col}</span>
               ))}
             </div>
@@ -1128,6 +1241,7 @@ function UsersTab() {
   const getScope = (u) => {
     if (u.role === 'club_coordinator') return clubMap[u.club_id] || u.club_id || '—'
     if (u.role === 'dept_coordinator') return u.department || '—'
+    if (u.role === 'tutor') return `${u.department || ''} ${u.batch || ''} ${u.section || ''}`.trim() || '—'
     if (u.role === 'student') return `${u.batch || ''} ${u.section || ''}`.trim() || '—'
     if (u.role === 'guest') return `${clubMap[u.club_id] || ''} · 1 event`
     return '—'
@@ -1166,6 +1280,7 @@ function UsersTab() {
           <option value="">All Roles</option>
           <option value="club_coordinator">Club Coordinator</option>
           <option value="dept_coordinator">Dept Coordinator</option>
+          <option value="tutor">Tutor</option>
           <option value="student">Student</option>
           <option value="guest">Guest</option>
         </select>
