@@ -13,10 +13,22 @@ Requirements
 
 import logging
 import asyncio
+import re
 from pathlib import Path
 from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_role_key(value: str) -> str:
+    return "_".join(str(value or "").strip().lower().replace("-", " ").split())
+
+
+def _normalize_field_key(value: str) -> str:
+    """Normalize template/field headings to a canonical lookup key."""
+    txt = str(value or "").strip().lower().replace("_", " ")
+    txt = re.sub(r"[^a-z0-9]+", " ", txt)
+    return " ".join(txt.split())
 
 # ── Static paths ──────────────────────────────────────────────────────────────
 _STATIC_DIR    = Path(__file__).parent.parent / "static"
@@ -67,17 +79,12 @@ async def generate_certificate_pillow(
     from ..models.role_template_preset import RoleTemplatePreset
 
     role_val = str((participant.fields or {}).get("Role", "")) or getattr(participant, "role", "") or "participant"
-    normalized_role = role_val.lower().replace(" ", "_").replace("-", "_")
+    normalized_role = _normalize_role_key(role_val)
     
-    presets = await RoleTemplatePreset.find(RoleTemplatePreset.template_filename == event.template_filename).to_list()
-    preset = None
-    if presets:
-        for p in presets:
-            if p.role_name == normalized_role:
-                preset = p
-                break
-        if not preset:
-            preset = presets[0]
+    preset = await RoleTemplatePreset.find_one(
+        RoleTemplatePreset.role_name == normalized_role,
+        RoleTemplatePreset.is_active == True,
+    )
 
     column_positions = {}
     asset_positions = {}
@@ -86,6 +93,7 @@ async def generate_certificate_pillow(
     if preset:
         column_positions = preset.column_positions or {}
         asset_positions = preset.asset_positions or {}
+        template_filename = preset.template_filename or template_filename
     else:
         fp = await FieldPosition.find_one(FieldPosition.event_id == event.id, FieldPosition.cert_type == cert_type)
         if not fp: fp = await FieldPosition.find_one(FieldPosition.event_id == event.id, FieldPosition.cert_type == "participant")
@@ -151,7 +159,7 @@ async def generate_certificate_from_role_preset(
     """Generate certificate from RoleTemplatePreset without FieldPosition lookup."""
     from ..models.role_template_preset import RoleTemplatePreset
 
-    normalized = (role_name or "participant").lower().replace(" ", "_").replace("-", "_")
+    normalized = _normalize_role_key(role_name or "participant")
     preset = await RoleTemplatePreset.find_one(
         RoleTemplatePreset.role_name == normalized,
         RoleTemplatePreset.is_active == True,
@@ -211,8 +219,44 @@ def _render_certificate_pillow(
     # Override per-field via font_size_percent in column_positions.
     DEFAULT_FONT_PERCENT = 2.7
 
+    fields_dict = fields or {}
+    normalized_fields = {
+        _normalize_field_key(k): v
+        for k, v in fields_dict.items()
+    }
+
+    alias_map = {
+        "club": ["club", "club name", "clubname"],
+        "club name": ["club name", "club", "clubname"],
+        "clubname": ["clubname", "club name", "club"],
+        "event": ["event", "event name", "eventname"],
+        "event name": ["event name", "event", "eventname"],
+        "eventname": ["eventname", "event name", "event"],
+    }
+    cert_number_keys = {
+        "cert",
+        "certificate no",
+        "certificate no.",
+        "certificate number",
+        "certificate no :",
+        "certificate number :",
+    }
+    cert_drawn_from_mapping = False
+
     for col_header, pos in (column_positions or {}).items():
-        value = str((fields or {}).get(col_header, ""))
+        normalized_key = _normalize_field_key(col_header)
+        value_raw = fields_dict.get(col_header)
+        if value_raw is None and cert_number and normalized_key in cert_number_keys:
+            value_raw = cert_number
+        if value_raw is None:
+            value_raw = normalized_fields.get(normalized_key)
+            if value_raw is None:
+                for candidate in alias_map.get(normalized_key, []):
+                    value_raw = normalized_fields.get(_normalize_field_key(candidate))
+                    if value_raw is not None:
+                        break
+
+        value = str(value_raw or "")
         if not value:
             continue
 
@@ -226,9 +270,11 @@ def _render_certificate_pillow(
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h
         draw.text((x, y), value, font=field_font, fill=(30, 30, 30, 255), anchor="mm")
+        if cert_number and normalized_key in cert_number_keys:
+            cert_drawn_from_mapping = True
 
-    # Certificate number — slightly smaller than body text.
-    if cert_number:
+    # Certificate number fallback for templates not yet configured with Cert position.
+    if cert_number and not cert_drawn_from_mapping:
         cert_font = _load_font(max(20, int(img_w * 0.025)))
         cert_x = int(img_w * 0.83)
         cert_y = int(img_h * 0.048)

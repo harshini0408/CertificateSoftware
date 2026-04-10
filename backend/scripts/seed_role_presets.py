@@ -17,6 +17,10 @@ from app.database import connect_db, disconnect_db
 from app.models.role_template_preset import RoleTemplatePreset
 
 
+def _normalize_role_name(value: str) -> str:
+    return (value or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
 def _default_column_positions():
     return {
         "Name": {"x_percent": 35.4, "y_percent": 52.6, "font_size_percent": 2.7},
@@ -41,6 +45,7 @@ async def main() -> None:
     try:
         template_dir = BACKEND_DIR / "app" / "static" / "certificate_templates"
         png_files = sorted([p.name for p in template_dir.glob("*.png")])
+        png_set = set(png_files)
         if not png_files:
             raise RuntimeError("No PNG templates found in backend/app/static/certificate_templates")
 
@@ -64,7 +69,9 @@ async def main() -> None:
         created = 0
         updated = 0
         for idx, (role_name, display_label) in enumerate(role_specs):
-            template_filename = png_files[idx % len(png_files)]
+            normalized_role = _normalize_role_name(role_name)
+            expected_template = f"{display_label}.png"
+            template_filename = expected_template if expected_template in png_set else png_files[idx % len(png_files)]
             payload = {
                 "display_label": display_label,
                 "template_filename": template_filename,
@@ -73,12 +80,16 @@ async def main() -> None:
                 "display_width": 1905.0,
                 "is_active": True,
             }
-            existing = await RoleTemplatePreset.find_one(RoleTemplatePreset.role_name == role_name)
+            existing = await RoleTemplatePreset.find_one({
+                "role_name": {"$in": [normalized_role, role_name]}
+            })
             if existing:
-                await existing.set(payload)
-                updated += 1
+                # Preserve manually configured mappings; seed fills only missing presets.
+                if existing.role_name != normalized_role:
+                    await existing.set({"role_name": normalized_role})
+                    updated += 1
             else:
-                await RoleTemplatePreset(role_name=role_name, **payload).insert()
+                await RoleTemplatePreset(role_name=normalized_role, **payload).insert()
                 created += 1
 
         print(f"Seed complete: created={created}, updated={updated}, total={len(role_specs)}")

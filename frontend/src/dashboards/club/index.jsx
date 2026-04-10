@@ -516,9 +516,18 @@ function SettingsTab({ club, clubId, clubLoading }) {
 // ClubDashboard (main export)
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function ClubDashboard() {
+  const navigate = useNavigate()
   const { club_id } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const requiresProfileSetup = useAuthStore((s) => s.requires_profile_setup)
+  const role = useAuthStore((s) => s.role)
+  const authClubId = useAuthStore((s) => s.club_id)
+  const setAuth = useAuthStore((s) => s.setAuth)
+
+  const normalizedRole = String(role || '').trim().toLowerCase().replace(/\s+/g, '_')
+  const isClubCoordinator = normalizedRole === 'club_coordinator'
+
+  const effectiveClubId = isClubCoordinator && authClubId ? authClubId : club_id
 
   const activeTab = TABS.includes(searchParams.get('tab'))
     ? searchParams.get('tab')
@@ -527,8 +536,35 @@ export default function ClubDashboard() {
   const setTab = (tab) =>
     setSearchParams(tab === 'dashboard' ? {} : { tab }, { replace: true })
 
-  const { data: dashboard, isLoading: dashLoading } = useClubDashboard(club_id)
+  const { data: dashboard, isLoading: dashLoading } = useClubDashboard(effectiveClubId)
   const club = dashboard?.club || null
+
+  useEffect(() => {
+    if (isClubCoordinator && authClubId && club_id && authClubId !== club_id) {
+      navigate(`/club/${authClubId}`, { replace: true })
+    }
+  }, [isClubCoordinator, authClubId, club_id, navigate])
+
+  useEffect(() => {
+    // Refresh persisted auth snapshot so dashboard uses the latest club assignment.
+    if (!isClubCoordinator) return
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const { data } = await axiosInstance.get('/auth/me')
+        if (!cancelled && data?.role) {
+          setAuth(data)
+        }
+      } catch {
+        // ProtectedRoute will handle auth failures.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isClubCoordinator, setAuth])
 
   useEffect(() => {
     if (requiresProfileSetup && activeTab !== 'settings') {
@@ -571,11 +607,11 @@ export default function ClubDashboard() {
             )}
 
             {activeTab === 'dashboard' && (
-              <DashboardTab clubId={club_id} dashboard={dashboard} isLoading={dashLoading} />
+              <DashboardTab clubId={effectiveClubId} dashboard={dashboard} isLoading={dashLoading} />
             )}
-            {activeTab === 'events' && <EventsTab clubId={club_id} />}
+            {activeTab === 'events' && <EventsTab clubId={effectiveClubId} />}
             {activeTab === 'settings' && (
-              <SettingsTab club={club} clubId={club_id} clubLoading={dashLoading} />
+              <SettingsTab club={club} clubId={effectiveClubId} clubLoading={dashLoading} />
             )}
           </div>
         </main>

@@ -81,32 +81,37 @@ async def list_role_presets(include_inactive: bool = False):
 async def seed_role_presets(_user: User = _admin):
     template_dir = Path(__file__).resolve().parents[1] / "static" / "certificate_templates"
     available_pngs = sorted([p.name for p in template_dir.glob("*.png")])
+    available_set = set(available_pngs)
     if not available_pngs:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No PNG templates found in static/certificate_templates")
 
     role_specs = [
-        ("Student Council Member", "Student Council Member"),
-        ("Office Bearer", "Office Bearer"),
-        ("Club Member", "Club Member"),
-        ("Class Representative", "Class Representative"),
-        ("Student Volunteer", "Student Volunteer"),
-        ("Organizer", "Organizer"),
-        ("Coordinator", "Coordinator"),
-        ("Technical Talk", "Technical Talk"),
-        ("Paper Presenter", "Paper Presenter"),
-        ("First Place", "First Place"),
-        ("Second Place", "Second Place"),
-        ("Third Place", "Third Place"),
-        ("Technical Participant", "Technical Participant"),
-        ("Non-Technical Participant", "Non-Technical Participant"),
+        ("student_council_member", "Student Council Member"),
+        ("office_bearer", "Office Bearer"),
+        ("club_member", "Club Member"),
+        ("class_representative", "Class Representative"),
+        ("student_volunteer", "Student Volunteer"),
+        ("organizer", "Organizer"),
+        ("coordinator", "Coordinator"),
+        ("technical_talk", "Technical Talk"),
+        ("paper_presenter", "Paper Presenter"),
+        ("first_place", "First Place"),
+        ("second_place", "Second Place"),
+        ("third_place", "Third Place"),
+        ("technical_participant", "Technical Participant"),
+        ("non_technical_participant", "Non-Technical Participant"),
     ]
 
     created = 0
     updated = 0
     for idx, (role_name, display_label) in enumerate(role_specs):
-        template_filename = available_pngs[idx % len(available_pngs)]
+        normalized_role = _normalize_role_name(role_name)
+        expected_template = f"{display_label}.png"
+        template_filename = expected_template if expected_template in available_set else available_pngs[idx % len(available_pngs)]
 
-        existing = await RoleTemplatePreset.find_one(RoleTemplatePreset.role_name == role_name)
+        existing = await RoleTemplatePreset.find_one({
+            "role_name": {"$in": [normalized_role, role_name]}
+        })
         payload = {
             "display_label": display_label,
             "template_filename": template_filename,
@@ -116,10 +121,12 @@ async def seed_role_presets(_user: User = _admin):
             "is_active": True,
         }
         if existing:
-            await existing.set(payload)
-            updated += 1
+            # Never overwrite manually configured mappings during seeding.
+            if existing.role_name != normalized_role:
+                await existing.set({"role_name": normalized_role})
+                updated += 1
         else:
-            await RoleTemplatePreset(role_name=role_name, **payload).insert()
+            await RoleTemplatePreset(role_name=normalized_role, **payload).insert()
             created += 1
 
     return SeedResponse(created=created, updated=updated, total=len(role_specs))
@@ -161,8 +168,6 @@ async def update_role_preset(role_name: str, body: RolePresetUpsert, _user: User
     if not preset:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Role preset not found")
 
-    print("--- UPDATE RECEIVED FOR ROLE:", role_name)
-    print("BODY COLUMN POSITIONS:", body.column_positions)
     update_data = {
         "role_name": _normalize_role_name(body.role_name),
         "display_label": body.display_label,

@@ -29,6 +29,10 @@ router = APIRouter(
 )
 settings = get_settings()
 
+
+def _normalize_role_key(value: str) -> str:
+    return "_".join(str(value or "").strip().lower().replace("-", " ").split())
+
 # Bounded concurrency to avoid overloading CPU/SMTP while improving throughput.
 _GEN_SEMAPHORE = asyncio.Semaphore(max(4, min(12, (os.cpu_count() or 4) * 2)))
 _EMAIL_SEMAPHORE = asyncio.Semaphore(3)
@@ -70,19 +74,25 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         mapping_data = {
             "Name": participant.fields.get("Name") or cert.snapshot.name,
             "Registration Number": str(participant.registration_number or participant.fields.get("Registration Number") or ""),
+            "Reg No": str(participant.registration_number or participant.fields.get("Registration Number") or ""),
+            "Cert": cert.cert_number,
+            "Certificate No": cert.cert_number,
+            "Certificate Number": cert.cert_number,
             "Role": participant.fields.get("Role") or participant.cert_type or "",
             "Event": event.name,
+            "Event Name": event.name,
             "Date": event.event_date.strftime("%d-%m-%Y") if event.event_date else "",
             "Event Date": event.event_date.strftime("%d-%m-%Y") if event.event_date else "",
             "Year": event.academic_year or (str(event.event_date.year) if event.event_date else ""),
             "Club": club.name,
+            "Club Name": club.name,
         }
         # Final fields dictionary for the generator
         all_fields = {**(participant.fields or {}), **mapping_data}
 
         # Role detection for template selection
         role_name = mapping_data["Role"] or "participant"
-        normalized_role = role_name.lower().replace(" ", "_").replace("-", "_")
+        normalized_role = _normalize_role_key(role_name)
         preset = await RoleTemplatePreset.find_one(
             RoleTemplatePreset.role_name == normalized_role,
             RoleTemplatePreset.is_active == True,
@@ -241,13 +251,15 @@ async def generate_certificates(
     existing_certs = await Certificate.find(Certificate.event_id == event_id).to_list()
 
     # Index existing certificates by participant with active/retry buckets.
+    # GENERATED certs are retryable so template/value fixes can be applied
+    # by running Generate again. EMAILED certs remain protected.
     active_by_pid = {}
     retry_by_pid = {}
     for c in existing_certs:
         pid = c.participant_id
-        if c.status in {CertStatus.PENDING, CertStatus.GENERATED, CertStatus.EMAILED}:
+        if c.status in {CertStatus.PENDING, CertStatus.EMAILED}:
             active_by_pid[pid] = c
-        elif c.status in {CertStatus.FAILED, CertStatus.REVOKED} and pid not in retry_by_pid:
+        elif c.status in {CertStatus.GENERATED, CertStatus.FAILED, CertStatus.REVOKED} and pid not in retry_by_pid:
             retry_by_pid[pid] = c
 
     queued = 0
