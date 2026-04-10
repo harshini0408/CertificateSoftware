@@ -11,6 +11,11 @@ import {
 import { useImageTemplates } from '../club/eventsApi'
 
 const EMPTY_POSITION = { x_percent: 50, y_percent: 50, font_size_percent: 2.5 }
+const DEFAULT_ASSET_WIDTHS = { logo: 15.0, signature: 11.0 }
+const ASSET_SLOT_DEFS = [
+  { key: 'logo', label: 'Logo' },
+  { key: 'signature', label: 'Sign' },
+]
 
 function normalizeRoleName(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_')
@@ -30,7 +35,7 @@ function toFormState(preset) {
       display_width: 1905,
       is_active: true,
       column_positions: {},
-      asset_positions: null,
+      asset_positions: {},
     }
   }
   return {
@@ -40,7 +45,7 @@ function toFormState(preset) {
     display_width: asNumber(preset.display_width, 1905),
     is_active: !!preset.is_active,
     column_positions: { ...(preset.column_positions || {}) },
-    asset_positions: preset.asset_positions || null,
+    asset_positions: { ...(preset.asset_positions || {}) },
   }
 }
 
@@ -58,6 +63,7 @@ export default function CertificateMappingTab() {
   // Visual Mapper State
   const imageRef = useRef(null)
   const [pendingFieldId, setPendingFieldId] = useState(null)
+  const [pendingAssetKey, setPendingAssetKey] = useState(null)
   const [fieldNameInput, setFieldNameInput] = useState('')
 
   const sortedMappings = useMemo(() => {
@@ -83,10 +89,17 @@ export default function CertificateMappingTab() {
     if (!selectedPreset) return // Prevent wiping state during refetch race conditions
     setForm(toFormState(selectedPreset))
     setPendingFieldId(null)
+    setPendingAssetKey(null)
     setFieldNameInput('')
   }, [selectedRole, selectedPreset])
 
   const allFieldKeys = useMemo(() => Object.keys(form.column_positions || {}), [form.column_positions])
+  const configuredAssetKeys = useMemo(() => {
+    return ASSET_SLOT_DEFS.filter(({ key }) => {
+      const pos = form.asset_positions?.[key]
+      return pos && pos.x_percent != null && pos.y_percent != null
+    }).map(({ key }) => key)
+  }, [form.asset_positions])
 
   const busy = createMutation.isPending || updateMutation.isPending
 
@@ -96,26 +109,45 @@ export default function CertificateMappingTab() {
 
   // --- Visual Mapper Handlers ---
   const handleImageClick = (e) => {
-    if (!pendingFieldId) {
-       addToast({ type: 'info', message: 'Add a new field first and confirm its name to place it on the certificate.' })
+    if (!pendingFieldId && !pendingAssetKey) {
+       addToast({ type: 'info', message: 'Create a text field or choose Logo/Sign, then click on the template to place it.' })
        return
     }
     const rect = imageRef.current.getBoundingClientRect()
     const x = parseFloat((((e.clientX - rect.left) / rect.width) * 100).toFixed(2))
     const y = parseFloat((((e.clientY - rect.top) / rect.height) * 100).toFixed(2))
 
-    setForm((prev) => ({
-      ...prev,
-      column_positions: {
-        ...prev.column_positions,
-        [pendingFieldId]: {
-          ...(prev.column_positions?.[pendingFieldId] || EMPTY_POSITION),
-          x_percent: x,
-          y_percent: y,
+    if (pendingFieldId) {
+      setForm((prev) => ({
+        ...prev,
+        column_positions: {
+          ...prev.column_positions,
+          [pendingFieldId]: {
+            ...(prev.column_positions?.[pendingFieldId] || EMPTY_POSITION),
+            x_percent: x,
+            y_percent: y,
+          },
         },
-      },
-    }))
-    setPendingFieldId(null)
+      }))
+      setPendingFieldId(null)
+      return
+    }
+
+    if (pendingAssetKey) {
+      setForm((prev) => ({
+        ...prev,
+        asset_positions: {
+          ...(prev.asset_positions || {}),
+          [pendingAssetKey]: {
+            ...((prev.asset_positions || {})[pendingAssetKey] || {}),
+            x_percent: x,
+            y_percent: y,
+            width_percent: asNumber((prev.asset_positions || {})[pendingAssetKey]?.width_percent, DEFAULT_ASSET_WIDTHS[pendingAssetKey] || 12),
+          },
+        },
+      }))
+      setPendingAssetKey(null)
+    }
   }
 
   const confirmFieldName = () => {
@@ -151,6 +183,17 @@ export default function CertificateMappingTab() {
     }
   }
 
+  const handleRemoveAsset = (key) => {
+    setForm((prev) => {
+      const next = { ...(prev.asset_positions || {}) }
+      delete next[key]
+      return { ...prev, asset_positions: next }
+    })
+    if (pendingAssetKey === key) {
+      setPendingAssetKey(null)
+    }
+  }
+
   const handleNew = () => {
     setSelectedRole('')
     setForm(toFormState(null))
@@ -163,7 +206,7 @@ export default function CertificateMappingTab() {
       display_label: String(form.display_label || '').trim(),
       template_filename: String(form.template_filename || '').trim(),
       column_positions: form.column_positions || {},
-      asset_positions: form.asset_positions || null,
+      asset_positions: Object.keys(form.asset_positions || {}).length > 0 ? form.asset_positions : null,
       display_width: asNumber(form.display_width, 1905),
       is_active: !!form.is_active,
     }
@@ -282,6 +325,7 @@ export default function CertificateMappingTab() {
                        template_filename: e.target.value
                      }))
                      setPendingFieldId(null)
+                     setPendingAssetKey(null)
                   }}
                 >
                   <option value="">Select template</option>
@@ -318,7 +362,7 @@ export default function CertificateMappingTab() {
               {/* Visual Preview Canvas */}
               <div className="flex-1 p-6 bg-gray-50 overflow-auto flex items-center justify-center relative">
                 <div 
-                  className={`relative shadow-lg ring-1 ring-black/5 bg-white transition-colors duration-200 ${pendingFieldId ? 'cursor-crosshair border-2 border-indigo-400' : ''}`}
+                  className={`relative shadow-lg ring-1 ring-black/5 bg-white transition-colors duration-200 ${(pendingFieldId || pendingAssetKey) ? 'cursor-crosshair border-2 border-indigo-400' : ''}`}
                   onClick={handleImageClick}
                   style={{ maxWidth: '100%', maxHeight: '100%' }}
                 >
@@ -351,6 +395,31 @@ export default function CertificateMappingTab() {
                     )
                   })}
 
+                  {ASSET_SLOT_DEFS.map(({ key, label }) => {
+                    const pos = form.asset_positions?.[key]
+                    if (!pos || pos.x_percent == null || pos.y_percent == null) return null
+                    const isActive = pendingAssetKey === key
+                    const badgeClass = key === 'logo'
+                      ? (isActive ? 'bg-blue-600 outline outline-2 outline-blue-200' : 'bg-blue-700/90 hover:bg-blue-700')
+                      : (isActive ? 'bg-amber-600 outline outline-2 outline-amber-200' : 'bg-amber-700/90 hover:bg-amber-700')
+
+                    return (
+                      <div
+                        key={key}
+                        className={`absolute flex flex-col items-center cursor-pointer transition-transform ${isActive ? 'scale-125 z-10' : 'hover:scale-110 z-0'}`}
+                        style={{ left: `${pos.x_percent}%`, top: `${pos.y_percent}%`, transform: 'translate(-50%, -50%)' }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setPendingAssetKey(key)
+                        }}
+                      >
+                        <div className={`px-2.5 py-1 backdrop-blur text-white text-xs font-semibold rounded shadow-md whitespace-nowrap border border-white/30 transition-all ${badgeClass}`}>
+                          {label}
+                        </div>
+                      </div>
+                    )
+                  })}
+
 
                 </div>
               </div>
@@ -358,16 +427,76 @@ export default function CertificateMappingTab() {
               {/* Sidebar - Fields List */}
               <div className="w-80 bg-white border-l border-gray-100 flex flex-col h-full shadow-inner">
                 <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between shrink-0">
-                  <h3 className="font-semibold text-sm text-foreground">Custom Fields</h3>
+                  <h3 className="font-semibold text-sm text-foreground">Fields and Assets</h3>
                   <div className="flex items-center gap-3">
-                    {allFieldKeys.length > 0 && (
-                      <button onClick={() => setForm(f => ({ ...f, column_positions: {} }))} className="text-xs font-semibold text-red-500 hover:text-red-700 transition-colors">Clear All</button>
+                    {(allFieldKeys.length > 0 || configuredAssetKeys.length > 0) && (
+                      <button
+                        onClick={() => {
+                          setForm((f) => ({ ...f, column_positions: {}, asset_positions: {} }))
+                          setPendingFieldId(null)
+                          setPendingAssetKey(null)
+                        }}
+                        className="text-xs font-semibold text-red-500 hover:text-red-700 transition-colors"
+                      >
+                        Clear All
+                      </button>
                     )}
-                    <span className="text-xs font-bold text-navy bg-navy/10 px-2 py-1 rounded">{allFieldKeys.length}</span>
+                    <span className="text-xs font-bold text-navy bg-navy/10 px-2 py-1 rounded">{allFieldKeys.length + configuredAssetKeys.length}</span>
                   </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  <div className="rounded-xl border border-gray-200 bg-white p-3">
+                    <p className="text-xs font-semibold text-gray-500 mb-2">Asset Blanks</p>
+                    <div className="space-y-2">
+                      {ASSET_SLOT_DEFS.map(({ key, label }) => {
+                        const pos = form.asset_positions?.[key]
+                        const isPending = pendingAssetKey === key
+                        const isConfigured = pos && pos.x_percent != null && pos.y_percent != null
+
+                        return (
+                          <div key={key} className={`rounded-lg border p-2 ${isConfigured ? 'border-gray-200' : 'border-amber-300 bg-amber-50'}`}>
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-semibold text-foreground">{label}</p>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    setPendingFieldId(null)
+                                    setPendingAssetKey(key)
+                                  }}
+                                  className="text-gray-400 hover:text-indigo-500 transition-colors"
+                                  title={isConfigured ? 'Reposition' : 'Place'}
+                                >
+                                  <Mouse size={16} />
+                                </button>
+                                <button
+                                  onClick={() => handleRemoveAsset(key)}
+                                  className="text-gray-400 hover:text-red-500 transition-colors"
+                                  title="Clear"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                            {!isConfigured ? (
+                              <div className="text-xs font-medium text-amber-700 mt-1 flex items-center gap-1">
+                                <AlertCircle size={12}/> Awaiting visual placement
+                              </div>
+                            ) : (
+                              <div className="flex gap-2 mt-1">
+                                <div className="flex-1 bg-gray-50 rounded px-2 py-1 text-[10px] font-mono text-gray-600 border border-gray-100">X: {pos.x_percent}%</div>
+                                <div className="flex-1 bg-gray-50 rounded px-2 py-1 text-[10px] font-mono text-gray-600 border border-gray-100">Y: {pos.y_percent}%</div>
+                              </div>
+                            )}
+                            {isPending && (
+                              <p className="text-[11px] mt-1 text-indigo-600 font-semibold">Click on template to place {label}.</p>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
                   {allFieldKeys.length === 0 && !pendingFieldId && (
                      <div className="text-center py-8 opacity-40">
                        <p className="text-sm font-medium text-gray-500">No custom fields created</p>
@@ -406,7 +535,7 @@ export default function CertificateMappingTab() {
                 </div>
 
                 <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0">
-                  {pendingFieldId === null ? (
+                  {pendingFieldId === null && pendingAssetKey === null ? (
                     <div className="space-y-2">
                       <input 
                         type="text"
@@ -421,8 +550,20 @@ export default function CertificateMappingTab() {
                       </button>
                     </div>
                   ) : (
-                     <button onClick={() => { setPendingFieldId(null); setFieldNameInput(''); handleRemoveField(pendingFieldId); }} className="w-full py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold text-sm rounded-lg transition-colors">
-                       Cancel Placement
+                     <button
+                       onClick={() => {
+                         if (pendingFieldId) {
+                           const field = pendingFieldId
+                           setPendingFieldId(null)
+                           setFieldNameInput('')
+                           handleRemoveField(field)
+                           return
+                         }
+                         setPendingAssetKey(null)
+                       }}
+                       className="w-full py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold text-sm rounded-lg transition-colors"
+                     >
+                       Cancel {pendingFieldId ? 'Field' : 'Asset'} Placement
                      </button>
                   )}
                 </div>

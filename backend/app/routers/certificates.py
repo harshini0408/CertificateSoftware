@@ -253,7 +253,7 @@ async def generate_certificates(
     queued = 0
     skipped_existing = 0
     skipped_no_template = 0
-    year = datetime.utcnow().year
+    year = event.event_date.year if event.event_date else datetime.utcnow().year
 
     # Support both preset roles and manual field-position templates.
     preset_docs = await RoleTemplatePreset.find(RoleTemplatePreset.is_active == True).to_list()

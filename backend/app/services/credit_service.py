@@ -11,9 +11,19 @@ async def award_credits(certificate: Certificate) -> None:
 
     If no rule exists for the cert_type, this is a no-op.
     """
-    rule = await CreditRule.find_one(
-        CreditRule.cert_type == certificate.snapshot.cert_type
-    )
+    cert_type_raw = (certificate.snapshot.cert_type or "").strip()
+    cert_type_normalized = cert_type_raw.lower().replace("-", "_").replace(" ", "_")
+    cert_type_display = cert_type_normalized.replace("_", " ").title() if cert_type_normalized else cert_type_raw
+
+    rule = await CreditRule.find_one({
+        "cert_type": {
+            "$in": [
+                cert_type_raw,
+                cert_type_normalized,
+                cert_type_display,
+            ]
+        }
+    })
     if not rule or rule.points <= 0:
         return
 

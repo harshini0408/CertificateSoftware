@@ -813,12 +813,26 @@ function CreditRulesTab() {
     if (rulesData) setLocalRules(rulesData)
   }, [rulesData])
 
-  const certTypes = ['participant', 'coordinator', 'winner_1st', 'winner_2nd', 'winner_3rd', 'mentor', 'judge', 'volunteer', 'appreciation']
+  const targetRules = [
+    { cert_type: 'Class Representative', points: 3 },
+    { cert_type: 'Club Member', points: 2 },
+    { cert_type: 'Coordinator', points: 3 },
+    { cert_type: 'First Place', points: 5 },
+    { cert_type: 'Non-Technical Participant', points: 2 },
+    { cert_type: 'Office Bearer', points: 3 },
+    { cert_type: 'Organizer', points: 5 },
+    { cert_type: 'Paper Presenter', points: 3 },
+    { cert_type: 'Second Place', points: 5 },
+    { cert_type: 'Student Council Member', points: 5 },
+    { cert_type: 'Student Volunteer', points: 2 },
+    { cert_type: 'Technical Participant', points: 2 },
+    { cert_type: 'Third Place', points: 5 },
+  ]
 
   // Ensure all types exist in local array
-  const orderedRules = certTypes.map(type => {
-    const r = localRules.find(x => x.cert_type === type)
-    return r || { cert_type: type, points: 0 }
+  const orderedRules = targetRules.map((base) => {
+    const r = localRules.find((x) => x.cert_type === base.cert_type)
+    return r || base
   })
 
   const startEdit = (idx, value) => {
@@ -835,7 +849,7 @@ function CreditRulesTab() {
   }
 
   const handleSaveAll = () => {
-    updateRules.mutate(localRules)
+    updateRules.mutate(orderedRules)
   }
   return (
     <div className="space-y-6">

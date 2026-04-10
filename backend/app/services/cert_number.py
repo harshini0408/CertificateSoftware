@@ -6,7 +6,7 @@ settings = get_settings()
 
 async def generate_cert_number(club_slug: str, year: int) -> str:
     """Atomically increment the per-club-per-year counter and return a
-    formatted certificate number like ``PSG-ECOCLUB-2025-000001``.
+    formatted certificate number like ``AST-26-0001``.
 
     Uses Motor's ``find_one_and_update`` with ``$inc`` + ``upsert``
     to guarantee uniqueness even under concurrent requests.
@@ -22,4 +22,5 @@ async def generate_cert_number(club_slug: str, year: int) -> str:
     )
 
     seq = doc["seq"]
-    return f"PSG-{club_slug}-{year}-{str(seq).zfill(6)}"
+    year_2d = str(year)[-2:]
+    return f"{club_slug}-{year_2d}-{str(seq).zfill(4)}"
