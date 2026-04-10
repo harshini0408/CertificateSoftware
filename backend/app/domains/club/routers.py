@@ -125,7 +125,7 @@ async def club_dashboard(
             total_certificates_issued += await _count_event_certificates(event_id)
 
         total_participants = await Participant.find(
-            Participant.event_id.in_(event_ids),
+            {"event_id": {"$in": event_ids}},
         ).count()
     else:
         total_certificates_issued = 0

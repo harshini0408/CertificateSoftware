@@ -318,7 +318,7 @@ function TemplatesTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Settings tab
 // ═══════════════════════════════════════════════════════════════════════════════
-function SettingsTab({ club, clubId, clubLoading }) {
+function SettingsTab({ club, clubId, clubLoading, dashboardError, missingClubAssignment }) {
   const changePassword = useChangePassword()
   const { data: assetState, isLoading: assetsLoading } = useClubAssets(clubId)
   const updateAssets = useUpdateClubAssets(clubId)
@@ -383,6 +383,14 @@ function SettingsTab({ club, clubId, clubLoading }) {
 
   return (
     <div className="space-y-8">
+      {(missingClubAssignment || dashboardError) && (
+        <div className="max-w-3xl rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {missingClubAssignment
+            ? 'Your account is not linked to a club yet. Ask Super Admin to assign a club to this coordinator account.'
+            : (dashboardError?.response?.data?.detail || 'Unable to load club information. Check your club access and URL.')} 
+        </div>
+      )}
+
       {/* Club info (read-only) */}
       <div className="max-w-2xl">
         <h2 className="section-title mb-3">Club Information</h2>
@@ -544,8 +552,9 @@ export default function ClubDashboard() {
   const setTab = (tab) =>
     setSearchParams({ tab }, { replace: true })
 
-  const { data: dashboard, isLoading: dashLoading } = useClubDashboard(effectiveClubId)
+  const { data: dashboard, isLoading: dashLoading, error: dashboardError } = useClubDashboard(effectiveClubId)
   const club = dashboard?.club || null
+  const missingClubAssignment = isClubCoordinator && !effectiveClubId
 
   useEffect(() => {
     if (isClubCoordinator && authClubId && club_id && authClubId !== club_id) {
@@ -614,9 +623,21 @@ export default function ClubDashboard() {
               </div>
             )}
 
+            {missingClubAssignment && (
+              <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                No club is assigned to this coordinator account. Contact Super Admin to assign a club.
+              </div>
+            )}
+
             {activeTab === 'events' && <EventsTab clubId={effectiveClubId} />}
             {activeTab === 'settings' && (
-              <SettingsTab club={club} clubId={effectiveClubId} clubLoading={dashLoading} />
+              <SettingsTab
+                club={club}
+                clubId={effectiveClubId}
+                clubLoading={dashLoading}
+                dashboardError={dashboardError}
+                missingClubAssignment={missingClubAssignment}
+              />
             )}
           </div>
         </main>

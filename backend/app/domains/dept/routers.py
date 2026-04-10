@@ -21,6 +21,7 @@ from ...models.dept_event import DeptEvent, DeptEventStatus
 from ...models.dept_template import DeptTemplate
 from ...services.signature_service import process_signature, save_logo
 from ...services.storage_service import save_cert_png
+from ...services.storage_service import storage_path_to_url
 from ...services.storage_service import storage_url_to_path
 from ...services.email_service import send_certificate_email
 from ...config import get_settings
@@ -78,9 +79,13 @@ def _slugify(value: str) -> str:
 
 
 def _normalize_department(department: Optional[str]) -> str:
-    if not department:
-        return "General"
-    return department.strip()
+    normalized = (department or "").strip()
+    if not normalized:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Department is not configured for this account. Ask Super Admin to set your department.",
+        )
+    return normalized
 
 
 def _pick_single_template() -> Path:
@@ -397,11 +402,26 @@ async def get_dept_assets(
 ):
     department = _normalize_department(current_user.department)
     asset = await _get_or_create_dept_asset(department)
+
+    logo_url = asset.logo_url
+    if asset.logo_path and (not logo_url or not str(logo_url).startswith("/storage/")):
+        logo_url = storage_path_to_url(asset.logo_path)
+
+    signature_url = asset.signature1_url
+    if asset.signature1_path and (not signature_url or not str(signature_url).startswith("/storage/")):
+        signature_url = storage_path_to_url(asset.signature1_path)
+
+    if logo_url != asset.logo_url or signature_url != asset.signature1_url:
+        asset.logo_url = logo_url
+        asset.signature1_url = signature_url
+        asset.updated_at = datetime.utcnow()
+        await asset.save()
+
     return {
         "department": department,
-        "logo_url": asset.logo_url,
+        "logo_url": logo_url,
         "logo_hash": asset.logo_hash,
-        "signature_url": asset.signature1_url,
+        "signature_url": signature_url,
         "signature_hash": asset.signature1_hash,
         "has_logo": bool(asset.logo_path),
         "has_signature": bool(asset.signature1_path),
@@ -425,13 +445,13 @@ async def upsert_dept_assets(
         logo_bytes = await logo.read()
         asset.logo_path = save_logo(logo_bytes, dept_slug)
         asset.logo_hash = hashlib.md5(logo_bytes).hexdigest()
-        asset.logo_url = asset.logo_path
+        asset.logo_url = storage_path_to_url(asset.logo_path)
 
     if signature is not None:
         sig_bytes = await signature.read()
         asset.signature1_path = process_signature(sig_bytes, dept_slug)
         asset.signature1_hash = hashlib.md5(sig_bytes).hexdigest()
-        asset.signature1_url = asset.signature1_path
+        asset.signature1_url = storage_path_to_url(asset.signature1_path)
 
     asset.updated_at = datetime.utcnow()
     await asset.save()
@@ -463,7 +483,7 @@ async def get_dept_dashboard(
     event_ids = [str(evt.id) for evt in events]
     certs = await DeptCertificate.find(
         DeptCertificate.department == department,
-        DeptCertificate.event_id.in_(event_ids),
+        {"event_id": {"$in": event_ids}},
     ).to_list() if event_ids else []
 
     participants = {f"{(c.name or '').strip().lower()}|{(c.class_name or '').strip().lower()}" for c in certs if c.name}
@@ -1091,19 +1111,19 @@ async def generate_department_certificates(
         logo_bytes = await logo_file.read()
         asset.logo_path = save_logo(logo_bytes, dept_slug)
         asset.logo_hash = hashlib.md5(logo_bytes).hexdigest()
-        asset.logo_url = asset.logo_path
+        asset.logo_url = storage_path_to_url(asset.logo_path)
 
     if signature_primary_file is not None:
         sig1_bytes = await signature_primary_file.read()
         asset.signature1_path = process_signature(sig1_bytes, dept_slug)
         asset.signature1_hash = hashlib.md5(sig1_bytes).hexdigest()
-        asset.signature1_url = asset.signature1_path
+        asset.signature1_url = storage_path_to_url(asset.signature1_path)
 
     if signature_secondary_file is not None:
         sig2_bytes = await signature_secondary_file.read()
         asset.signature2_path = process_signature(sig2_bytes, dept_slug)
         asset.signature2_hash = hashlib.md5(sig2_bytes).hexdigest()
-        asset.signature2_url = asset.signature2_path
+        asset.signature2_url = storage_path_to_url(asset.signature2_path)
 
     if not asset.logo_path or not asset.signature1_path or not asset.signature2_path:
         raise HTTPException(
