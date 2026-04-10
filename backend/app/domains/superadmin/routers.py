@@ -124,35 +124,15 @@ def _club_response(c: Club) -> ClubResponse:
 @router.post("/clubs", response_model=ClubResponse, status_code=201)
 async def create_club(body: ClubCreate, _user: User = _admin):
     slug_upper = body.slug.upper()
-    username = body.coordinator_username.strip()
 
     if await Club.find_one(Club.slug == slug_upper):
         raise HTTPException(status.HTTP_409_CONFLICT, "Slug already exists")
-    if await Club.find_one(Club.contact_email == body.contact_email):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
-    if await User.find_one(User.username == username):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Coordinator username already taken")
-    if await User.find_one(User.email == body.contact_email):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Coordinator email already in use")
 
     club = Club(
         name=body.name,
         slug=slug_upper,
-        contact_email=body.contact_email,
     )
     await club.insert()
-
-    coordinator = User(
-        username=username,
-        name=f"{body.name} Coordinator",
-        email=body.contact_email,
-        password_hash=hash_password(body.coordinator_password),
-        role=UserRole.CLUB_COORDINATOR,
-        first_login_completed=False,
-        club_id=club.id,
-        is_active=True,
-    )
-    await coordinator.insert()
 
     return _club_response(club)
 

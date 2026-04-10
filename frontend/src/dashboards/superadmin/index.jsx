@@ -173,12 +173,8 @@ function NewClubModal({ isOpen, onClose }) {
   const [form, setForm] = useState({
     name: '',
     slug: '',
-    contact_email: '',
-    coordinator_username: '',
-    coordinator_password: '',
   })
   const [errors, setErrors] = useState({})
-  const [showPassword, setShowPassword] = useState(false)
   const createClub = useCreateClub()
 
   const handleChange = (field, value) => {
@@ -193,12 +189,6 @@ function NewClubModal({ isOpen, onClose }) {
     if (!form.name.trim()) errs.name = 'Club name is required'
     if (!form.slug.trim()) errs.slug = 'Slug is required'
     if (!/^[A-Z0-9]+$/.test(form.slug)) errs.slug = 'Uppercase letters and digits only'
-    if (!form.contact_email.trim()) errs.contact_email = 'Email is required'
-    if (!form.coordinator_username.trim()) errs.coordinator_username = 'Coordinator username is required'
-    if (!form.coordinator_password.trim()) errs.coordinator_password = 'Coordinator password is required'
-    if (form.coordinator_password && form.coordinator_password.length < 6) {
-      errs.coordinator_password = 'Password must be at least 6 characters'
-    }
     if (Object.keys(errs).length) { setErrors(errs); return }
 
     createClub.mutate(form, {
@@ -207,16 +197,11 @@ function NewClubModal({ isOpen, onClose }) {
         setForm({
           name: '',
           slug: '',
-          contact_email: '',
-          coordinator_username: '',
-          coordinator_password: '',
         })
       },
       onError: (err) => {
         const detail = err?.response?.data?.detail || ''
         if (detail.toLowerCase().includes('slug')) setErrors({ slug: detail })
-        else if (detail.toLowerCase().includes('email')) setErrors({ contact_email: detail })
-        else if (detail.toLowerCase().includes('username')) setErrors({ coordinator_username: detail })
       },
     })
   }
@@ -234,38 +219,7 @@ function NewClubModal({ isOpen, onClose }) {
           <p className="mt-1 text-xs text-gray-400">Used in certificate numbers. Uppercase letters and digits only. Cannot be changed later.</p>
           {errors.slug && <p className="form-error">{errors.slug}</p>}
         </div>
-        <div>
-          <label className="form-label">Contact Email *</label>
-          <input type="email" className={`form-input ${errors.contact_email ? 'form-input-error' : ''}`} value={form.contact_email} onChange={(e) => handleChange('contact_email', e.target.value)} />
-          {errors.contact_email && <p className="form-error">{errors.contact_email}</p>}
-        </div>
-        <div>
-          <label className="form-label">Coordinator Username *</label>
-          <input className={`form-input ${errors.coordinator_username ? 'form-input-error' : ''}`} value={form.coordinator_username} onChange={(e) => handleChange('coordinator_username', e.target.value)} placeholder="ecoclub_coordinator" />
-          {errors.coordinator_username && <p className="form-error">{errors.coordinator_username}</p>}
-        </div>
-        <div>
-          <label className="form-label">Coordinator Password *</label>
-          <div className="relative">
-            <input
-              type={showPassword ? 'text' : 'password'}
-              autoComplete="new-password"
-              className={`form-input pr-10 ${errors.coordinator_password ? 'form-input-error' : ''}`}
-              value={form.coordinator_password}
-              onChange={(e) => handleChange('coordinator_password', e.target.value)}
-              placeholder="Minimum 6 characters"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-navy"
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-            >
-              {showPassword ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          {errors.coordinator_password && <p className="form-error">{errors.coordinator_password}</p>}
-        </div>
+        <p className="text-xs text-gray-500">Coordinator details can be created separately under Users as Club Coordinator.</p>
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary min-w-[120px]" disabled={createClub.isPending}>
@@ -1001,10 +955,7 @@ function OverviewTab() {
         <StatCard label="Total Clubs" value={stats?.total_clubs ?? 0} accent="navy" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} />
         <StatCard label="Total Users" value={stats?.total_users ?? 0} accent="blue" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>} />
         <StatCard label="Total Students" value={stats?.total_students ?? 0} accent="green" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /></svg>} />
-        
-        <StatCard label="Certs Issued Today" value={stats?.certs_today ?? 0} accent="navy" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>} />
         <StatCard label="Emails Sent Today" value={stats?.emails_sent_today ?? 0} accent="blue" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>} />
-        <StatCard label="Platform Status" value="Online" accent="green" icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} />
       </div>
 
       <div className="card p-6">

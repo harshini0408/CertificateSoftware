@@ -13,9 +13,6 @@ class ClubCreate(BaseModel):
         pattern=r"^[A-Z0-9]+$",
         description="Uppercase letters and digits only. Used in certificate numbers.",
     )
-    contact_email: EmailStr
-    coordinator_username: str = Field(..., min_length=3, max_length=50)
-    coordinator_password: str = Field(..., min_length=6, max_length=128)
 
 
 class ClubUpdate(BaseModel):

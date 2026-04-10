@@ -151,8 +151,17 @@ async def club_dashboard(
             "cert_count": c_count,
         })
 
+    club_payload = _club_response(club).model_dump()
+    if not club_payload.get("contact_email"):
+        coordinator = await User.find_one(
+            User.club_id == club_id,
+            User.role == UserRole.CLUB_COORDINATOR,
+        )
+        if coordinator and coordinator.email:
+            club_payload["contact_email"] = coordinator.email
+
     return {
-        "club": _club_response(club),
+        "club": club_payload,
         "stats": {
             "total_events": total_events,
             "total_certificates_issued": total_certificates_issued,
