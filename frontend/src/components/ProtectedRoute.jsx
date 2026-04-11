@@ -1,4 +1,4 @@
-import { Navigate, useParams } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 
 /**
@@ -38,8 +38,8 @@ const roleHomePath = (role, store) => {
  */
 export default function ProtectedRoute({ allowedRoles = [], children }) {
   const store = useAuthStore()
-  const { isAuthenticated, role, club_id, event_id } = store
-  const params = useParams()
+  const { isAuthenticated, role } = store
+  const location = useLocation()
 
   // 1. Not logged in at all.
   if (!isAuthenticated) {
@@ -48,7 +48,8 @@ export default function ProtectedRoute({ allowedRoles = [], children }) {
 
   // 2. Logged in but wrong role for this route.
   if (allowedRoles.length > 0 && !allowedRoles.includes(role)) {
-    return <Navigate to={roleHomePath(role, store)} replace />
+    const from = encodeURIComponent(location.pathname + (location.search || ''))
+    return <Navigate to={`/login?switch=1&from=${from}`} replace />
   }
 
   return children

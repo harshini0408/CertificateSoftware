@@ -1,5 +1,6 @@
 import sys
 import asyncio
+from datetime import datetime
 
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -81,6 +82,63 @@ async def _seed_image_templates() -> None:
         print(f"[SEED] Image templates: {created} registered")
 
 
+def _norm_cert_type(value: str | None) -> str:
+    return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+async def _seed_credit_rules() -> None:
+    """Ensure required default credit rules exist in DB."""
+    from .models.credit_rule import CreditRule
+
+    targets = [
+        ("Technical Talk", 2),
+        ("Workshop", 3),
+    ]
+
+    for target_cert_type, target_points in targets:
+        normalized_target = _norm_cert_type(target_cert_type)
+        candidates = [
+            target_cert_type,
+            normalized_target,
+            normalized_target.replace("_", " "),
+            normalized_target.replace("_", " ").title(),
+        ]
+
+        existing = None
+        seen = set()
+        for candidate in candidates:
+            key = (candidate or "").strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            existing = await CreditRule.find_one({
+                "cert_type": {"$regex": f"^{candidate}$", "$options": "i"}
+            })
+            if existing:
+                break
+
+        if existing:
+            updates = {}
+            if int(existing.points or 0) != target_points:
+                updates["points"] = target_points
+            if existing.cert_type != target_cert_type:
+                updates["cert_type"] = target_cert_type
+            if updates:
+                updates["updated_at"] = datetime.utcnow()
+                await existing.set(updates)
+                print(f"[SEED] Credit rule ensured: {target_cert_type} = {target_points} (updated)")
+            else:
+                print(f"[SEED] Credit rule ensured: {target_cert_type} = {target_points} (already present)")
+            continue
+
+        await CreditRule(
+            cert_type=target_cert_type,
+            points=target_points,
+            updated_at=datetime.utcnow(),
+        ).insert()
+        print(f"[SEED] Credit rule ensured: {target_cert_type} = {target_points} (created)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────
@@ -94,6 +152,7 @@ async def lifespan(app: FastAPI):
 
     await _seed_superadmin()
     await _seed_image_templates()
+    await _seed_credit_rules()
 
     from .scheduler import start_scheduler
     start_scheduler()

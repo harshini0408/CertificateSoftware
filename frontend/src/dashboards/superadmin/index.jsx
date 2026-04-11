@@ -840,8 +840,10 @@ function CreditRulesTab() {
     { cert_type: 'Second Place', points: 5 },
     { cert_type: 'Student Council Member', points: 5 },
     { cert_type: 'Student Volunteer', points: 2 },
+    { cert_type: 'Technical Talk', points: 2 },
     { cert_type: 'Technical Participant', points: 2 },
     { cert_type: 'Third Place', points: 5 },
+    { cert_type: 'Workshop', points: 3 },
   ]
 
   // Ensure all required cert types exist in local array.

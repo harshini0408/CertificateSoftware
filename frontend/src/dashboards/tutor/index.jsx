@@ -1,12 +1,23 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
 import DataTable from '../../components/DataTable'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import StatCard from '../../components/StatCard'
+import StatusBadge from '../../components/StatusBadge'
 
-import { useTutorCreditRules, useTutorManualCertificate, useTutorProfile, useTutorStudentDetail, useTutorStudents } from './api'
+import {
+  useTutorCreditPointVerifications,
+  useTutorCreditRules,
+  useTutorManualCertificate,
+  useTutorProfile,
+  useTutorRejectCreditPoint,
+  useTutorStudentDetail,
+  useTutorStudents,
+  useTutorVerifyCreditPoint,
+} from './api'
 
 function fmtDate(iso) {
   if (!iso) return '—'
@@ -61,13 +72,77 @@ function DetailModal({ email, onClose }) {
   )
 }
 
+function VerificationTab() {
+  const { data, isLoading } = useTutorCreditPointVerifications()
+  const verifyMutation = useTutorVerifyCreditPoint()
+  const rejectMutation = useTutorRejectCreditPoint()
+
+  return (
+    <div>
+      <h2 className="section-title mb-3">Credit Point Verification</h2>
+      <DataTable
+        columns={[
+          { key: 'student_name', header: 'Student', searchKey: true, render: (v, row) => `${v || '—'} (${row.registration_number || '—'})` },
+          { key: 'student_email', header: 'Email', searchKey: true },
+          { key: 'cert_type', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
+          { key: 'event_date', header: 'Event Date', render: (v) => fmtDate(v) },
+          {
+            key: 'certificate_image_url',
+            header: 'Certificate',
+            render: (v) => (v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View</a> : '—'),
+          },
+          { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+          { key: 'submitted_at', header: 'Submitted', render: (v) => fmtDate(v) },
+          {
+            key: 'id',
+            header: 'Actions',
+            align: 'center',
+            searchKey: false,
+            render: (id, row) => {
+              if (row.status !== 'pending') {
+                return <span className="text-xs text-gray-500">Reviewed</span>
+              }
+              return (
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    className="rounded bg-green-100 px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-200"
+                    disabled={verifyMutation.isPending || rejectMutation.isPending}
+                    onClick={() => verifyMutation.mutate(id)}
+                  >
+                    Verify
+                  </button>
+                  <button
+                    className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                    disabled={verifyMutation.isPending || rejectMutation.isPending}
+                    onClick={() => rejectMutation.mutate({ submissionId: id })}
+                  >
+                    Reject
+                  </button>
+                </div>
+              )
+            },
+          },
+        ]}
+        data={data || []}
+        isLoading={isLoading}
+        emptyMessage="No manual submissions found."
+        searchable
+        searchPlaceholder="Search student, email, role..."
+        rowKey="id"
+      />
+    </div>
+  )
+}
+
 export default function TutorDashboard() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const { data: profile, isLoading: profileLoading } = useTutorProfile()
   const { data: students, isLoading: studentsLoading } = useTutorStudents()
   const { data: creditRules, isLoading: rulesLoading } = useTutorCreditRules()
   const manualCertMutation = useTutorManualCertificate()
   const [selectedStudentEmail, setSelectedStudentEmail] = useState(null)
   const [manualEntry, setManualEntry] = useState({ student_email: '', cert_type: '', cert_number: '' })
+  const activeTab = searchParams.get('tab') === 'verification' ? 'verification' : 'dashboard'
 
   const totalStudents = students?.length || 0
 
@@ -100,6 +175,34 @@ export default function TutorDashboard() {
                 Class: {(profile?.department || '—')} {(profile?.batch || '')} {(profile?.section || '')}
               </p>
             </div>
+
+            <div className="mb-2 flex gap-1 border-b border-gray-200">
+              <button
+                onClick={() => setSearchParams({}, { replace: true })}
+                className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
+                  activeTab === 'dashboard'
+                    ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
+                    : 'text-gray-500 hover:text-navy'
+                }`}
+              >
+                Dashboard
+              </button>
+              <button
+                onClick={() => setSearchParams({ tab: 'verification' }, { replace: true })}
+                className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
+                  activeTab === 'verification'
+                    ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
+                    : 'text-gray-500 hover:text-navy'
+                }`}
+              >
+                Credit Point Verification
+              </button>
+            </div>
+
+            {activeTab === 'verification' ? (
+              <VerificationTab />
+            ) : (
+              <>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-1">
               <StatCard label="Assigned Students" value={totalStudents} accent="navy" />
@@ -192,6 +295,8 @@ export default function TutorDashboard() {
                 rowKey="student_email"
               />
             </div>
+              </>
+            )}
           </div>
         </main>
       </div>

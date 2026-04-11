@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useLogin } from './api'
+import { useLogin, useLogout } from './api'
 import ForgotPasswordModal from './ForgotPasswordModal'
 import { useAuthStore } from '../../store/authStore'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import collegeBg from '../../Images/college bg.jpeg'
 import collegeLogo from '../../Images/College logo.png'
@@ -57,15 +57,19 @@ function TogglePasswordBtn({ show, onToggle }) {
 
 // ── Login page ────────────────────────────────────────────────────────────────
 export default function Login() {
+  const [searchParams] = useSearchParams()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const role = useAuthStore((s) => s.role)
   const club_id = useAuthStore((s) => s.club_id)
   const event_id = useAuthStore((s) => s.event_id)
+  const userName = useAuthStore((s) => s.user)
 
   const [showPassword, setShowPassword] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
 
   const loginMutation = useLogin()
+  const logoutMutation = useLogout()
+  const switchMode = searchParams.get('switch') === '1'
 
   const {
     register,
@@ -74,7 +78,7 @@ export default function Login() {
   } = useForm({ defaultValues: { username: '', email: '', password: '' } })
 
   // Already logged in — redirect to own dashboard
-  if (isAuthenticated) {
+  if (isAuthenticated && !switchMode) {
     const redirectMap = {
       super_admin:      '/admin',
       club_coordinator: `/club/${club_id}`,
@@ -91,6 +95,7 @@ export default function Login() {
   }
 
   const busy = isSubmitting || loginMutation.isPending
+  const switchingBusy = logoutMutation.isPending
 
   return (
     <div className="relative min-h-dvh flex items-center justify-center px-4 py-12 overflow-hidden">
@@ -110,6 +115,23 @@ export default function Login() {
       <div className="relative z-10 w-full max-w-sm">
         {/* Card shell */}
         <div className="card px-8 py-10 shadow-modal">
+          {switchMode && isAuthenticated && (
+            <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <p className="font-semibold">You are already logged in as {userName || role}.</p>
+              <p className="mt-1">To sign in as another user in this browser profile, switch account first.</p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={switchingBusy}
+                  onClick={() => logoutMutation.mutate()}
+                >
+                  {switchingBusy ? 'Switching...' : 'Switch Account'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Logo */}
           <div className="mb-8 flex justify-center">
             <PsgLogo />

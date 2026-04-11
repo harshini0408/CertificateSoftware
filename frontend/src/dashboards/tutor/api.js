@@ -64,3 +64,56 @@ export function useTutorManualCertificate() {
     },
   })
 }
+
+export function useTutorCreditPointVerifications() {
+  return useQuery({
+    queryKey: ['tutor', 'credit-point-verifications'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/tutor/credit-point-verifications')
+      return data
+    },
+  })
+}
+
+export function useTutorVerifyCreditPoint() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (submissionId) => {
+      const { data } = await axiosInstance.post(`/tutor/credit-point-verifications/${submissionId}/verify`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tutor', 'credit-point-verifications'] })
+      qc.invalidateQueries({ queryKey: ['tutor', 'students'] })
+      qc.invalidateQueries({ queryKey: ['credits', 'me'] })
+      qc.invalidateQueries({ queryKey: ['credits', 'me', 'history'] })
+      addToast({ type: 'success', message: 'Submission verified. Credits awarded.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to verify submission.' })
+    },
+  })
+}
+
+export function useTutorRejectCreditPoint() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ submissionId, reason }) => {
+      const { data } = await axiosInstance.post(`/tutor/credit-point-verifications/${submissionId}/reject`, {
+        reason,
+      })
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tutor', 'credit-point-verifications'] })
+      addToast({ type: 'success', message: 'Submission rejected.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to reject submission.' })
+    },
+  })
+}

@@ -38,14 +38,17 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config
+    const requestUrl = originalRequest?.url || ''
+    const isAuthMeRequest = requestUrl.includes('/auth/me')
 
     // ── 403 Forbidden ────────────────────────────────────────────────────────
     if (error.response?.status === 403) {
       // Lazy import to avoid circular dependency at module load time.
       const { useToastStore } = await import('../store/uiStore')
+      const detail = error?.response?.data?.detail
       useToastStore.getState().addToast({
         type: 'error',
-        message: 'Access denied. You do not have permission to perform this action.',
+        message: detail || 'Access denied. You do not have permission to perform this action.',
       })
       return Promise.reject(error)
     }
@@ -55,7 +58,8 @@ axiosInstance.interceptors.response.use(
       error.response?.status === 401 &&
       !originalRequest._retry &&
       !originalRequest.url?.includes('/auth/login') &&
-      !originalRequest.url?.includes('/auth/refresh')
+      !originalRequest.url?.includes('/auth/refresh') &&
+      !isAuthMeRequest
     ) {
       if (isRefreshing) {
         // Queue the request until refresh completes.
@@ -76,12 +80,15 @@ axiosInstance.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError)
 
-        // Refresh failed — clear auth state and redirect.
+        // Refresh failed — clear auth state. Avoid full-page reload loops.
         const { useAuthStore } = await import('../store/authStore')
         const { default: queryClient } = await import('./queryClient')
         useAuthStore.getState().clearAuth()
         queryClient.clear()
-        window.location.href = '/login'
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.history.replaceState(null, '', '/login')
+          window.dispatchEvent(new PopStateEvent('popstate'))
+        }
 
         return Promise.reject(refreshError)
       } finally {

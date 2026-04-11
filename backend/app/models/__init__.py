@@ -20,6 +20,7 @@ from .dept_template import DeptTemplate
 from .guest_session import GuestSession
 from .role_template_preset import RoleTemplatePreset
 from .user_otp import OTPRequest
+from .manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ..certificate_config.model import CertificateTemplateConfig
 
 ALL_MODELS = [
@@ -45,6 +46,7 @@ ALL_MODELS = [
     GuestSession,
     RoleTemplatePreset,
     OTPRequest,
+    ManualCreditSubmission,
     CertificateTemplateConfig,
 ]
 
@@ -68,5 +70,6 @@ __all__ = [
     "GuestSession",
     "RoleTemplatePreset",
     "OTPRequest",
+    "ManualCreditSubmission", "ManualSubmissionStatus",
     "ALL_MODELS",
 ]

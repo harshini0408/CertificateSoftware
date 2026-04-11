@@ -118,6 +118,30 @@ def _club_response(c: Club) -> ClubResponse:
     )
 
 
+def _normalize_cert_type(value: str | None) -> str:
+    return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+async def _find_credit_rule(cert_type_raw: str) -> Optional[CreditRule]:
+    normalized = _normalize_cert_type(cert_type_raw)
+    spaced = normalized.replace("_", " ")
+    display = spaced.title() if normalized else cert_type_raw
+
+    candidates = [cert_type_raw, normalized, spaced, display]
+    seen = set()
+    for candidate in candidates:
+        key = (candidate or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        existing = await CreditRule.find_one({
+            "cert_type": {"$regex": f"^{re.escape(candidate)}$", "$options": "i"}
+        })
+        if existing:
+            return existing
+    return None
+
+
 # ═══ CLUBS ═══════════════════════════════════════════════════════════════════
 
 
@@ -774,9 +798,9 @@ async def get_credit_rules(_user: User = _admin):
 @router.put("/credit-rules")
 async def upsert_credit_rules(body: CreditRulesUpdateRequest, admin: User = _admin):
     for rule in body.rules:
-        existing = await CreditRule.find_one(CreditRule.cert_type == rule.cert_type)
+        existing = await _find_credit_rule(rule.cert_type)
         if existing:
-            await existing.set({"points": rule.points, "updated_by": admin.id,
+            await existing.set({"cert_type": rule.cert_type, "points": rule.points, "updated_by": admin.id,
                                 "updated_at": datetime.utcnow()})
         else:
             await CreditRule(cert_type=rule.cert_type, points=rule.points,

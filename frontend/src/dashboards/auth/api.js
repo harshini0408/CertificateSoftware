@@ -129,7 +129,6 @@ export function useRefreshToken() {
  */
 export function useMe() {
   const setAuth = useAuthStore((s) => s.setAuth)
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
   return useQuery({
     queryKey: ['auth', 'me'],
@@ -144,8 +143,10 @@ export function useMe() {
       const { clearAuth } = useAuthStore.getState()
       clearAuth()
     },
-    enabled: !isAuthenticated,   // only fetch if not already hydrated
+    // Always reconcile persisted store with the real cookie session on app load.
+    enabled: true,
     retry: false,
+    refetchOnWindowFocus: false,
   })
 }
 

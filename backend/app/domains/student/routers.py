@@ -1,13 +1,18 @@
 from pathlib import Path
 import re
+from datetime import date, datetime
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
+from ...config import get_settings
 from ...core.dependencies import require_role
 from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
 from ...models.certificate import Certificate, CertStatus
+from ...models.credit_rule import CreditRule
+from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.event import Event
 from ...models.club import Club
 from ...services.storage_service import storage_url_to_path
@@ -17,6 +22,30 @@ router = APIRouter(tags=["Student"])
 
 def _norm_email(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+def _norm_cert_type(value: str | None) -> str:
+    return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
+    normalized = _norm_cert_type(cert_type_raw)
+    spaced = normalized.replace("_", " ")
+    display = spaced.title() if normalized else cert_type_raw
+    candidates = [cert_type_raw, normalized, spaced, display]
+
+    seen = set()
+    for candidate in candidates:
+        key = (candidate or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        rule = await CreditRule.find_one({
+            "cert_type": {"$regex": f"^{re.escape(candidate)}$", "$options": "i"}
+        })
+        if rule:
+            return rule
+    return None
 
 
 # ── /students/me ─────────────────────────────────────────────────────────
@@ -40,15 +69,30 @@ async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT
 @router.get("/students/me/credits")
 async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT))):
     email = _norm_email(current_user.email)
-    credit_docs = await StudentCredit.find({
-        "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
-    }).to_list()
+    reg_no = (current_user.registration_number or "").strip()
+    query = {
+        "$or": [
+            {"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+        ]
+    }
+    if reg_no:
+        query["$or"].append({"registration_number": reg_no})
+
+    credit_docs = await StudentCredit.find(query).to_list()
     if not credit_docs:
         return {"total_credits": 0, "breakdown": [], "credit_history": []}
 
     all_history = []
     for doc in credit_docs:
         all_history.extend(doc.credit_history or [])
+
+    # Avoid counting duplicate entries if legacy split docs exist.
+    dedup = {}
+    for entry in all_history:
+        key = entry.cert_number or f"manual::{entry.awarded_at.isoformat()}::{entry.cert_type}"
+        if key not in dedup:
+            dedup[key] = entry
+    all_history = list(dedup.values())
 
     # Build breakdown by cert_type
     breakdown = {}
@@ -64,7 +108,7 @@ async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT
     return {
         "total_credits": total_credits,
         "breakdown": list(breakdown.values()),
-        "credit_history": [e.model_dump() for e in all_history],
+        "credit_history": [e.model_dump() for e in sorted(all_history, key=lambda e: e.awarded_at, reverse=True)],
     }
 
 
@@ -73,15 +117,28 @@ async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT
 @router.get("/students/me/credits/history")
 async def get_credits_history(current_user: User = Depends(require_role(UserRole.STUDENT))):
     email = _norm_email(current_user.email)
-    credit_docs = await StudentCredit.find({
-        "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
-    }).to_list()
+    reg_no = (current_user.registration_number or "").strip()
+    query = {
+        "$or": [
+            {"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+        ]
+    }
+    if reg_no:
+        query["$or"].append({"registration_number": reg_no})
+
+    credit_docs = await StudentCredit.find(query).to_list()
     if not credit_docs:
         return []
     all_history = []
     for doc in credit_docs:
         all_history.extend(doc.credit_history or [])
-    return [e.model_dump() for e in all_history]
+    dedup = {}
+    for entry in all_history:
+        key = entry.cert_number or f"manual::{entry.awarded_at.isoformat()}::{entry.cert_type}"
+        if key not in dedup:
+            dedup[key] = entry
+    ordered = sorted(dedup.values(), key=lambda e: e.awarded_at, reverse=True)
+    return [e.model_dump() for e in ordered]
 
 
 # ── /students/me/certificates ────────────────────────────────────────────
@@ -112,6 +169,110 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
         })
 
     return results
+
+
+@router.get("/students/me/credit-rules")
+async def get_credit_rules_for_student(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    _ = current_user
+    rules = await CreditRule.find_all().to_list()
+    rules.sort(key=lambda r: r.cert_type.lower())
+    return [{"cert_type": r.cert_type, "points": int(r.points or 0)} for r in rules]
+
+
+@router.get("/students/me/manual-credit-submissions")
+async def get_my_manual_credit_submissions(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    email = _norm_email(current_user.email)
+    submissions = await ManualCreditSubmission.find({
+        "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
+    }).sort("-submitted_at").to_list()
+
+    return [
+        {
+            "id": str(s.id),
+            "cert_type": s.cert_type,
+            "event_date": s.event_date,
+            "certificate_image_url": s.certificate_image_url,
+            "status": s.status.value,
+            "points_awarded": int(s.points_awarded or 0),
+            "review_comment": s.review_comment,
+            "reviewed_at": s.reviewed_at,
+            "submitted_at": s.submitted_at,
+        }
+        for s in submissions
+    ]
+
+
+@router.post("/students/me/manual-credit-submissions")
+async def create_manual_credit_submission(
+    cert_type: str = Form(...),
+    event_date: str = Form(...),
+    certificate_image: UploadFile = File(...),
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    cert_type_clean = (cert_type or "").strip()
+    if not cert_type_clean:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Role is required")
+
+    rule = await _resolve_credit_rule(cert_type_clean)
+    if not rule:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid role selected")
+
+    try:
+        parsed_event_date = date.fromisoformat((event_date or "").strip())
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid event_date. Use YYYY-MM-DD")
+
+    if not certificate_image or not certificate_image.filename:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Certificate image is required")
+    if not (certificate_image.content_type or "").lower().startswith("image/"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only image files are allowed")
+
+    email = _norm_email(current_user.email)
+    reg_no = (current_user.registration_number or "").strip()
+    query = {"$or": [{"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}]}
+    if reg_no:
+        query["$or"].append({"registration_number": reg_no})
+
+    credit_docs = await StudentCredit.find(query).to_list()
+    mapped_doc = next((d for d in credit_docs if d.tutor_email), None)
+    if not mapped_doc or not mapped_doc.tutor_email:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No tutor is mapped to your account yet. Please contact your department coordinator.",
+        )
+
+    settings = get_settings()
+    upload_dir = settings.storage_root / "manual_credit_uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(certificate_image.filename).suffix or ".png"
+    saved_name = f"{uuid4().hex}{suffix.lower()}"
+    target = upload_dir / saved_name
+
+    data = await certificate_image.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Uploaded file is empty")
+    target.write_bytes(data)
+
+    image_url = f"/storage/manual_credit_uploads/{saved_name}"
+    submission = await ManualCreditSubmission(
+        student_email=email,
+        student_name=(current_user.name or "").strip(),
+        registration_number=reg_no or None,
+        tutor_email=_norm_email(mapped_doc.tutor_email),
+        cert_type=rule.cert_type,
+        event_date=parsed_event_date,
+        certificate_image_url=image_url,
+        status=ManualSubmissionStatus.PENDING,
+        points_awarded=0,
+        submitted_at=datetime.utcnow(),
+    ).insert()
+
+    return {
+        "message": "Submission created and sent for tutor verification",
+        "id": str(submission.id),
+        "status": submission.status.value,
+    }
 
 
 # ── /students/{student_id}/credits (admin/coordinator view) ──────────────

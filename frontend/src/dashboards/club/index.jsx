@@ -596,6 +596,16 @@ export default function ClubDashboard() {
         <Sidebar />
         <main className="flex-1 overflow-y-auto bg-background">
           <div className="page-container">
+            {/* Club identity header */}
+            <div className="mb-4">
+              <h1 className="text-2xl font-bold text-foreground">
+                {club?.name || 'Club Dashboard'}
+              </h1>
+              {club?.slug && (
+                <p className="mt-1 text-sm text-gray-500">{club.slug}</p>
+              )}
+            </div>
+
             {/* Tab bar */}
             <div className="mb-6 flex gap-1 border-b border-gray-200">
               {TABS.map((tab) => (

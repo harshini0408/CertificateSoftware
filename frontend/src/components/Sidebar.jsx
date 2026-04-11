@@ -124,6 +124,7 @@ function useNavItems() {
     case 'tutor':
       return [
         { to: '/tutor', icon: icons.student, label: 'Dashboard', end: true },
+        { to: '/tutor?tab=verification', icon: icons.creditCard, label: 'Credit Point Verification' },
       ]
 
     default:
