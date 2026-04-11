@@ -14,6 +14,7 @@ from .image_template import ImageTemplate
 from .field_position import FieldPosition
 from .dept_asset import DeptAsset, DeptFieldPosition
 from .dept_certificate import DeptCertificate
+from .dept_certificate_preview import DeptCertificatePreview
 from .dept_event import DeptEvent, DeptEventStatus
 from .dept_template import DeptTemplate
 from .guest_session import GuestSession
@@ -38,6 +39,7 @@ ALL_MODELS = [
     FieldPosition,
     DeptAsset,
     DeptCertificate,
+    DeptCertificatePreview,
     DeptEvent,
     DeptTemplate,
     GuestSession,
@@ -61,7 +63,7 @@ __all__ = [
     "StudentCredit", "CreditHistoryEntry",
     "ImageTemplate",
     "FieldPosition",    "DeptAsset", "DeptFieldPosition",
-    "DeptCertificate", "DeptTemplate",
+    "DeptCertificate", "DeptCertificatePreview", "DeptTemplate",
     "DeptEvent", "DeptEventStatus",
     "GuestSession",
     "RoleTemplatePreset",

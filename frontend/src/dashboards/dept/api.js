@@ -9,6 +9,7 @@ export const deptKeys = {
   event: (eventId) => ['dept', 'event', eventId],
   eventCertificates: (eventId) => ['dept', 'event-certificates', eventId],
   eventParticipantsPreview: (eventId) => ['dept', 'event-participants-preview', eventId],
+  eventCertificatePreview: (eventId) => ['dept', 'event-certificate-preview', eventId],
   deptAssets: () => ['dept', 'assets'],
   eventTemplate: (eventId) => ['dept', 'event-template', eventId],
   eventMapping: (eventId) => ['dept', 'event-mapping', eventId],
@@ -193,22 +194,71 @@ export function useGenerateDeptEventCertificates(eventId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: async (excelFile) => {
-      const formData = new FormData()
-      formData.append('excel_file', excelFile)
-      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/generate`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+    mutationFn: async () => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/generate`)
       return data
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: deptKeys.events() })
       qc.invalidateQueries({ queryKey: deptKeys.dashboard() })
+      qc.invalidateQueries({ queryKey: deptKeys.event(eventId) })
       qc.invalidateQueries({ queryKey: deptKeys.certs() })
+      qc.invalidateQueries({ queryKey: deptKeys.eventCertificates(eventId) })
       addToast({ type: 'success', message: data?.message || 'Certificates generated.' })
     },
     onError: (err) => {
       addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to generate certificates.' })
+    },
+  })
+}
+
+export function useDeptEventCertificatePreview(eventId) {
+  return useQuery({
+    queryKey: deptKeys.eventCertificatePreview(eventId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/dept/events/${eventId}/certificates/preview`)
+      return data
+    },
+    enabled: !!eventId,
+  })
+}
+
+export function useGenerateDeptEventCertificatePreview(eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/preview`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: deptKeys.event(eventId) })
+      qc.invalidateQueries({ queryKey: deptKeys.eventCertificatePreview(eventId) })
+      addToast({ type: 'success', message: 'Preview certificate generated.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to generate preview certificate.' })
+    },
+  })
+}
+
+export function useApproveDeptEventCertificatePreview(eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/preview/approve`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: deptKeys.event(eventId) })
+      qc.invalidateQueries({ queryKey: deptKeys.eventCertificatePreview(eventId) })
+      addToast({ type: 'success', message: data?.message || 'Preview approved.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to approve preview.' })
     },
   })
 }

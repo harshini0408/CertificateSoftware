@@ -18,6 +18,9 @@ FONTS = {
     "EBGaramond.ttf": "https://github.com/google/fonts/raw/main/ofl/ebgaramond/EBGaramond%5Bwght%5D.ttf",
     "Raleway.ttf": "https://github.com/google/fonts/raw/main/ofl/raleway/Raleway%5Bwght%5D.ttf",
     "DancingScript.ttf": "https://github.com/google/fonts/raw/main/ofl/dancingscript/DancingScript%5Bwght%5D.ttf",
+    "Roboto.ttf": "https://github.com/google/fonts/raw/main/ofl/roboto/Roboto%5Bwght%5D.ttf",
+    "Lato.ttf": "https://github.com/google/fonts/raw/main/ofl/lato/Lato%5Bwght%5D.ttf",
+    "OpenSans.ttf": "https://github.com/google/fonts/raw/main/ofl/opensans/OpenSans%5Bwght%5D.ttf"
 }
 
 

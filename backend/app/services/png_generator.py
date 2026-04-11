@@ -154,10 +154,14 @@ async def generate_certificate_pillow(
         if sp.exists():
             sig_path = str(sp)
 
+    display_fields: Dict[str, str] = dict(participant.fields or {})
+    if preset and preset.display_label:
+        display_fields["Role"] = preset.display_label
+
     await asyncio.to_thread(
         _render_certificate_pillow,
         template_path,
-        participant.fields or {},
+        display_fields,
         column_positions,
         asset_positions or {},
         logo_path,
@@ -202,8 +206,11 @@ async def generate_certificate_from_role_preset(
         "student_volunteer": "volunteered",
         "paper_presenter": "paper",
     }
-    if "Role" in display_fields:
-        display_fields["Role"] = role_display_map.get(normalized, display_fields["Role"])
+    role_label = (preset.display_label or "").strip()
+    if not role_label:
+        role_label = role_display_map.get(normalized, "")
+    if role_label:
+        display_fields["Role"] = role_label
 
     await asyncio.to_thread(
         _render_certificate_pillow,

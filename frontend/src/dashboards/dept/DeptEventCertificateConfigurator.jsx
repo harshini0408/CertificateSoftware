@@ -5,6 +5,7 @@ import LoadingSpinner from '../../components/LoadingSpinner'
 import { useToastStore } from '../../store/uiStore'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 import {
+  useDeptEvent,
   useDeptEventTemplate,
   useUploadDeptEventTemplate,
   extractDeptExcelHeaders,
@@ -57,6 +58,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
 
   const containerRef = useRef(null)
 
+  const { data: eventState } = useDeptEvent(event?.id)
   const { data: templateResp } = useDeptEventTemplate(event?.id)
   const { data: mappingResp } = useDeptEventMapping(event?.id)
   const { data: deptAssets } = useDeptAssets()
@@ -100,6 +102,17 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
   }, [mappingResp])
 
   useEffect(() => {
+    if (!eventState) return
+    const savedHeaders = eventState?.excel_headers || []
+    if (savedHeaders.length) {
+      setHeaders(savedHeaders)
+    }
+    if (eventState?.preview_row && Object.keys(eventState.preview_row).length > 0) {
+      setPreviewRow(eventState.preview_row)
+    }
+  }, [eventState])
+
+  useEffect(() => {
     const validKeys = [...selectedFields, ...enabledAssetKeys]
     if (!validKeys.includes(activePlacementKey)) {
       setActivePlacementKey(validKeys[0] || null)
@@ -123,15 +136,6 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
 
     if (isEnabled) {
       setActivePlacementKey(id)
-      return
-    }
-
-    if (id === '_logo' && !deptAssets?.has_logo) {
-      addToast({ type: 'error', message: 'Update the logo first in Settings.' })
-      return
-    }
-    if (id === '_signature' && !deptAssets?.has_signature) {
-      addToast({ type: 'error', message: 'Update the signature first in Settings.' })
       return
     }
 
@@ -188,7 +192,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
       const hdrs = data?.headers || []
       setHeaders(hdrs)
       const preview = await previewDeptExcelParticipants(event.id, excelFile)
-      setPreviewRow(preview?.participants?.[0]?.raw || null)
+      setPreviewRow(preview?.preview_row || preview?.participants?.[0]?.raw || null)
       setSelectedFields((prev) => {
         const keep = prev.filter((f) => hdrs.includes(f) || f === '_date')
         return keep
@@ -380,7 +384,8 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
             <button
               className="btn-primary"
               onClick={async () => {
-                if (!excelFile || !previewRow) {
+                const hasRows = (eventState?.source_rows_count || 0) > 0 || !!previewRow
+                if (!hasRows) {
                   addToast({ type: 'warning', message: 'Upload Excel and extract fields first.' })
                   return
                 }
@@ -388,12 +393,10 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
                 if (typeof onClose === 'function') {
                   onClose({
                     nextTab: 'certificates',
-                    excelFile,
-                    previewRow,
                   })
                 }
               }}
-              disabled={saveMappingMutation.isPending || !excelFile || !previewRow || selectedFields.length === 0}
+              disabled={saveMappingMutation.isPending || selectedFields.length === 0}
             >
               Continue to Certificates
             </button>

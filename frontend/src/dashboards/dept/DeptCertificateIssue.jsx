@@ -5,12 +5,16 @@ import LoadingSpinner from '../../components/LoadingSpinner'
 import { useToastStore } from '../../store/uiStore'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 import {
+  useDeptEvent,
   useDeptEventCertificates,
   useSendDeptEventCertificates,
   useSendSingleDeptEventCertificate,
   useDeptAssets,
   useDeptEventTemplate,
   useDeptEventMapping,
+  useDeptEventCertificatePreview,
+  useGenerateDeptEventCertificatePreview,
+  useApproveDeptEventCertificatePreview,
   useGenerateDeptEventCertificates,
 } from './api'
 
@@ -57,41 +61,37 @@ function PreviewTag({ label, x, y, fontSize }) {
   )
 }
 
-export default function DeptCertificateIssue({ event, excelFileFromOverview = null, previewRowFromOverview = null }) {
+export default function DeptCertificateIssue({ event }) {
   const addToast = useToastStore((s) => s.addToast)
 
+  const { data: eventState } = useDeptEvent(event?.id)
   const { data: certs, isLoading: certsLoading } = useDeptEventCertificates(event?.id)
   const { data: assets } = useDeptAssets()
   const { data: eventTemplate } = useDeptEventTemplate(event?.id)
   const { data: mapping } = useDeptEventMapping(event?.id)
-
-  const [excelFile, setExcelFile] = useState(excelFileFromOverview)
-  const [previewRow, setPreviewRow] = useState(previewRowFromOverview)
-
-  useEffect(() => {
-    if (excelFileFromOverview) setExcelFile(excelFileFromOverview)
-  }, [excelFileFromOverview])
-
-  useEffect(() => {
-    if (previewRowFromOverview) setPreviewRow(previewRowFromOverview)
-  }, [previewRowFromOverview])
+  const { data: previewData } = useDeptEventCertificatePreview(event?.id)
 
   const sendMutation = useSendDeptEventCertificates(event?.id)
   const sendSingleMutation = useSendSingleDeptEventCertificate(event?.id)
+  const previewMutation = useGenerateDeptEventCertificatePreview(event?.id)
+  const approvePreviewMutation = useApproveDeptEventCertificatePreview(event?.id)
   const generateMutation = useGenerateDeptEventCertificates(event?.id)
 
   const pendingEmailCount = (certs ?? []).filter((c) => c.status === 'generated').length
 
-  const hasParticipants = !!excelFile || (event?.participant_count ?? 0) > 0 || (certs?.length ?? 0) > 0
+  const hasParticipants = (eventState?.source_rows_count ?? 0) > 0 || (certs?.length ?? 0) > 0
   const requiresLogo = !!mapping?.field_positions?._logo
   const requiresSignature = !!mapping?.field_positions?._signature
   const hasAssets = (!requiresLogo || !!assets?.has_logo) && (!requiresSignature || !!assets?.has_signature)
   const hasTemplate = !!eventTemplate?.template
   const hasMapping = !!mapping?.mapping_configured
+  const hasPreview = !!previewData?.preview
+  const previewApproved = !!previewData?.preview_approved
 
-  const allReady = hasParticipants && hasAssets && hasTemplate && hasMapping
+  const allReady = hasParticipants && hasTemplate && hasMapping
 
   const firstGenerated = (certs || []).find((c) => !!c.png_url)
+  const previewImageUrl = previewData?.preview?.png_url ? `${BACKEND_URL}${previewData.preview.png_url}` : null
   const templateUrl = toImageUrl(eventTemplate?.template?.template_url)
   const templateAspectRatio = 2480 / 3508
 
@@ -100,8 +100,8 @@ export default function DeptCertificateIssue({ event, excelFileFromOverview = nu
     if (fieldId === '_cert_number') return 'CERT-0001'
     if (fieldId === '_logo') return 'Logo'
     if (fieldId === '_signature') return 'Signature'
-    if (!previewRow) return fieldId
-    const value = previewRow[fieldId]
+    if (!eventState?.preview_row) return fieldId
+    const value = eventState.preview_row[fieldId]
     return value == null || String(value).trim() === '' ? fieldId : String(value)
   }
 
@@ -112,12 +112,17 @@ export default function DeptCertificateIssue({ event, excelFileFromOverview = nu
     return [...selected, ...mappedSpecial]
   }, [mapping])
 
+  useEffect(() => {
+    if (!allReady || hasPreview || previewMutation.isPending) return
+    previewMutation.mutate()
+  }, [allReady, hasPreview, previewMutation])
+
   const handleGenerate = async () => {
-    if (!excelFile) {
-      addToast({ type: 'warning', message: 'Go to Overview and click Continue to Certificates after extracting fields.' })
+    if (!previewApproved) {
+      addToast({ type: 'warning', message: 'Approve the preview certificate before generating all certificates.' })
       return
     }
-    await generateMutation.mutateAsync(excelFile)
+    await generateMutation.mutateAsync()
   }
 
   const certColumns = [
@@ -210,11 +215,20 @@ export default function DeptCertificateIssue({ event, excelFileFromOverview = nu
                 />
                 <p className="mt-2 text-xs text-gray-500">Showing first generated certificate preview.</p>
               </div>
+            ) : previewImageUrl ? (
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <img
+                  src={previewImageUrl}
+                  alt="Preview certificate"
+                  className="w-full rounded"
+                />
+                <p className="mt-2 text-xs text-gray-500">Showing backend-rendered preview using first Excel row and saved mapping.</p>
+              </div>
             ) : templateUrl ? (
               <div className="rounded-lg border border-gray-200 bg-white p-3">
                 <div className="relative mx-auto w-full max-w-[820px] overflow-hidden rounded border" style={{ aspectRatio: String(templateAspectRatio) }}>
                   <img src={templateUrl} alt="Certificate template preview" className="absolute inset-0 h-full w-full object-contain object-center" />
-                  {!!previewRow && previewPlacementKeys.map((key) => {
+                  {!!eventState?.preview_row && previewPlacementKeys.map((key) => {
                     const pos = mapping?.field_positions?.[key]
                     if (!pos) return null
                     return (
@@ -229,7 +243,7 @@ export default function DeptCertificateIssue({ event, excelFileFromOverview = nu
                   })}
                 </div>
                 <p className="mt-2 text-xs text-gray-500">
-                  {previewRow ? 'Showing first participant from the Overview step.' : 'No preview data yet. Go to Overview, extract fields, and continue to Certificates.'}
+                  {eventState?.preview_row ? 'Fallback visual preview. Click Generate Preview for exact rendered certificate.' : 'No preview data yet. Go to Overview, extract fields, and continue to Certificates.'}
                 </p>
               </div>
             ) : (
@@ -241,10 +255,16 @@ export default function DeptCertificateIssue({ event, excelFileFromOverview = nu
 
           <div className="space-y-3">
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-              Participant Excel is taken from the Overview step.
+              Participant Excel rows are persisted from the Overview step.
             </div>
-            <button className="btn-primary w-full" onClick={handleGenerate} disabled={generateMutation.isPending || !excelFile || !allReady}>
-              {generateMutation.isPending ? 'Generating...' : 'Generate Certificates'}
+            <button className="btn-secondary w-full" onClick={() => previewMutation.mutate()} disabled={previewMutation.isPending || !allReady}>
+              {previewMutation.isPending ? 'Generating Preview...' : (hasPreview ? 'Regenerate Preview' : 'Generate Preview')}
+            </button>
+            <button className="btn-secondary w-full" onClick={() => approvePreviewMutation.mutate()} disabled={approvePreviewMutation.isPending || !hasPreview || previewApproved}>
+              {previewApproved ? 'Preview Approved' : (approvePreviewMutation.isPending ? 'Approving...' : 'Approve Preview')}
+            </button>
+            <button className="btn-primary w-full" onClick={handleGenerate} disabled={generateMutation.isPending || !allReady || !previewApproved}>
+              {generateMutation.isPending ? 'Generating...' : 'Generate Remaining Certificates'}
             </button>
           </div>
         </div>
@@ -256,9 +276,11 @@ export default function DeptCertificateIssue({ event, excelFileFromOverview = nu
             <p className="text-sm font-semibold text-foreground mb-3">Pre-flight Checklist</p>
             <div className="space-y-2">
               <PreflightItem ok={hasParticipants} label="Participants imported" />
-              <PreflightItem ok={hasAssets} label={requiresLogo || requiresSignature ? 'Required assets uploaded' : 'No assets required by current mapping'} />
+              <PreflightItem ok={true} label={requiresLogo || requiresSignature ? (hasAssets ? 'Mapped assets uploaded (optional)' : 'Mapped assets missing (optional)') : 'No assets mapped (optional)'} />
               <PreflightItem ok={hasTemplate} label="Event template uploaded" />
               <PreflightItem ok={hasMapping} label="Field mapping configured" />
+              <PreflightItem ok={hasPreview} label="Preview certificate generated" />
+              <PreflightItem ok={previewApproved} label="Preview approved" />
             </div>
           </div>
 

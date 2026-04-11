@@ -223,10 +223,6 @@ function EventDetailView({ eventId }) {
   const navigate = useNavigate()
   const { data: event, isLoading } = useDeptEvent(eventId)
   const [activeTab, setActiveTab] = useState('overview')
-  const [certificateFlowContext, setCertificateFlowContext] = useState({
-    excelFile: null,
-    previewRow: null,
-  })
 
   if (isLoading) {
     return <LoadingSpinner fullPage label="Loading event..." />
@@ -274,10 +270,6 @@ function EventDetailView({ eventId }) {
           event={event}
           onClose={(action) => {
             if (action?.nextTab === 'certificates') {
-              setCertificateFlowContext({
-                excelFile: action.excelFile || null,
-                previewRow: action.previewRow || null,
-              })
               setActiveTab('certificates')
               return
             }
@@ -286,11 +278,7 @@ function EventDetailView({ eventId }) {
         />
       )}
       {activeTab === 'certificates' && (
-        <DeptCertificateIssue
-          event={event}
-          excelFileFromOverview={certificateFlowContext.excelFile}
-          previewRowFromOverview={certificateFlowContext.previewRow}
-        />
+        <DeptCertificateIssue event={event} />
       )}
     </div>
   )

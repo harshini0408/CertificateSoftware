@@ -17,6 +17,7 @@ from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
 from ...models.dept_asset import DeptAsset
 from ...models.dept_certificate import DeptCertificate
+from ...models.dept_certificate_preview import DeptCertificatePreview
 from ...models.dept_event import DeptEvent, DeptEventStatus
 from ...models.dept_template import DeptTemplate
 from ...services.signature_service import process_signature, save_logo
@@ -69,6 +70,11 @@ def _event_response(evt: DeptEvent) -> dict:
         "status": evt.status.value,
         "participant_count": evt.participant_count,
         "cert_count": evt.cert_count,
+        "excel_headers": evt.excel_headers,
+        "source_rows_count": len(evt.excel_rows or []),
+        "preview_row": evt.excel_preview_row,
+        "preview_certificate_id": str(evt.preview_certificate_id) if evt.preview_certificate_id else None,
+        "preview_approved": bool(evt.preview_approved),
         "created_at": evt.created_at,
     }
 
@@ -618,7 +624,13 @@ async def upload_dept_event_template(
     )
     await doc.insert()
 
-    await evt.set({"template_id": doc.id})
+    await evt.set({
+        "template_id": doc.id,
+        "preview_certificate_id": None,
+        "preview_approved": False,
+        "preview_approved_at": None,
+        "preview_approved_by_user_id": None,
+    })
     evt = await DeptEvent.get(evt.id)
 
     return {
@@ -670,7 +682,7 @@ async def extract_dept_event_excel_headers(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
-    await _get_dept_event_or_404(event_id, department, str(current_user.id))
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     content = await excel_file.read()
     headers = _parse_excel_headers(content)
@@ -684,10 +696,11 @@ async def preview_dept_event_excel_rows(
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
-    await _get_dept_event_or_404(event_id, department, str(current_user.id))
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     content = await excel_file.read()
     rows = _parse_excel_rows_dynamic(content)
+    headers = _parse_excel_headers(content)
 
     preview = []
     for idx, row in enumerate(rows[:300], start=1):
@@ -703,7 +716,21 @@ async def preview_dept_event_excel_rows(
             }
         )
 
+    await evt.set({
+        "excel_headers": headers,
+        "excel_rows": rows,
+        "excel_preview_row": rows[0] if rows else {},
+        "excel_file_name": excel_file.filename or "",
+        "excel_uploaded_at": datetime.utcnow(),
+        "preview_certificate_id": None,
+        "preview_approved": False,
+        "preview_approved_at": None,
+        "preview_approved_by_user_id": None,
+    })
+
     return {
+        "headers": headers,
+        "preview_row": rows[0] if rows else {},
         "total_rows": len(rows),
         "preview_count": len(preview),
         "participants": preview,
@@ -742,6 +769,10 @@ async def save_dept_event_mapping(
         "selected_fields": selected,
         "field_positions": body.field_positions,
         "mapping_configured": True,
+        "preview_certificate_id": None,
+        "preview_approved": False,
+        "preview_approved_at": None,
+        "preview_approved_by_user_id": None,
     })
     evt = await DeptEvent.get(evt.id)
     return {
@@ -752,10 +783,43 @@ async def save_dept_event_mapping(
     }
 
 
-@router.post("/dept/events/{event_id}/certificates/generate")
-async def generate_dept_event_certificates(
+@router.get("/dept/events/{event_id}/certificates/preview")
+async def get_dept_event_certificate_preview(
     event_id: str,
-    excel_file: UploadFile = File(...),
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
+
+    preview_doc = None
+    if evt.preview_certificate_id:
+        preview_doc = await DeptCertificatePreview.get(evt.preview_certificate_id)
+
+    if not preview_doc:
+        return {
+            "preview": None,
+            "preview_approved": bool(evt.preview_approved),
+            "source_rows_count": len(evt.excel_rows or []),
+        }
+
+    return {
+        "preview": {
+            "id": str(preview_doc.id),
+            "cert_number": preview_doc.cert_number,
+            "png_url": preview_doc.png_url,
+            "participant_email": preview_doc.participant_email,
+            "created_at": preview_doc.created_at,
+            "approved": bool(preview_doc.approved),
+            "approved_at": preview_doc.approved_at,
+        },
+        "preview_approved": bool(evt.preview_approved),
+        "source_rows_count": len(evt.excel_rows or []),
+    }
+
+
+@router.post("/dept/events/{event_id}/certificates/preview")
+async def generate_dept_event_certificate_preview(
+    event_id: str,
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
@@ -765,17 +829,121 @@ async def generate_dept_event_certificates(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload event template first")
     if not evt.mapping_configured or not evt.selected_fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure field mapping first")
+    if not evt.excel_rows:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload Excel and extract fields first")
 
     template_doc = await DeptTemplate.get(evt.template_id)
     if not template_doc or not Path(template_doc.template_path).exists():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Template file not found for this event")
 
     asset = await _get_or_create_dept_asset(department)
-    if not asset.logo_path or not asset.signature1_path:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department logo and signature are required")
+    preview_row = evt.excel_preview_row or evt.excel_rows[0]
+    dept_slug = _slugify(department)
+    year = datetime.utcnow().year
+    cert_number = f"PREVIEW-DPT-{dept_slug[:4].upper()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
-    content = await excel_file.read()
-    rows = _parse_excel_rows_dynamic(content)
+    png_bytes = _render_dept_certificate_dynamic(
+        template_path=Path(template_doc.template_path),
+        row=preview_row,
+        cert_number=cert_number,
+        selected_fields=evt.selected_fields,
+        field_positions=evt.field_positions,
+        logo_path=asset.logo_path,
+        sig1_path=asset.signature1_path,
+        event_date=evt.event_date,
+    )
+    png_url = save_cert_png(png_bytes, dept_slug, year, cert_number)
+
+    preview_doc = DeptCertificatePreview(
+        department=department,
+        coordinator_user_id=str(current_user.id),
+        event_id=evt.id,
+        template_id=template_doc.id,
+        cert_number=cert_number,
+        participant_email=_pick_email_from_row(preview_row),
+        preview_row=preview_row,
+        png_url=png_url,
+        approved=False,
+    )
+    await preview_doc.insert()
+
+    await evt.set({
+        "preview_certificate_id": preview_doc.id,
+        "preview_approved": False,
+        "preview_approved_at": None,
+        "preview_approved_by_user_id": None,
+    })
+
+    return {
+        "message": "Preview certificate generated",
+        "preview": {
+            "id": str(preview_doc.id),
+            "cert_number": preview_doc.cert_number,
+            "png_url": preview_doc.png_url,
+            "participant_email": preview_doc.participant_email,
+            "created_at": preview_doc.created_at,
+            "approved": False,
+        },
+    }
+
+
+@router.post("/dept/events/{event_id}/certificates/preview/approve")
+async def approve_dept_event_certificate_preview(
+    event_id: str,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
+
+    if not evt.preview_certificate_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Generate preview certificate first")
+
+    preview_doc = await DeptCertificatePreview.get(evt.preview_certificate_id)
+    if not preview_doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Preview certificate not found")
+
+    now = datetime.utcnow()
+    preview_doc.approved = True
+    preview_doc.approved_at = now
+    preview_doc.approved_by_user_id = str(current_user.id)
+    await preview_doc.save()
+
+    await evt.set({
+        "preview_approved": True,
+        "preview_approved_at": now,
+        "preview_approved_by_user_id": str(current_user.id),
+    })
+
+    return {
+        "message": "Preview approved. You can now generate certificates for this event.",
+        "preview_id": str(preview_doc.id),
+        "approved_at": now,
+    }
+
+
+@router.post("/dept/events/{event_id}/certificates/generate")
+async def generate_dept_event_certificates(
+    event_id: str,
+    current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
+):
+    department = _normalize_department(current_user.department)
+    evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
+
+    if not evt.template_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload event template first")
+    if not evt.mapping_configured or not evt.selected_fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure field mapping first")
+    if not evt.excel_rows:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload Excel and extract fields first")
+    if not evt.preview_approved:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Approve preview certificate before generating")
+
+    template_doc = await DeptTemplate.get(evt.template_id)
+    if not template_doc or not Path(template_doc.template_path).exists():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Template file not found for this event")
+
+    asset = await _get_or_create_dept_asset(department)
+    rows = evt.excel_rows
 
     dept_slug = _slugify(department)
     year = datetime.utcnow().year
@@ -869,6 +1037,7 @@ async def generate_dept_event_certificates(
     await evt.set({
         "participant_count": len(participant_keys),
         "cert_count": generated,
+        "status": DeptEventStatus.ACTIVE,
     })
 
     return {
