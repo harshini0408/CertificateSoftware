@@ -127,24 +127,25 @@ export function useRefreshToken() {
  * Fetches current user info (useful for hydrating the store on page reload
  * if the session cookie is still valid but sessionStorage was cleared).
  */
-export function useMe() {
+export function useMe(options = {}) {
   const setAuth = useAuthStore((s) => s.setAuth)
+  const { enabled = true } = options
 
   return useQuery({
     queryKey: ['auth', 'me'],
     queryFn: async () => {
-      const { data } = await axiosInstance.get('/auth/me')
-      setAuth(data)
-      return data
-    },
-    onError: () => {
-      // Session cookie expired or server error — silently clear auth.
-      // ProtectedRoute will handle redirect to /login.
-      const { clearAuth } = useAuthStore.getState()
-      clearAuth()
+      try {
+        const { data } = await axiosInstance.get('/auth/me')
+        setAuth(data)
+        return data
+      } catch (err) {
+        const { clearAuth } = useAuthStore.getState()
+        clearAuth()
+        throw err
+      }
     },
     // Always reconcile persisted store with the real cookie session on app load.
-    enabled: true,
+    enabled,
     retry: false,
     refetchOnWindowFocus: false,
   })

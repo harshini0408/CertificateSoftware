@@ -63,7 +63,7 @@ def build_redirect(user: User) -> str:
     if user.role == UserRole.STUDENT:
         return "/student"
     if user.role == UserRole.GUEST:
-        return f"/club/{user.club_id}/events/{user.event_id}"
+        return "/guest"
     return "/"
 
 

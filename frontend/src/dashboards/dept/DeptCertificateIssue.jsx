@@ -4,6 +4,7 @@ import StatusBadge from '../../components/StatusBadge'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { useToastStore } from '../../store/uiStore'
 import { BACKEND_URL } from '../../utils/axiosInstance'
+import { downloadDeptCertificatesZip } from './api'
 import {
   useDeptEvent,
   useDeptEventCertificates,
@@ -63,6 +64,7 @@ function PreviewTag({ label, x, y, fontSize }) {
 
 export default function DeptCertificateIssue({ event }) {
   const addToast = useToastStore((s) => s.addToast)
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false)
 
   const { data: eventState } = useDeptEvent(event?.id)
   const { data: certs, isLoading: certsLoading } = useDeptEventCertificates(event?.id)
@@ -123,6 +125,35 @@ export default function DeptCertificateIssue({ event }) {
       return
     }
     await generateMutation.mutateAsync()
+  }
+
+  const handleDownloadZip = async () => {
+    const certNumbers = (certs ?? [])
+      .map((c) => c?.cert_number)
+      .filter(Boolean)
+
+    if (certNumbers.length === 0) {
+      addToast({ type: 'warning', message: 'No generated certificates available to download.' })
+      return
+    }
+
+    try {
+      setIsDownloadingZip(true)
+      const blob = await downloadDeptCertificatesZip(certNumbers)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(event?.name || 'department-event').replace(/\s+/g, '-').toLowerCase()}-certificates.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      addToast({ type: 'success', message: 'ZIP download started.' })
+    } catch (err) {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to download ZIP.' })
+    } finally {
+      setIsDownloadingZip(false)
+    }
   }
 
   const certColumns = [
@@ -287,6 +318,13 @@ export default function DeptCertificateIssue({ event }) {
           <div className="flex flex-col items-end gap-3">
             <button className="btn-secondary text-sm" disabled={sendMutation.isPending || pendingEmailCount === 0} onClick={() => sendMutation.mutate()}>
               {sendMutation.isPending ? (<><LoadingSpinner size="sm" label="" /> Sending...</>) : `Approve & Send ${pendingEmailCount} Pending Email${pendingEmailCount !== 1 ? 's' : ''}`}
+            </button>
+            <button
+              className="btn-secondary text-sm"
+              disabled={isDownloadingZip || (certs?.length ?? 0) === 0}
+              onClick={handleDownloadZip}
+            >
+              {isDownloadingZip ? (<><LoadingSpinner size="sm" label="" /> Downloading...</>) : 'Download ZIP'}
             </button>
           </div>
         </div>

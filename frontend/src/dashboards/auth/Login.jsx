@@ -85,16 +85,23 @@ export default function Login() {
       dept_coordinator: '/dept',
       tutor: '/tutor',
       student:          '/student',
-      guest:            `/club/${club_id}/events/${event_id}`,
+      guest:            '/guest',
     }
     return <Navigate to={redirectMap[role] ?? '/login'} replace />
   }
 
-  const onSubmit = (values) => {
-    loginMutation.mutate(values)
+  const onSubmit = async (values) => {
+    try {
+      if (isAuthenticated) {
+        await logoutMutation.mutateAsync()
+      }
+      await loginMutation.mutateAsync(values)
+    } catch {
+      // Mutation handlers surface the error toast.
+    }
   }
 
-  const busy = isSubmitting || loginMutation.isPending
+  const busy = isSubmitting || loginMutation.isPending || logoutMutation.isPending
   const switchingBusy = logoutMutation.isPending
 
   return (
@@ -118,7 +125,7 @@ export default function Login() {
           {switchMode && isAuthenticated && (
             <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               <p className="font-semibold">You are already logged in as {userName || role}.</p>
-              <p className="mt-1">To sign in as another user in this browser profile, switch account first.</p>
+              <p className="mt-1">Signing in below will automatically switch to the new account.</p>
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
