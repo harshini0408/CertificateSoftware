@@ -30,8 +30,9 @@ const STEPS = [
   { n: 1, label: 'Certificate Template' },
   { n: 2, label: 'Excel & Columns' },
   { n: 3, label: 'Position Fields' },
-  { n: 4, label: 'Generate' },
-  { n: 5, label: 'Send & Download' },
+  { n: 4, label: 'Review Sample' },
+  { n: 5, label: 'Generate' },
+  { n: 6, label: 'Send & Download' },
 ]
 
 function StepIndicator({ current }) {
@@ -365,8 +366,19 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
     }))
   }, [activeCol])
 
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n))
+
   const updateProp = (col, prop, val) => {
-    setPositions((prev) => ({ ...prev, [col]: { ...prev[col], [prop]: +val } }))
+    const parsed = parseFloat(val)
+    if (Number.isNaN(parsed)) return
+    const limits = {
+      x_percent: [0, 100],
+      y_percent: [0, 100],
+      font_size_percent: [1, 8],
+    }
+    const [min, max] = limits[prop] || [0, 9999]
+    const nextVal = Number(clamp(parsed, min, max).toFixed(2))
+    setPositions((prev) => ({ ...prev, [col]: { ...prev[col], [prop]: nextVal } }))
   }
 
   const savePositions = async () => {
@@ -502,10 +514,22 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
                           type="number"
                           min={min} max={max} step={step}
                           className="w-full rounded border border-gray-200 px-1.5 py-1 text-xs text-center focus:border-indigo-400 focus:outline-none"
-                          value={pos[key]?.toFixed?.(1) ?? pos[key]}
+                          value={pos[key] ?? ''}
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => updateProp(col, key, e.target.value)}
                         />
+                        {key === 'font_size_percent' && (
+                          <input
+                            type="range"
+                            min={1}
+                            max={8}
+                            step={0.1}
+                            value={pos.font_size_percent ?? 3.2}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => updateProp(col, 'font_size_percent', e.target.value)}
+                            className="mt-1 w-full accent-indigo-600"
+                          />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -531,6 +555,107 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
         >
           {saving ? <><LoadingSpinner size="sm" label="" /> Saving…</> : 'Save Positions & Continue →'}
         </button>
+      </div>
+    </StepCard>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 4 — Review first-row sample certificate
+// ─────────────────────────────────────────────────────────────────────────────
+function Step4Sample({ onBack, onComplete }) {
+  const addToast = useToastStore((s) => s.addToast)
+  const [loading, setLoading] = useState(false)
+  const [sample, setSample] = useState(null)
+
+  const fetchSample = async () => {
+    setLoading(true)
+    try {
+      const { data } = await axiosInstance.post('/guest/sample-preview')
+      setSample(data)
+    } catch (err) {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to generate sample preview.' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchSample()
+  }, [])
+
+  const sampleSrc = resolveImgSrc(sample?.sample_url)
+
+  return (
+    <StepCard
+      title="Review Sample Certificate"
+      subtitle="This preview uses the first row of your Excel file. If alignment/font size looks good, continue. Otherwise, go back and adjust field positions."
+    >
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Sample Certificate</p>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-2">
+              {loading ? (
+                <div className="flex h-64 items-center justify-center"><LoadingSpinner label="Generating sample..." /></div>
+              ) : sampleSrc ? (
+                <img src={sampleSrc} alt="Sample certificate preview" className="w-full rounded-lg object-contain" />
+              ) : (
+                <div className="flex h-64 items-center justify-center text-sm text-gray-400">No sample available</div>
+              )}
+            </div>
+            <button
+              className="mt-3 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              onClick={fetchSample}
+              disabled={loading}
+            >
+              {loading ? 'Refreshing…' : 'Refresh Sample'}
+            </button>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">First Row Data</p>
+            <div className="max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Field</th>
+                    <th className="px-3 py-2 text-left font-semibold">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(sample?.first_row || {}).map(([k, v]) => (
+                    <tr key={k} className="border-t border-gray-100">
+                      <td className="px-3 py-2 font-medium text-gray-700">{k}</td>
+                      <td className="px-3 py-2 text-gray-600">{String(v || '—')}</td>
+                    </tr>
+                  ))}
+                  {Object.keys(sample?.first_row || {}).length === 0 && (
+                    <tr>
+                      <td className="px-3 py-8 text-center text-gray-400" colSpan={2}>No row data available</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+          <button
+            className="px-5 py-2 rounded-xl border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            onClick={onBack}
+          >
+            ← Back to Field Positioning
+          </button>
+          <button
+            className="px-6 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+            onClick={onComplete}
+            disabled={!sampleSrc || loading}
+          >
+            Looks Good, Continue →
+          </button>
+        </div>
       </div>
     </StepCard>
   )
@@ -816,18 +941,25 @@ export default function GuestWizard({ eventName }) {
       )}
 
       {step === 4 && (
-        <Step4
-          rowCount={excelState?.rowCount || 0}
+        <Step4Sample
           onBack={() => setStep(3)}
-          onComplete={({ generated }) => { setGeneratedCount(generated); setStep(5) }}
+          onComplete={() => setStep(5)}
         />
       )}
 
       {step === 5 && (
+        <Step4
+          rowCount={excelState?.rowCount || 0}
+          onBack={() => setStep(4)}
+          onComplete={({ generated }) => { setGeneratedCount(generated); setStep(6) }}
+        />
+      )}
+
+      {step === 6 && (
         <Step5
           generatedCount={generatedCount}
           emailsSent={false}
-          onBack={() => setStep(4)}
+          onBack={() => setStep(5)}
         />
       )}
     </div>

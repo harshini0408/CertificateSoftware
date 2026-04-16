@@ -4,7 +4,6 @@ from typing import List
 from beanie import PydanticObjectId
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
-
 from ...core.dependencies import get_current_user, require_club_access, require_role
 from ...models.user import User, UserRole
 from ...models.club import Club

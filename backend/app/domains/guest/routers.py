@@ -340,6 +340,76 @@ async def save_guest_field_positions(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STEP 3.5 — Generate sample certificate from first row
+# POST /guest/sample-preview
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/sample-preview")
+async def generate_guest_sample_preview(
+    current_user: User = Depends(require_guest),
+):
+    """Generate and return a preview certificate using the first Excel row.
+
+    This allows the guest to review placement/font sizing before batch generation.
+    """
+    session = await _resolve_active_session(current_user)
+
+    if not session.guest_template_path or not Path(session.guest_template_path).exists():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No valid certificate template found. Please complete Step 1 first.",
+        )
+    if not session.guest_excel_data:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No Excel data found. Please complete Step 2 first.",
+        )
+    if not session.guest_selected_columns:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Column configuration not saved. Please complete Step 2 first.",
+        )
+
+    fp = await FieldPosition.find_one(
+        FieldPosition.event_id == session.id,
+        FieldPosition.cert_type == "guest",
+    )
+    if not fp:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Field positions not configured. Please complete Step 3 first.",
+        )
+
+    first_row = session.guest_excel_data[0] if session.guest_excel_data else None
+    if not first_row:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel does not contain data rows")
+
+    sample_dir = settings.storage_root / "tmp"
+    sample_dir.mkdir(parents=True, exist_ok=True)
+    sample_name = f"guest_sample_{session.id}.png"
+    sample_path = sample_dir / sample_name
+
+    await asyncio.to_thread(
+        _render_guest_certificate,
+        Path(session.guest_template_path),
+        first_row,
+        fp.column_positions,
+        str(sample_path),
+    )
+
+    first_row_selected = {
+        col: str(first_row.get(col, "") if first_row.get(col) is not None else "")
+        for col in (session.guest_selected_columns or [])
+    }
+
+    return {
+        "sample_url": f"/storage/tmp/{sample_name}",
+        "first_row": first_row_selected,
+        "message": "Sample certificate generated from first row",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STEP 4 — Generate certificates (Pillow batch)
 # POST /guest/generate
 # ─────────────────────────────────────────────────────────────────────────────
