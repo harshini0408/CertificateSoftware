@@ -246,7 +246,7 @@ async def upload_guest_excel(
 
 class GuestConfigRequest(BaseModel):
     selected_columns: List[str]
-    email_column: str
+    email_column: Optional[str] = None
 
 
 @router.post("/config")
@@ -257,23 +257,26 @@ async def save_guest_config(
     """Persist which columns should be printed and which is the email column."""
     session = await _resolve_active_session(current_user)
 
-    if not body.selected_columns:
+    selected_columns = [c.strip() for c in (body.selected_columns or []) if isinstance(c, str) and c.strip()]
+    if not selected_columns:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "At least one column must be selected",
         )
 
+    email_column = (body.email_column or "").strip() or None
+
     await session.set({
-        "guest_selected_columns": body.selected_columns,
-        "guest_email_column": body.email_column,
+        "guest_selected_columns": selected_columns,
+        "guest_email_column": email_column,
         "guest_generated_certs": None,
         "guest_emails_sent": False,
     })
 
     return {
         "message": "Column configuration saved",
-        "selected_columns": body.selected_columns,
-        "email_column": body.email_column,
+        "selected_columns": selected_columns,
+        "email_column": email_column,
     }
 
 
@@ -431,7 +434,7 @@ async def generate_guest_certificates(
             status.HTTP_400_BAD_REQUEST,
             "No Excel data found. Please complete Step 2 first.",
         )
-    if not session.guest_selected_columns or not session.guest_email_column:
+    if not session.guest_selected_columns:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Column configuration not saved. Please complete Step 2 first.",
@@ -491,16 +494,22 @@ def _render_guest_certificate(
     """Synchronous Pillow rendering — called inside asyncio.to_thread."""
     from PIL import Image, ImageDraw, ImageFont
 
-    _FONTS_DIR = Path(__file__).parent.parent / "static" / "fonts"
-    _DEFAULT_FONT = _FONTS_DIR / "PlayfairDisplay.ttf"
+    _FONTS_DIR = Path(__file__).resolve().parents[2] / "static" / "fonts"
+    _FONT_CANDIDATES = [
+        _FONTS_DIR / "Montserrat-Bold.ttf",
+        _FONTS_DIR / "PlayfairDisplay.ttf",
+        _FONTS_DIR / "EBGaramond.ttf",
+        _FONTS_DIR / "Roboto.ttf",
+    ]
     DEFAULT_FONT_PERCENT = 2.7
 
     def _load_font(size: int):
-        try:
-            if _DEFAULT_FONT.exists():
-                return ImageFont.truetype(str(_DEFAULT_FONT), size)
-        except Exception:
-            pass
+        for font_path in _FONT_CANDIDATES:
+            try:
+                if font_path.exists():
+                    return ImageFont.truetype(str(font_path), size)
+            except Exception:
+                continue
         return ImageFont.load_default()
 
     img = Image.open(str(template_path)).convert("RGBA")
@@ -517,7 +526,15 @@ def _render_guest_certificate(
         font = _load_font(font_size)
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h
-        draw.text((x, y), value, font=font, fill=(30, 30, 30, 255), anchor="mm")
+        draw.text(
+            (x, y),
+            value,
+            font=font,
+            fill=(30, 30, 30, 255),
+            anchor="mm",
+            stroke_width=1,
+            stroke_fill=(30, 30, 30, 255),
+        )
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -657,7 +674,6 @@ async def get_guest_status(
         "step2_complete": bool(
             session.guest_excel_data
             and session.guest_selected_columns
-            and session.guest_email_column
         ),
         "excel_row_count": len(session.guest_excel_data) if session.guest_excel_data else 0,
         "selected_columns": session.guest_selected_columns or [],

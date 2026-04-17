@@ -213,12 +213,11 @@ function Step2({ initialState, onComplete, onBack }) {
 
   const saveConfig = async () => {
     if (selectedCols.size === 0) { addToast({ type: 'warning', message: 'Select at least one column.' }); return }
-    if (!emailCol) { addToast({ type: 'warning', message: 'Designate an email column.' }); return }
     setSaving(true)
     try {
       await axiosInstance.post(
         `/guest/config`,
-        { selected_columns: Array.from(selectedCols), email_column: emailCol },
+        { selected_columns: Array.from(selectedCols), email_column: emailCol || null },
       )
       addToast({ type: 'success', message: 'Column configuration saved.' })
       onComplete({ selectedColumns: Array.from(selectedCols), emailColumn: emailCol, headers, rowCount })
@@ -235,7 +234,7 @@ function Step2({ initialState, onComplete, onBack }) {
   return (
     <StepCard
       title="Upload Excel & Select Columns"
-      subtitle="Upload your participant Excel file. Select which columns to print, and designate the email column for delivery."
+      subtitle="Upload your participant Excel file and select only the columns you want on certificates. Email column is optional and only needed for sending emails."
     >
       <div className="space-y-6">
         <div>
@@ -296,8 +295,8 @@ function Step2({ initialState, onComplete, onBack }) {
 
             <div>
               <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-                Email column <span className="text-red-500">*</span>
-                <span className="ml-1.5 text-xs text-gray-400 font-normal">(used to send certificates)</span>
+                Email column
+                <span className="ml-1.5 text-xs text-gray-400 font-normal">(optional, required only for Send Emails step)</span>
               </label>
               <select
                 id="guest-email-col-select"
@@ -323,7 +322,7 @@ function Step2({ initialState, onComplete, onBack }) {
             id="guest-step2-next"
             className="px-6 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
             onClick={saveConfig}
-            disabled={saving || selectedCols.size === 0 || !emailCol}
+            disabled={saving || selectedCols.size === 0}
           >
             {saving ? <><LoadingSpinner size="sm" label="" /> Saving…</> : 'Save & Continue →'}
           </button>
@@ -351,6 +350,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
   const [activeCol, setActiveCol] = useState(selectedColumns[0] || null)
   const [saving, setSaving]       = useState(false)
   const [imgLoaded, setImgLoaded] = useState(false)
+  const [templateAspect, setTemplateAspect] = useState(16 / 11)
 
   // Prefer blob URL (instant) > server URL > nothing
   const imgSrc = resolveImgSrc(templateBlobUrl || templateUrl)
@@ -430,7 +430,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
           <div
             ref={canvasRef}
             className="relative w-full rounded-xl overflow-hidden border border-gray-200 cursor-crosshair bg-gray-100"
-            style={{ aspectRatio: '16/11' }}
+            style={{ aspectRatio: String(templateAspect) }}
             onClick={handleCanvasClick}
           >
             {imgSrc ? (
@@ -438,9 +438,15 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
                 ref={imgRef}
                 src={imgSrc}
                 alt="Certificate template"
-                className="absolute inset-0 w-full h-full object-fill select-none"
+                className="absolute inset-0 w-full h-full object-contain select-none"
                 draggable={false}
-                onLoad={() => setImgLoaded(true)}
+                onLoad={(e) => {
+                  setImgLoaded(true)
+                  const img = e.currentTarget
+                  if (img?.naturalWidth && img?.naturalHeight) {
+                    setTemplateAspect(img.naturalWidth / img.naturalHeight)
+                  }
+                }}
                 onError={(e) => { e.target.style.display = 'none' }}
               />
             ) : (
@@ -484,7 +490,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
         </div>
 
         {/* Controls panel */}
-        <div className="w-full lg:w-72 space-y-3 flex-shrink-0">
+        <div className="w-full lg:w-64 space-y-3 flex-shrink-0">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Field Controls</p>
           <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
             {selectedColumns.map((col) => {
@@ -570,9 +576,10 @@ function Step4Sample({ onBack, onComplete }) {
 
   const fetchSample = async () => {
     setLoading(true)
+    setSample(null)
     try {
       const { data } = await axiosInstance.post('/guest/sample-preview')
-      setSample(data)
+      setSample({ ...data, _previewTs: Date.now() })
     } catch (err) {
       addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to generate sample preview.' })
     } finally {
@@ -584,7 +591,10 @@ function Step4Sample({ onBack, onComplete }) {
     fetchSample()
   }, [])
 
-  const sampleSrc = resolveImgSrc(sample?.sample_url)
+  const sampleSrcBase = resolveImgSrc(sample?.sample_url)
+  const sampleSrc = sampleSrcBase
+    ? `${sampleSrcBase}${sampleSrcBase.includes('?') ? '&' : '?'}t=${sample?._previewTs || Date.now()}`
+    : null
 
   return (
     <StepCard
@@ -599,7 +609,7 @@ function Step4Sample({ onBack, onComplete }) {
               {loading ? (
                 <div className="flex h-64 items-center justify-center"><LoadingSpinner label="Generating sample..." /></div>
               ) : sampleSrc ? (
-                <img src={sampleSrc} alt="Sample certificate preview" className="w-full rounded-lg object-contain" />
+                <img key={sample?._previewTs || 'sample'} src={sampleSrc} alt="Sample certificate preview" className="w-full rounded-lg object-contain" />
               ) : (
                 <div className="flex h-64 items-center justify-center text-sm text-gray-400">No sample available</div>
               )}
@@ -765,7 +775,7 @@ function Step4({ rowCount, onComplete, onBack }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 5 — Send emails + ZIP download
 // ─────────────────────────────────────────────────────────────────────────────
-function Step5({ generatedCount, emailsSent: initialEmailsSent, onBack }) {
+function Step5({ generatedCount, emailsSent: initialEmailsSent, emailColumn, onBack }) {
   const addToast   = useToastStore((s) => s.addToast)
   const [sending, setSending]         = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -849,10 +859,13 @@ function Step5({ generatedCount, emailsSent: initialEmailsSent, onBack }) {
               id="guest-send-emails-btn"
               className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
               onClick={sendEmails}
-              disabled={sending}
+              disabled={sending || !emailColumn}
             >
               {sending ? <><LoadingSpinner size="sm" label="" /> Sending…</> : emailsSent ? '↺ Resend Emails' : '✉ Send Emails'}
             </button>
+            {!emailColumn && (
+              <p className="mt-2 text-xs text-amber-600">Choose an Email column in Step 2 to enable sending.</p>
+            )}
           </div>
 
           {/* Download ZIP card */}
@@ -906,7 +919,7 @@ export default function GuestWizard({ eventName }) {
   const [generatedCount, setGeneratedCount] = useState(0)
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <StepIndicator current={step} />
 
       {step === 1 && (
@@ -959,6 +972,7 @@ export default function GuestWizard({ eventName }) {
         <Step5
           generatedCount={generatedCount}
           emailsSent={false}
+          emailColumn={excelState?.emailColumn}
           onBack={() => setStep(5)}
         />
       )}
