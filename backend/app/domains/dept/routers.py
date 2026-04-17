@@ -221,7 +221,7 @@ def _pick_email_from_row(row: dict[str, str]) -> Optional[str]:
 
 
 def _load_font(size: int):
-    font_path = Path(__file__).parent.parent.parent / "static" / "fonts" / "PlayfairDisplay.ttf"
+    font_path = Path(__file__).parent.parent.parent / "static" / "fonts" / "Montserrat-Bold.ttf"
     try:
         if font_path.exists():
             return ImageFont.truetype(str(font_path), size)
@@ -271,10 +271,10 @@ def _render_dept_certificate(
     contrib_font = _load_font(max(1, int(ts)))
     cert_font = _load_font(max(1, int(zs)))
 
-    draw.text((w * nx, h * ny), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm")
-    draw.text((w * cx, h * cy), f"Class: {class_name}", fill=(45, 45, 45, 255), font=class_font, anchor="mm")
-    draw.text((w * tx, h * ty), f"Contribution: {contribution}", fill=(45, 45, 45, 255), font=contrib_font, anchor="mm")
-    draw.text((w * zx, h * zy), cert_number, fill=(44, 61, 127, 255), font=cert_font, anchor="lm")
+    draw.text((w * nx, h * ny), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm", stroke_width=1.5, stroke_fill=(28, 35, 70, 255))
+    draw.text((w * cx, h * cy), f"Class: {class_name}", fill=(45, 45, 45, 255), font=class_font, anchor="mm", stroke_width=1.5, stroke_fill=(45, 45, 45, 255))
+    draw.text((w * tx, h * ty), f"Contribution: {contribution}", fill=(45, 45, 45, 255), font=contrib_font, anchor="mm", stroke_width=1.5, stroke_fill=(45, 45, 45, 255))
+    draw.text((w * zx, h * zy), cert_number, fill=(44, 61, 127, 255), font=cert_font, anchor="lm", stroke_width=1.5, stroke_fill=(44, 61, 127, 255))
 
     def _paste_scaled(path: Optional[str], field_id: str, def_x: float, def_y: float, max_w_ratio: float, max_h_ratio: float):
         if not path:
@@ -342,7 +342,7 @@ def _render_dept_certificate_dynamic(
             value = _clean_text_value(row.get(field))
 
         if value:
-            draw.text((w * x / 100, h * y / 100), value, fill=(28, 35, 70, 255), font=font, anchor="mm")
+            draw.text((w * x / 100, h * y / 100), value, fill=(28, 35, 70, 255), font=font, anchor="mm", stroke_width=1.5, stroke_fill=(28, 35, 70, 255))
 
     cert_pos = field_positions.get("_cert_number")
     if cert_pos:
@@ -353,6 +353,8 @@ def _render_dept_certificate_dynamic(
             fill=(44, 61, 127, 255),
             font=cert_font,
             anchor="lm",
+            stroke_width=1.5,
+            stroke_fill=(44, 61, 127, 255),
         )
 
     def _paste_scaled(path: Optional[str], field_id: str, def_x: float, def_y: float, max_w_ratio: float, max_h_ratio: float):
@@ -840,7 +842,7 @@ async def generate_dept_event_certificate_preview(
     preview_row = evt.excel_preview_row or evt.excel_rows[0]
     dept_slug = _slugify(department)
     year = datetime.utcnow().year
-    cert_number = f"PREVIEW-DPT-{dept_slug[:4].upper()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    cert_number = f"PREVIEW-DPT-{dept_slug[:4].upper()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}-{uuid4().hex[:6].upper()}"
 
     png_bytes = _render_dept_certificate_dynamic(
         template_path=Path(template_doc.template_path),

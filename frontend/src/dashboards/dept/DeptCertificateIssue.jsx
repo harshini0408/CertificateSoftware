@@ -93,7 +93,12 @@ export default function DeptCertificateIssue({ event }) {
   const allReady = hasParticipants && hasTemplate && hasMapping
 
   const firstGenerated = (certs || []).find((c) => !!c.png_url)
-  const previewImageUrl = previewData?.preview?.png_url ? `${BACKEND_URL}${previewData.preview.png_url}` : null
+  const previewImageUrl = useMemo(() => {
+    if (!previewData?.preview?.png_url) return null
+    const base = `${BACKEND_URL}${previewData.preview.png_url}`
+    const cacheKey = previewData?.preview?.id || previewData?.preview?.created_at || Date.now()
+    return `${base}${base.includes('?') ? '&' : '?'}t=${encodeURIComponent(String(cacheKey))}`
+  }, [previewData])
   const templateUrl = toImageUrl(eventTemplate?.template?.template_url)
   const templateAspectRatio = 2480 / 3508
 
@@ -237,7 +242,17 @@ export default function DeptCertificateIssue({ event }) {
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="lg:col-span-2">
-            {firstGenerated?.png_url ? (
+            {previewImageUrl ? (
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <img
+                  key={previewData?.preview?.id || previewData?.preview?.created_at || 'dept-preview'}
+                  src={previewImageUrl}
+                  alt="Preview certificate"
+                  className="w-full rounded"
+                />
+                <p className="mt-2 text-xs text-gray-500">Showing backend-rendered preview using first Excel row and saved mapping.</p>
+              </div>
+            ) : firstGenerated?.png_url ? (
               <div className="rounded-lg border border-gray-200 bg-white p-3">
                 <img
                   src={`${BACKEND_URL}${firstGenerated.png_url}`}
@@ -245,15 +260,6 @@ export default function DeptCertificateIssue({ event }) {
                   className="w-full rounded"
                 />
                 <p className="mt-2 text-xs text-gray-500">Showing first generated certificate preview.</p>
-              </div>
-            ) : previewImageUrl ? (
-              <div className="rounded-lg border border-gray-200 bg-white p-3">
-                <img
-                  src={previewImageUrl}
-                  alt="Preview certificate"
-                  className="w-full rounded"
-                />
-                <p className="mt-2 text-xs text-gray-500">Showing backend-rendered preview using first Excel row and saved mapping.</p>
               </div>
             ) : templateUrl ? (
               <div className="rounded-lg border border-gray-200 bg-white p-3">

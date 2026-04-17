@@ -532,7 +532,7 @@ def _render_guest_certificate(
             font=font,
             fill=(30, 30, 30, 255),
             anchor="mm",
-            stroke_width=1,
+            stroke_width=1.5,
             stroke_fill=(30, 30, 30, 255),
         )
 
@@ -587,6 +587,14 @@ async def send_guest_emails(
     rows = session.guest_excel_data or []
     certs = session.guest_generated_certs or []
     email_col = session.guest_email_column
+
+    if rows:
+        header_keys = set(rows[0].keys())
+        if email_col not in header_keys:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Configured email column '{email_col}' was not found in uploaded Excel headers.",
+            )
 
     sent = 0
     failed = 0
