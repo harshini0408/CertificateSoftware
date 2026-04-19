@@ -65,6 +65,7 @@ function PreviewTag({ label, x, y, fontSize }) {
 export default function DeptCertificateIssue({ event }) {
   const addToast = useToastStore((s) => s.addToast)
   const [isDownloadingZip, setIsDownloadingZip] = useState(false)
+  const [localPreviewPayload, setLocalPreviewPayload] = useState(null)
 
   const { data: eventState } = useDeptEvent(event?.id)
   const { data: certs, isLoading: certsLoading } = useDeptEventCertificates(event?.id)
@@ -87,18 +88,36 @@ export default function DeptCertificateIssue({ event }) {
   const hasAssets = (!requiresLogo || !!assets?.has_logo) && (!requiresSignature || !!assets?.has_signature)
   const hasTemplate = !!eventTemplate?.template
   const hasMapping = !!mapping?.mapping_configured
-  const hasPreview = !!previewData?.preview
+  const hasPreview = !!(localPreviewPayload?.preview || previewData?.preview)
   const previewApproved = !!previewData?.preview_approved
 
   const allReady = hasParticipants && hasTemplate && hasMapping
 
-  const firstGenerated = (certs || []).find((c) => !!c.png_url)
-  const previewImageUrl = useMemo(() => {
-    if (!previewData?.preview?.png_url) return null
-    const base = `${BACKEND_URL}${previewData.preview.png_url}`
-    const cacheKey = previewData?.preview?.id || previewData?.preview?.created_at || Date.now()
-    return `${base}${base.includes('?') ? '&' : '?'}t=${encodeURIComponent(String(cacheKey))}`
+  useEffect(() => {
+    setLocalPreviewPayload(null)
+  }, [event?.id])
+
+  useEffect(() => {
+    if (!previewData?.preview) return
+    setLocalPreviewPayload((prev) => {
+      if (!prev?.preview) {
+        return { ...previewData, _previewTs: Date.now() }
+      }
+      if (prev.preview.id !== previewData.preview.id || prev.preview.png_url !== previewData.preview.png_url) {
+        return { ...previewData, _previewTs: Date.now() }
+      }
+      return prev
+    })
   }, [previewData])
+
+  const firstGenerated = (certs || []).find((c) => !!c.png_url)
+  const effectivePreviewPayload = localPreviewPayload || previewData
+  const previewImageUrl = useMemo(() => {
+    if (!effectivePreviewPayload?.preview?.png_url) return null
+    const base = `${BACKEND_URL}${effectivePreviewPayload.preview.png_url}`
+    const cacheKey = effectivePreviewPayload?._previewTs || effectivePreviewPayload?.preview?.id || effectivePreviewPayload?.preview?.created_at || Date.now()
+    return `${base}${base.includes('?') ? '&' : '?'}t=${encodeURIComponent(String(cacheKey))}`
+  }, [effectivePreviewPayload])
   const templateUrl = toImageUrl(eventTemplate?.template?.template_url)
   const templateAspectRatio = 2480 / 3508
 
@@ -130,6 +149,13 @@ export default function DeptCertificateIssue({ event }) {
       return
     }
     await generateMutation.mutateAsync()
+  }
+
+  const handleGeneratePreview = async () => {
+    const data = await previewMutation.mutateAsync()
+    if (data?.preview) {
+      setLocalPreviewPayload({ ...data, _previewTs: Date.now() })
+    }
   }
 
   const handleDownloadZip = async () => {
@@ -245,7 +271,7 @@ export default function DeptCertificateIssue({ event }) {
             {previewImageUrl ? (
               <div className="rounded-lg border border-gray-200 bg-white p-3">
                 <img
-                  key={previewData?.preview?.id || previewData?.preview?.created_at || 'dept-preview'}
+                  key={effectivePreviewPayload?._previewTs || effectivePreviewPayload?.preview?.id || effectivePreviewPayload?.preview?.created_at || 'dept-preview'}
                   src={previewImageUrl}
                   alt="Preview certificate"
                   className="w-full rounded"
@@ -294,7 +320,7 @@ export default function DeptCertificateIssue({ event }) {
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
               Participant Excel rows are persisted from the Overview step.
             </div>
-            <button className="btn-secondary w-full" onClick={() => previewMutation.mutate()} disabled={previewMutation.isPending || !allReady}>
+            <button className="btn-secondary w-full" onClick={handleGeneratePreview} disabled={previewMutation.isPending || !allReady}>
               {previewMutation.isPending ? 'Generating Preview...' : (hasPreview ? 'Regenerate Preview' : 'Generate Preview')}
             </button>
             <button className="btn-secondary w-full" onClick={() => approvePreviewMutation.mutate()} disabled={approvePreviewMutation.isPending || !hasPreview || previewApproved}>

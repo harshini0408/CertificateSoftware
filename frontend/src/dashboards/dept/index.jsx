@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
+import { createPortal } from 'react-dom'
 
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
@@ -106,6 +107,15 @@ function EventsTab() {
 
   const isModalOpen = searchParams.get('openEvent') === '1'
 
+  useEffect(() => {
+    if (!isModalOpen) return undefined
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevOverflow
+    }
+  }, [isModalOpen])
+
   const openModal = () => {
     const next = new URLSearchParams(searchParams)
     next.set('openEvent', '1')
@@ -180,12 +190,13 @@ function EventsTab() {
         rowKey="id"
       />
 
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy/40 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+      {isModalOpen && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={closeModal}>
+          <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-lg font-bold text-navy">Create New Event</h3>
-              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">x</button>
+              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600" aria-label="Close modal">x</button>
             </div>
             <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
               <div>
@@ -213,7 +224,8 @@ function EventsTab() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
@@ -449,12 +461,23 @@ function SettingsTab() {
 }
 
 export default function DeptCoordinatorDashboard() {
+  const navigate = useNavigate()
   const { event_id: eventId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const activeTab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'events'
 
+  useEffect(() => {
+    if (eventId && activeTab === 'settings') {
+      navigate('/dept?tab=settings', { replace: true })
+    }
+  }, [eventId, activeTab, navigate])
+
   const setTab = (tab) => {
+    if (eventId) {
+      navigate(`/dept?tab=${tab}`)
+      return
+    }
     setSearchParams({ tab }, { replace: true })
   }
 

@@ -15,7 +15,6 @@ import {
   useMyManualCreditSubmissions,
   useMyProfile,
   useStudentCreditRules,
-  CREDIT_WEIGHTS,
 } from './api'
 
 // ── Icon helpers ──────────────────────────────────────────────────────────────
@@ -45,7 +44,11 @@ const TYPE_COLORS = {
 }
 
 // ── Credits breakdown bar ─────────────────────────────────────────────────────
-function CreditsBreakdown({ breakdown, total }) {
+function normalizeCertType(value) {
+  return (value || '').toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_')
+}
+
+function CreditsBreakdown({ breakdown, total, creditRules, rulesLoading }) {
   if (!breakdown?.length) return null
 
   const PALETTE = [
@@ -93,15 +96,25 @@ function CreditsBreakdown({ breakdown, total }) {
       <div className="pt-2 border-t border-gray-100">
         <p className="text-xs text-gray-400 mb-1.5">Credit weights per cert type:</p>
         <div className="flex flex-wrap gap-2">
-          {Object.entries(CREDIT_WEIGHTS).map(([type, weight]) => (
-            <span
-              key={type}
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium
-                ${TYPE_COLORS[type] ?? 'bg-gray-100 text-gray-600'}`}
-            >
-              {type.replace(/_/g, ' ')} × {weight}
-            </span>
-          ))}
+          {rulesLoading && (
+            <span className="text-[10px] text-gray-400">Loading credit rules...</span>
+          )}
+          {!rulesLoading && !(creditRules || []).length && (
+            <span className="text-[10px] text-gray-400">No credit rules configured.</span>
+          )}
+          {!rulesLoading && (creditRules || []).map((rule) => {
+            const type = rule?.cert_type || ''
+            const normalizedType = normalizeCertType(type)
+            return (
+              <span
+                key={type}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium
+                  ${TYPE_COLORS[normalizedType] ?? 'bg-gray-100 text-gray-600'}`}
+              >
+                {type.replace(/_/g, ' ')} × {rule?.points ?? 0}
+              </span>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -323,6 +336,8 @@ export default function StudentDashboard() {
             <CreditsBreakdown
               breakdown={credits?.breakdown}
               total={totalCredits}
+              creditRules={creditRules}
+              rulesLoading={rulesLoading}
             />
 
             <div className="card p-5">

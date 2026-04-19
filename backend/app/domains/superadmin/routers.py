@@ -16,6 +16,9 @@ from ...models.user import User, UserRole
 from ...models.club import Club
 from ...models.event import Event
 from ...models.certificate import Certificate, CertStatus
+from ...models.dept_certificate import DeptCertificate
+from ...models.dept_event import DeptEvent
+from ...models.guest_session import GuestSession
 from ...models.email_log import EmailLog, EmailStatus
 from ...models.scan_log import ScanLog
 from ...models.credit_rule import CreditRule
@@ -823,39 +826,164 @@ async def platform_stats(_user: User = _admin):
     total_clubs = await Club.find(Club.is_active == True).count()
     total_users = await User.find(User.role != UserRole.SUPER_ADMIN).count()
     total_students = await User.find(User.role == UserRole.STUDENT).count()
-    total_certificates = await Certificate.find_all().count()
+    club_certificates = await Certificate.find_all().count()
+    dept_certificates = await DeptCertificate.find_all().count()
+    guest_sessions = await GuestSession.find_all().to_list()
+    guest_certificates = sum(len(session.guest_generated_certs or []) for session in guest_sessions)
+    total_certificates = club_certificates + dept_certificates + guest_certificates
 
-    certificates_today = await Certificate.find(
+    club_certificates_today = await Certificate.find(
         {"issued_at": {"$gte": today_start}}
     ).count()
+
+    dept_certificates_today = await DeptCertificate.find(
+        {"created_at": {"$gte": today_start}}
+    ).count()
+
+    guest_sessions_today = await GuestSession.find(
+        {"created_at": {"$gte": today_start}}
+    ).to_list()
+    guest_certificates_today = sum(
+        len(session.guest_generated_certs or []) for session in guest_sessions_today
+    )
+    certificates_today = club_certificates_today + dept_certificates_today + guest_certificates_today
 
     emails_sent_today = await EmailLog.find(
         {"sent_at": {"$gte": today_start}, "status": EmailStatus.SENT.value}
     ).count()
 
-    # ── Certs per club (aggregation pipeline) ────────────────────────────
-    pipeline = [
-        {"$group": {"_id": "$club_id", "count": {"$sum": 1}}},
+    certs_by_source = [
+        {"slug": "clubs", "name": "Clubs", "count": club_certificates},
+        {"slug": "departments", "name": "Departments", "count": dept_certificates},
+        {"slug": "guest", "name": "Guest", "count": guest_certificates},
     ]
-    raw_groups = await Certificate.aggregate(pipeline).to_list()
 
-    # Build an id → Club lookup to resolve names & slugs
-    all_clubs = await Club.find_all().to_list()
-    club_map: dict = {str(c.id): c for c in all_clubs}
+    def _summarize_status(status_counts: dict[str, int], mailed_count: int, total_count: int) -> str:
+        if total_count > 0 and mailed_count == total_count:
+            return "emailed"
+        if status_counts.get("generated", 0) > 0:
+            return "generated"
+        if status_counts.get("pending", 0) > 0:
+            return "pending"
+        if status_counts.get("failed", 0) > 0:
+            return "failed"
+        if status_counts.get("revoked", 0) > 0:
+            return "revoked"
+        return "generated"
 
-    certs_per_club = []
-    for item in raw_groups:
-        club_oid = item.get("_id")
-        if not club_oid:
+    grouped_recent: dict[tuple[str, str, str], dict] = {}
+
+    recent_club_certs = await Certificate.find_all().sort("-issued_at").limit(1200).to_list()
+    for cert in recent_club_certs:
+        generated_at = cert.issued_at
+        if not generated_at:
             continue
-        club = club_map.get(str(club_oid))
-        if club:
-            certs_per_club.append(
-                {"club_name": club.name, "slug": club.slug, "count": item["count"]}
-            )
+        source_name = (cert.snapshot.club_name or "Club").strip() or "Club"
+        event_name = (cert.snapshot.event_name or "Club Event").strip() or "Club Event"
+        key = ("club", source_name, event_name)
+        bucket = grouped_recent.get(key)
+        if not bucket:
+            bucket = {
+                "source_type": "club",
+                "source_name": source_name,
+                "event_name": event_name,
+                "generated_at": generated_at,
+                "count": 0,
+                "mailed_count": 0,
+                "status_counts": {},
+            }
+            grouped_recent[key] = bucket
+        if generated_at > bucket["generated_at"]:
+            bucket["generated_at"] = generated_at
+        bucket["count"] += 1
+        status_key = cert.status.value
+        bucket["status_counts"][status_key] = bucket["status_counts"].get(status_key, 0) + 1
+        if status_key == CertStatus.EMAILED.value:
+            bucket["mailed_count"] += 1
 
-    # Sort descending by count so the bar chart renders highest bars first
-    certs_per_club.sort(key=lambda x: x["count"], reverse=True)
+    recent_dept_certs = await DeptCertificate.find_all().sort("-created_at").limit(1200).to_list()
+    dept_event_ids: list[PydanticObjectId] = []
+    for cert in recent_dept_certs:
+        if cert.event_id:
+            try:
+                dept_event_ids.append(PydanticObjectId(cert.event_id))
+            except Exception:
+                continue
+
+    dept_event_map: dict[str, str] = {}
+    if dept_event_ids:
+        events = await DeptEvent.find({"_id": {"$in": dept_event_ids}}).to_list()
+        dept_event_map = {str(evt.id): evt.name for evt in events}
+
+    for cert in recent_dept_certs:
+        generated_at = cert.created_at
+        source_name = (cert.department or "Department").strip() or "Department"
+        event_name = dept_event_map.get(str(cert.event_id), "Department Event") if cert.event_id else "Department Event"
+        key = ("department", source_name, event_name)
+        bucket = grouped_recent.get(key)
+        if not bucket:
+            bucket = {
+                "source_type": "department",
+                "source_name": source_name,
+                "event_name": event_name,
+                "generated_at": generated_at,
+                "count": 0,
+                "mailed_count": 0,
+                "status_counts": {},
+            }
+            grouped_recent[key] = bucket
+        if generated_at > bucket["generated_at"]:
+            bucket["generated_at"] = generated_at
+        bucket["count"] += 1
+        status_key = "emailed" if cert.emailed_at else "generated"
+        bucket["status_counts"][status_key] = bucket["status_counts"].get(status_key, 0) + 1
+        if cert.emailed_at:
+            bucket["mailed_count"] += 1
+
+    recent_guest_sessions = await GuestSession.find_all().sort("-created_at").limit(600).to_list()
+    for session in recent_guest_sessions:
+        generated_count = len(session.guest_generated_certs or [])
+        if generated_count <= 0:
+            continue
+        source_name = "Guest"
+        event_name = (session.event_name or "Guest Event").strip() or "Guest Event"
+        key = ("guest", source_name, event_name)
+        bucket = grouped_recent.get(key)
+        if not bucket:
+            bucket = {
+                "source_type": "guest",
+                "source_name": source_name,
+                "event_name": event_name,
+                "generated_at": session.created_at,
+                "count": 0,
+                "mailed_count": 0,
+                "status_counts": {},
+            }
+            grouped_recent[key] = bucket
+        if session.created_at > bucket["generated_at"]:
+            bucket["generated_at"] = session.created_at
+        bucket["count"] += generated_count
+        mailed_for_session = generated_count if session.guest_emails_sent else 0
+        bucket["mailed_count"] += mailed_for_session
+        status_key = "emailed" if session.guest_emails_sent else "generated"
+        bucket["status_counts"][status_key] = bucket["status_counts"].get(status_key, 0) + generated_count
+
+    recent_certificates = []
+    for bucket in grouped_recent.values():
+        total = int(bucket["count"] or 0)
+        mailed = int(bucket["mailed_count"] or 0)
+        recent_certificates.append({
+            "source_type": bucket["source_type"],
+            "source_name": bucket["source_name"],
+            "event_name": bucket["event_name"],
+            "generated_at": bucket["generated_at"],
+            "count": total,
+            "mailed_count": mailed,
+            "status": _summarize_status(bucket["status_counts"], mailed, total),
+        })
+
+    recent_certificates.sort(key=lambda x: x["generated_at"] or datetime.min, reverse=True)
+    recent_certificates = recent_certificates[:12]
 
     return {
         "total_clubs": total_clubs,
@@ -864,5 +992,6 @@ async def platform_stats(_user: User = _admin):
         "total_certificates": total_certificates,
         "certificates_today": certificates_today,
         "emails_sent_today": emails_sent_today,
-        "certs_per_club": certs_per_club,
+        "certs_by_source": certs_by_source,
+        "recent_certificates": recent_certificates,
     }

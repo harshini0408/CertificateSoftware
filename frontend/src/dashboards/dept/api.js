@@ -132,7 +132,9 @@ export function useUploadDeptEventTemplate(eventId) {
       return data
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: deptKeys.event(eventId) })
       qc.invalidateQueries({ queryKey: deptKeys.eventTemplate(eventId) })
+      qc.invalidateQueries({ queryKey: deptKeys.eventCertificatePreview(eventId) })
       addToast({ type: 'success', message: 'Event template uploaded.' })
     },
     onError: (err) => {
@@ -180,7 +182,9 @@ export function useSaveDeptEventMapping(eventId) {
       return data
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: deptKeys.event(eventId) })
       qc.invalidateQueries({ queryKey: deptKeys.eventMapping(eventId) })
+      qc.invalidateQueries({ queryKey: deptKeys.eventCertificatePreview(eventId) })
       addToast({ type: 'success', message: 'Field mapping saved.' })
     },
     onError: (err) => {

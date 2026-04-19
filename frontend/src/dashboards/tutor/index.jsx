@@ -24,6 +24,19 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+const CREDIT_TARGET = 20
+
+function renderCreditAgainstTarget(points) {
+  const obtained = Number(points || 0)
+  const tone = obtained >= CREDIT_TARGET ? 'text-green-700' : 'text-red-600'
+  return (
+    <span className="font-bold">
+      <span className={tone}>{obtained}</span>
+      <span className="text-green-700">/{CREDIT_TARGET}</span>
+    </span>
+  )
+}
+
 function DetailModal({ email, onClose }) {
   const { data, isLoading } = useTutorStudentDetail(email, !!email)
 
@@ -48,7 +61,7 @@ function DetailModal({ email, onClose }) {
               <div><span className="text-gray-500">Name:</span> <span className="font-semibold">{data?.student_name || '—'}</span></div>
               <div><span className="text-gray-500">Reg No:</span> <span className="font-semibold">{data?.registration_number || '—'}</span></div>
               <div><span className="text-gray-500">Email:</span> <span className="font-semibold">{data?.student_email || '—'}</span></div>
-              <div><span className="text-gray-500">Total Credits:</span> <span className="font-bold text-navy">{data?.total_credits ?? 0}</span></div>
+              <div><span className="text-gray-500">Total Credits:</span> {renderCreditAgainstTarget(data?.total_credits)}</div>
             </div>
 
             <DataTable
@@ -285,7 +298,7 @@ export default function TutorDashboard() {
                   },
                   { key: 'registration_number', header: 'Reg Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
                   { key: 'student_email', header: 'Email', searchKey: true },
-                  { key: 'total_credits', header: 'Credit Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
+                  { key: 'total_credits', header: 'Credit Points', align: 'right', render: (v) => renderCreditAgainstTarget(v) },
                 ]}
                 data={students || []}
                 isLoading={studentsLoading}
