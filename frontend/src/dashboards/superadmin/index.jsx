@@ -14,7 +14,17 @@ import ConfirmModal from '../../components/ConfirmModal'
 import CertificateMappingTab from './CertificateMappingTab'
 
 import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../club/api'
-import { useUsers, useCreateUser, useUpdateUser, useAssignTutorStudents, useBulkImportTutorStudents } from './usersApi'
+import {
+  useUsers,
+  useCreateUser,
+  useUpdateUser,
+  useAssignTutorStudents,
+  useBulkImportTutorStudents,
+  useBulkImportTutors,
+  useDownloadTutorImportSample,
+  useReassignTutorStudents,
+  useTutorMappingSummary,
+} from './usersApi'
 import {
   useAdminStats,
   useAdminClubs,
@@ -743,7 +753,7 @@ function CertificatesTab() {
       render: (v) => <StatusBadge status={v} size="sm" /> },
     { key: 'issued_at', header: 'Issued', render: (v) => fmtDate(v) },
     { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
-      row.status !== 'revoked' && (
+      !['revoked', 'emailed'].includes((row.status || '').toLowerCase()) && (
         <button
           onClick={() => setRevokeTarget(row)}
           className="rounded p-1 text-xs font-semibold text-red-600 hover:bg-red-50 hover:underline"
@@ -1179,6 +1189,196 @@ function BulkImportModal({ isOpen, onClose }) {
   )
 }
 
+function TutorBulkImportModal({ isOpen, onClose }) {
+  const [file, setFile] = useState(null)
+  const [result, setResult] = useState(null)
+  const importMutation = useBulkImportTutors()
+  const downloadSample = useDownloadTutorImportSample()
+
+  const handleClose = () => {
+    setFile(null)
+    setResult(null)
+    onClose()
+  }
+
+  const handleSubmit = () => {
+    if (!file) return
+    importMutation.mutate(file, {
+      onSuccess: ({ data }) => setResult(data),
+    })
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Bulk Import Tutors" wide>
+      {!result ? (
+        <div className="space-y-5">
+          <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
+            <p className="text-sm font-semibold text-blue-800 mb-1">Excel File Requirements</p>
+            <p className="text-xs text-blue-700">
+              Upload a <span className="font-mono font-bold">.xlsx</span> file with these column headers
+              (case-insensitive, in any order):
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {['name', 'username', 'email', 'password', 'department', 'batch', 'section'].map((col) => (
+                <span key={col} className="inline-block rounded bg-blue-100 px-2 py-0.5 font-mono text-[11px] text-blue-800">{col}</span>
+              ))}
+            </div>
+            <div className="mt-3">
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                onClick={() => downloadSample.mutate()}
+                disabled={downloadSample.isPending}
+              >
+                {downloadSample.isPending ? 'Downloading sample...' : 'Download Sample Excel'}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="form-label">Select Tutor Excel File (.xlsx)</label>
+            <input
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-gray-500 file:mr-3 file:rounded file:border-0
+                file:bg-navy/10 file:px-3 file:py-1.5 file:text-xs file:font-medium
+                file:text-navy hover:file:bg-navy/20 cursor-pointer"
+            />
+            {file && (
+              <p className="mt-1 text-xs text-gray-500">
+                Selected: <span className="font-medium">{file.name}</span> ({(file.size / 1024).toFixed(1)} KB)
+              </p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            <button className="btn-secondary" onClick={handleClose}>Cancel</button>
+            <button className="btn-primary" onClick={handleSubmit} disabled={!file || importMutation.isPending}>
+              {importMutation.isPending ? 'Importing...' : 'Import Tutors'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg bg-green-50 border border-green-100 p-3 text-center">
+              <p className="text-2xl font-bold text-green-700">{result.created}</p>
+              <p className="text-xs text-green-600 font-medium mt-0.5">Created</p>
+            </div>
+            <div className="rounded-lg bg-yellow-50 border border-yellow-100 p-3 text-center">
+              <p className="text-2xl font-bold text-yellow-700">{result.skipped}</p>
+              <p className="text-xs text-yellow-600 font-medium mt-0.5">Skipped</p>
+            </div>
+            <div className="rounded-lg bg-red-50 border border-red-100 p-3 text-center">
+              <p className="text-2xl font-bold text-red-700">{result.errors.length}</p>
+              <p className="text-xs text-red-600 font-medium mt-0.5">Errors</p>
+            </div>
+          </div>
+
+          {result.errors.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Row Errors</p>
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-red-100 bg-red-50 divide-y divide-red-100">
+                {result.errors.map((e, i) => (
+                  <div key={i} className="flex gap-3 px-3 py-2">
+                    <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-red-700">Row {e.row}</span>
+                    <span className="text-xs text-red-700">{e.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            <button className="btn-secondary" onClick={() => { setFile(null); setResult(null) }}>Import Another File</button>
+            <button className="btn-primary" onClick={handleClose}>Done</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor }) {
+  const [fromTutorId, setFromTutorId] = useState('')
+  const [toTutorId, setToTutorId] = useState('')
+  const switchMutation = useReassignTutorStudents()
+
+  useEffect(() => {
+    if (!isOpen) return
+    setFromTutorId(initialTutor?.id || '')
+    setToTutorId('')
+  }, [isOpen, initialTutor])
+
+  const fromTutor = (tutors || []).find((t) => t.id === fromTutorId) || null
+  const targetTutorOptions = (tutors || []).filter((t) => t.id !== fromTutorId)
+  const toTutor = targetTutorOptions.find((t) => t.id === toTutorId) || null
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!fromTutorId || !toTutorId) return
+    switchMutation.mutate(
+      { fromTutorId, toTutorId },
+      {
+        onSuccess: () => onClose(),
+      },
+    )
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Switch Tutor For Students" wide>
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <p className="text-sm text-gray-600">
+          Select the current tutor and target tutor. All students currently mapped to the selected tutor will be reassigned.
+        </p>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className="form-label">Current Tutor *</label>
+            <select className="form-input" value={fromTutorId} onChange={(e) => setFromTutorId(e.target.value)}>
+              <option value="">Select tutor...</option>
+              {(tutors || []).map((t) => (
+                <option key={t.id} value={t.id}>{t.name} ({t.email})</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label">New Tutor *</label>
+            <select className="form-input" value={toTutorId} onChange={(e) => setToTutorId(e.target.value)} disabled={!fromTutorId}>
+              <option value="">Select tutor...</option>
+              {targetTutorOptions.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} ({t.email})</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {fromTutor && (
+          <div className="rounded border border-gray-200 p-3 text-xs text-gray-600">
+            <p><span className="font-semibold text-gray-800">Current tutor:</span> {fromTutor.name} ({fromTutor.email})</p>
+            <p><span className="font-semibold text-gray-800">Scope:</span> {fromTutor.department || '—'} / {fromTutor.batch || '—'} / {fromTutor.section || '—'}</p>
+          </div>
+        )}
+        {toTutor && (
+          <div className="rounded border border-green-200 bg-green-50 p-3 text-xs text-green-700">
+            <p><span className="font-semibold">Target tutor:</span> {toTutor.name} ({toTutor.email})</p>
+            <p><span className="font-semibold">Scope:</span> {toTutor.department || '—'} / {toTutor.batch || '—'} / {toTutor.section || '—'}</p>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={!fromTutorId || !toTutorId || switchMutation.isPending}>
+            {switchMutation.isPending ? 'Switching...' : 'Switch Students'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 // ── USERS TAB ─────────────────────────────────────────────────────────────────
 function UsersTab() {
   const [search, setSearch] = useState('')
@@ -1192,10 +1392,15 @@ function UsersTab() {
   }, [debouncedSearch, roleFilter])
   const { data: users, isLoading } = useUsers(filters)
   const { data: clubs } = useClubs()
+  const { data: tutors } = useUsers({ role: 'tutor' })
+  const { data: tutorMappingSummary, isLoading: tutorMappingLoading } = useTutorMappingSummary()
 
   const [showBulkImport, setShowBulkImport] = useState(false)
+  const [showTutorBulkImport, setShowTutorBulkImport] = useState(false)
+  const [showTutorSwitch, setShowTutorSwitch] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [editUser, setEditUser] = useState(null)
+  const [selectedTutorForSwitch, setSelectedTutorForSwitch] = useState(null)
 
   const clubMap = useMemo(() => {
     const m = {}
@@ -1219,6 +1424,18 @@ function UsersTab() {
     { key: '_scope', header: 'Scope', searchKey: false, render: (_, row) => <span className="text-xs text-gray-500">{getScope(row)}</span> },
     { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        {row.role === 'tutor' && (
+          <button
+            title="Switch students to another tutor"
+            onClick={() => {
+              setSelectedTutorForSwitch(row)
+              setShowTutorSwitch(true)
+            }}
+            className="rounded p-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 hover:underline"
+          >
+            Switch Students
+          </button>
+        )}
         <button title="Edit" onClick={() => setEditUser(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
         </button>
@@ -1234,7 +1451,22 @@ function UsersTab() {
             className="btn-secondary"
             onClick={() => setShowBulkImport(true)}
           >
-            ↑ Bulk Import
+            ↑ Import Students
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={() => setShowTutorBulkImport(true)}
+          >
+            ↑ Import Tutors
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              setSelectedTutorForSwitch(null)
+              setShowTutorSwitch(true)
+            }}
+          >
+            ⇄ Switch Tutor Mapping
           </button>
           <button className="btn-primary" onClick={() => setShowNew(true)}>+ New User</button>
         </div>
@@ -1250,8 +1482,53 @@ function UsersTab() {
           <option value="guest">Guest</option>
         </select>
       </div>
+
+      <div className="card p-4">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-foreground">Tutor Mapping Snapshot</h2>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="rounded bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">
+                Tutors: {tutorMappingLoading ? '...' : (tutorMappingSummary?.total_tutors ?? 0)}
+              </span>
+              <span className="rounded bg-green-50 px-2 py-1 font-semibold text-green-700">
+                Mapped Students: {tutorMappingLoading ? '...' : (tutorMappingSummary?.total_mapped_students ?? 0)}
+              </span>
+            </div>
+          </div>
+
+          {!tutorMappingLoading && (
+            <div className="flex flex-wrap gap-2">
+              {(tutorMappingSummary?.items || []).slice(0, 12).map((t) => (
+                <span
+                  key={t.id}
+                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
+                  title={`${t.name} (${t.email})`}
+                >
+                  <span className="font-medium">{t.name}</span>
+                  <span className="text-gray-500">x {t.mapped_students}</span>
+                </span>
+              ))}
+              {(tutorMappingSummary?.items || []).length === 0 && (
+                <span className="text-xs text-gray-500">No tutor mappings found.</span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
       <DataTable columns={columns} data={users || []} isLoading={isLoading} emptyMessage="No users found matching your filters." />
       <BulkImportModal isOpen={showBulkImport} onClose={() => setShowBulkImport(false)} />
+      <TutorBulkImportModal isOpen={showTutorBulkImport} onClose={() => setShowTutorBulkImport(false)} />
+      <TutorSwitchModal
+        isOpen={showTutorSwitch}
+        onClose={() => {
+          setShowTutorSwitch(false)
+          setSelectedTutorForSwitch(null)
+        }}
+        tutors={tutors || []}
+        initialTutor={selectedTutorForSwitch}
+      />
       <NewUserModal isOpen={showNew} onClose={() => setShowNew(false)} />
       <EditUserModal isOpen={!!editUser} onClose={() => setEditUser(null)} user={editUser} />
     </div>

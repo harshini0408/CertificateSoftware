@@ -8,6 +8,7 @@ from typing import List, Optional
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import File, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ...core.dependencies import require_role
@@ -40,6 +41,10 @@ class TutorStudentItem(BaseModel):
 
 class TutorStudentAssignRequest(BaseModel):
     students: List[TutorStudentItem]
+
+
+class TutorReassignRequest(BaseModel):
+    new_tutor_id: PydanticObjectId
 
 
 async def _assign_student_to_tutor(
@@ -88,6 +93,16 @@ async def _assign_student_to_tutor(
         credit_history=[],
         last_updated=datetime.utcnow(),
     ).insert()
+
+
+async def _find_tutor_by_email(email: str | None) -> User | None:
+    email_norm = (email or "").strip().lower()
+    if not email_norm:
+        return None
+    tutor = await User.find_one(User.email == email_norm)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        return None
+    return tutor
 
 
 # ── Helper: Build UserResponse from User document ────────────────────────────
@@ -409,6 +424,12 @@ async def bulk_import_students(
             if len(password) < 8:
                 raise ValueError("Password must be at least 8 characters")
 
+            tutor = None
+            if tutor_email:
+                tutor = await _find_tutor_by_email(tutor_email)
+                if not tutor:
+                    raise ValueError(f"Tutor email '{tutor_email}' not found")
+
             # Uniqueness checks
             if await User.find_one(User.username == username):
                 skipped += 1
@@ -443,7 +464,7 @@ async def bulk_import_students(
             if not existing_credit:
                 await StudentCredit(
                     student_email=email,
-                    tutor_email=tutor_email or None,
+                    tutor_email=(tutor.email if tutor else None),
                     registration_number=reg_no,
                     student_name=name,
                     department=dept,
@@ -453,9 +474,136 @@ async def bulk_import_students(
                     credit_history=[],
                     last_updated=datetime.utcnow(),
                 ).insert()
-            elif tutor_email and existing_credit.tutor_email != tutor_email:
-                await existing_credit.set({"tutor_email": tutor_email, "last_updated": datetime.utcnow()})
+            elif tutor and existing_credit.tutor_email != tutor.email:
+                await existing_credit.set({"tutor_email": tutor.email, "last_updated": datetime.utcnow()})
 
+            created += 1
+
+        except ValueError as ve:
+            errors.append({"row": row_idx, "reason": str(ve)})
+        except Exception as exc:
+            errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+@router.get("/users/bulk-import-tutors/sample")
+async def download_tutor_import_sample(_user: User = _admin):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Tutors"
+
+    headers = ["name", "username", "email", "password", "department", "batch", "section"]
+    ws.append(headers)
+    ws.append(["Jane Tutor", "jane_tutor", "jane.tutor@example.com", "Passw0rd!", "CSE", "2024-2028", "A"])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=tutor_bulk_import_sample.xlsx"},
+    )
+
+
+@router.post("/users/bulk-import-tutors", status_code=200)
+async def bulk_import_tutors(
+    file: UploadFile = File(...),
+    _user: User = _admin,
+):
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only .xlsx files are accepted")
+
+    import openpyxl
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not parse the Excel file. Ensure it is a valid .xlsx.")
+
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel file is empty or has no header row")
+
+    headers = [str(h).strip().lower() if h is not None else "" for h in header_row]
+    required = {"name", "username", "email", "password", "department", "batch", "section"}
+    missing = required - set(headers)
+    if missing:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Missing required columns: {', '.join(sorted(missing))}. Found: {', '.join(h for h in headers if h)}",
+        )
+
+    def col(row_vals, field):
+        try:
+            idx = headers.index(field)
+            v = row_vals[idx]
+            return str(v).strip() if v is not None else ""
+        except (ValueError, IndexError):
+            return ""
+
+    created = 0
+    skipped = 0
+    errors = []
+
+    for row_idx, row_vals in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if all(v is None or str(v).strip() == "" for v in row_vals):
+            continue
+
+        name = col(row_vals, "name")
+        username = col(row_vals, "username")
+        email = col(row_vals, "email").lower()
+        password = col(row_vals, "password")
+        department = col(row_vals, "department")
+        batch = col(row_vals, "batch")
+        section = col(row_vals, "section")
+
+        try:
+            missing_fields = [
+                f for f, v in [
+                    ("name", name),
+                    ("username", username),
+                    ("email", email),
+                    ("password", password),
+                    ("department", department),
+                    ("batch", batch),
+                    ("section", section),
+                ] if not v
+            ]
+            if missing_fields:
+                raise ValueError(f"Missing: {', '.join(missing_fields)}")
+
+            if len(password) < 8:
+                raise ValueError("Password must be at least 8 characters")
+
+            if await User.find_one(User.username == username):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Username '{username}' already exists — skipped"})
+                continue
+
+            if await User.find_one(User.email == email):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Email '{email}' already exists — skipped"})
+                continue
+
+            tutor = User(
+                username=username,
+                name=name,
+                email=email,
+                password_hash=hash_password(password),
+                role=UserRole.TUTOR,
+                first_login_completed=True,
+                is_active=True,
+                department=department,
+                batch=batch,
+                section=section,
+            )
+            await tutor.insert()
             created += 1
 
         except ValueError as ve:
@@ -577,6 +725,45 @@ async def bulk_import_tutor_students(
     }
 
 
+@router.post("/tutors/{tutor_id}/reassign")
+async def reassign_tutor_students(
+    tutor_id: PydanticObjectId,
+    body: TutorReassignRequest,
+    _user: User = _admin,
+):
+    from_tutor = await User.get(tutor_id)
+    if not from_tutor or from_tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Source tutor not found")
+
+    to_tutor = await User.get(body.new_tutor_id)
+    if not to_tutor or to_tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Target tutor not found")
+
+    if from_tutor.id == to_tutor.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Source and target tutor cannot be the same")
+
+    mapped = await StudentCredit.find(StudentCredit.tutor_email == from_tutor.email).to_list()
+    moved = 0
+    now = datetime.utcnow()
+    for doc in mapped:
+        await doc.set(
+            {
+                "tutor_email": to_tutor.email,
+                "department": to_tutor.department,
+                "batch": to_tutor.batch,
+                "section": to_tutor.section,
+                "last_updated": now,
+            }
+        )
+        moved += 1
+
+    return {
+        "moved": moved,
+        "from_tutor": from_tutor.email,
+        "to_tutor": to_tutor.email,
+    }
+
+
 @router.get("/users", response_model=List[UserResponse])
 async def list_users(
     role: Optional[str] = None,
@@ -606,6 +793,47 @@ async def list_users(
 
     users = await User.find(query).to_list()
     return [_user_response(u) for u in users]
+
+
+@router.get("/tutors/mapping-summary")
+async def tutor_mapping_summary(
+    _user: User = _admin,
+):
+    tutors = await User.find(User.role == UserRole.TUTOR).to_list()
+    credits = await StudentCredit.find_all().to_list()
+
+    mapped_by_tutor = {}
+    for credit in credits:
+        email = (credit.tutor_email or "").strip().lower()
+        if not email:
+            continue
+        mapped_by_tutor[email] = mapped_by_tutor.get(email, 0) + 1
+
+    items = []
+    total_mapped = 0
+    for tutor in tutors:
+        tutor_email = (tutor.email or "").strip().lower()
+        mapped_count = int(mapped_by_tutor.get(tutor_email, 0))
+        total_mapped += mapped_count
+        items.append(
+            {
+                "id": str(tutor.id),
+                "name": tutor.name,
+                "email": tutor.email,
+                "department": tutor.department,
+                "batch": tutor.batch,
+                "section": tutor.section,
+                "mapped_students": mapped_count,
+            }
+        )
+
+    items.sort(key=lambda x: x["mapped_students"], reverse=True)
+
+    return {
+        "total_tutors": len(tutors),
+        "total_mapped_students": total_mapped,
+        "items": items,
+    }
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)
@@ -729,6 +957,16 @@ async def revoke_certificate(cert_number: str, admin: User = _admin):
     cert = await Certificate.find_one(Certificate.cert_number == cert_number)
     if not cert:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+
+    if cert.status == CertStatus.EMAILED:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Emailed certificates cannot be revoked",
+        )
+
+    if cert.status == CertStatus.REVOKED:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Certificate is already revoked")
+
     await cert.set({
         "status": CertStatus.REVOKED,
         "revoked_at": datetime.utcnow(),

@@ -34,7 +34,7 @@ const Icons = {
 // ── Credit type badge colours ─────────────────────────────────────────────────
 const TYPE_COLORS = {
   participant: 'bg-blue-100 text-blue-700',
-  coordinator: 'bg-purple-100 text-purple-700',
+  coordinator: 'bg-gray-100 text-gray-600',
   winner_1st:  'bg-amber-100 text-amber-700',
   winner_2nd:  'bg-gray-100 text-gray-600',
   winner_3rd:  'bg-orange-100 text-orange-700',
@@ -133,7 +133,10 @@ export default function StudentDashboard() {
   const { data: manualSubmissions, isLoading: submissionsLoading } = useMyManualCreditSubmissions()
   const createSubmission = useCreateManualCreditSubmission()
 
-  const totalCerts   = certs?.length ?? 0
+  const visibleCertificates = (certs || []).filter((c) => c?.status === 'emailed')
+  const uploadedVerifiedCount = (manualSubmissions || []).filter((s) => s?.status === 'verified').length
+
+  const totalCerts   = visibleCertificates.length
   const totalCredits = credits?.total_credits ?? 0
 
   const handleDownload = async (certNumber, certId) => {
@@ -244,7 +247,7 @@ export default function StudentDashboard() {
       render: (_, row) => {
         const certNumber = row?.cert_number
         const isDownloading = downloadingId === row._id
-        const canDownload = row.status === 'generated' || row.status === 'emailed'
+        const canDownload = row.status === 'emailed'
 
         if (!canDownload) {
           return <span className="text-xs text-gray-300">Not ready</span>
@@ -308,21 +311,16 @@ export default function StudentDashboard() {
                 </p>
               </div>
 
-              <a
-                href="/verify"
-                className="btn-secondary text-sm self-start sm:self-center"
-              >
-                🔍 Verify a Certificate
-              </a>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <StatCard
                 label="My Certificates"
                 value={totalCerts}
+                subText={`Uploaded & Verified: ${uploadedVerifiedCount}`}
                 icon={Icons.cert}
                 accent="navy"
-                isLoading={certsLoading}
+                isLoading={certsLoading || submissionsLoading}
               />
               <StatCard
                 label="Total Credits"
@@ -446,7 +444,7 @@ export default function StudentDashboard() {
               <h2 className="section-title mb-3">My Certificates</h2>
               <DataTable
                 columns={certColumns}
-                data={certs ?? []}
+                data={visibleCertificates}
                 isLoading={certsLoading}
                 emptyMessage="No certificates yet. Participate in events to earn certificates."
                 searchable

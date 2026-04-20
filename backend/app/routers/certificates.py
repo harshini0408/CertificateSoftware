@@ -141,7 +141,6 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
             "status": CertStatus.GENERATED,
             "issued_at": datetime.utcnow(),
         })
-        await award_credits(cert)
 
     except Exception as exc:
         await cert.set({"status": CertStatus.FAILED})
@@ -202,6 +201,7 @@ async def _send_email_for_generated(cert_id: PydanticObjectId) -> None:
 
         if sent:
             await cert.set({"status": CertStatus.EMAILED})
+            await award_credits(cert)
             await EmailLog(
                 certificate_id=cert.id,
                 recipient_email=cert.snapshot.email,

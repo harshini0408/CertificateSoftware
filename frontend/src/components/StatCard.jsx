@@ -43,6 +43,7 @@ export default function StatCard({
   icon,
   trend,
   trendLabel,
+  subText,
   accent = 'navy',
   isLoading = false,
 }) {
@@ -63,6 +64,10 @@ export default function StatCard({
         <p className="mt-1 text-3xl font-bold text-foreground tabular-nums">
           {typeof value === 'number' ? value.toLocaleString() : value}
         </p>
+
+        {subText && (
+          <p className="mt-1 text-xs text-gray-500">{subText}</p>
+        )}
 
         {/* Trend */}
         {!trendNeutral && (

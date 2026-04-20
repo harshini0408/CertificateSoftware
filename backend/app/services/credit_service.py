@@ -1,7 +1,7 @@
 from datetime import datetime
 import re
 
-from ..models.certificate import Certificate
+from ..models.certificate import Certificate, CertStatus
 from ..models.credit_rule import CreditRule
 from ..models.student_credit import CreditHistoryEntry, StudentCredit
 from ..models.user import User, UserRole
@@ -47,6 +47,9 @@ async def award_credits(certificate: Certificate) -> None:
 
     If no rule exists for the cert_type, this is a no-op.
     """
+    if certificate.status != CertStatus.EMAILED:
+        return
+
     cert_type_raw = (certificate.snapshot.cert_type or "").strip()
     rule = await _resolve_credit_rule(cert_type_raw)
     if not rule or rule.points <= 0:

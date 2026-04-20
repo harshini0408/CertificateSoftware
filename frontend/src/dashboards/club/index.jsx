@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -106,6 +107,15 @@ function EventsTab({ clubId }) {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
 
+  useEffect(() => {
+    if (!isModalOpen) return undefined
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevOverflow
+    }
+  }, [isModalOpen])
+
   const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm()
 
   const { data: events, isLoading } = useQuery({
@@ -179,12 +189,13 @@ function EventsTab({ clubId }) {
         searchPlaceholder="Search events…"
       />
 
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy/40 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      {isModalOpen && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setIsModalOpen(false)}>
+          <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-lg font-bold text-navy">Create New Event</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close modal">x</button>
             </div>
             <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
               <div>
@@ -216,7 +227,8 @@ function EventsTab({ clubId }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       <ConfirmModal

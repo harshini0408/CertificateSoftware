@@ -7,6 +7,7 @@ export const userKeys = {
   all:    ()           => ['users'],
   list:   (filters)    => ['users', 'list', filters],
   detail: (userId)     => ['users', userId],
+  tutorMappingSummary: () => ['users', 'tutor-mapping-summary'],
 }
 
 // ── useUsers ──────────────────────────────────────────────────────────────────
@@ -45,6 +46,16 @@ export function useUser(userId) {
       return data
     },
     enabled: !!userId,
+  })
+}
+
+export function useTutorMappingSummary() {
+  return useQuery({
+    queryKey: userKeys.tutorMappingSummary(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/admin/tutors/mapping-summary')
+      return data
+    },
   })
 }
 
@@ -127,6 +138,80 @@ export function useBulkImportTutorStudents() {
     },
     onError: (err) => {
       const msg = err?.response?.data?.detail || 'Failed to import tutor students.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useBulkImportTutors() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return axiosInstance.post('/admin/users/bulk-import-tutors', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({
+        type: 'success',
+        message: `${data.created} tutor${data.created !== 1 ? 's' : ''} imported, ${data.skipped} skipped.`,
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to import tutors.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useDownloadTutorImportSample() {
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await axiosInstance.get('/admin/users/bulk-import-tutors/sample', {
+        responseType: 'blob',
+      })
+      const blob = new Blob([
+        response.data,
+      ], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'tutor_bulk_import_sample.xlsx'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to download sample file.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useReassignTutorStudents() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ fromTutorId, toTutorId }) =>
+      axiosInstance.post(`/admin/tutors/${fromTutorId}/reassign`, { new_tutor_id: toTutorId }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({
+        type: 'success',
+        message: `${data.moved} student${data.moved !== 1 ? 's' : ''} moved to ${data.to_tutor}.`,
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to reassign tutor students.'
       addToast({ type: 'error', message: msg })
     },
   })

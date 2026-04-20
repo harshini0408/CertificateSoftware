@@ -10,6 +10,7 @@ One-off maintenance, migration, and debugging scripts. **Do not run these in pro
 | `reset_admin.py` | Resets the super-admin password to the value in `.env` |
 | `reset_templates.py` | Drops and re-seeds all ImageTemplate documents from the static PNG folder |
 | `seed_demo.py` | Seeds a demo club, event, and participants for local development |
+| `cleanup_non_emailed_credit_awards.py` | Removes legacy credit entries tied to non-emailed certificates and recomputes totals |
 | `db_check.py` | Prints counts of all collections — useful for sanity-checking DB state |
 | `check_superadmin.py` | Verifies the super-admin account exists and is active |
 
