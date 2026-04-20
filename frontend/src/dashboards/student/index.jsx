@@ -133,10 +133,11 @@ export default function StudentDashboard() {
   const { data: manualSubmissions, isLoading: submissionsLoading } = useMyManualCreditSubmissions()
   const createSubmission = useCreateManualCreditSubmission()
 
+  const generatedCertificatesCount = (certs || []).filter((c) => ['generated', 'emailed'].includes((c?.status || '').toLowerCase())).length
   const visibleCertificates = (certs || []).filter((c) => c?.status === 'emailed')
   const uploadedVerifiedCount = (manualSubmissions || []).filter((s) => s?.status === 'verified').length
 
-  const totalCerts   = visibleCertificates.length
+  const totalCerts   = generatedCertificatesCount + uploadedVerifiedCount
   const totalCredits = credits?.total_credits ?? 0
 
   const handleDownload = async (certNumber, certId) => {
@@ -317,7 +318,7 @@ export default function StudentDashboard() {
               <StatCard
                 label="My Certificates"
                 value={totalCerts}
-                subText={`Uploaded & Verified: ${uploadedVerifiedCount}`}
+                subText={`Generated: ${generatedCertificatesCount} • Uploaded & Verified: ${uploadedVerifiedCount}`}
                 icon={Icons.cert}
                 accent="navy"
                 isLoading={certsLoading || submissionsLoading}

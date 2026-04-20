@@ -181,7 +181,7 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
     email = _norm_email(current_user.email)
     certs = await Certificate.find({
         "snapshot.email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
-        "status": CertStatus.EMAILED,
+        "status": {"$in": [CertStatus.GENERATED, CertStatus.EMAILED]},
     }).to_list()
 
     results = []
