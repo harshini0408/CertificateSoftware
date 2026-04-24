@@ -291,6 +291,8 @@ def _render_certificate_pillow(
         fsp = float(pos.get("font_size_percent") or DEFAULT_FONT_PERCENT)
         fsp = max(1.0, min(fsp, 8.0))
         field_font_size = max(20, int(img_w * fsp / 100))
+        if normalized_key in cert_number_keys:
+            field_font_size = max(12, field_font_size - 8)
         field_font = _load_font(field_font_size)
 
         x = (pos["x_percent"] / 100) * img_w
@@ -301,7 +303,7 @@ def _render_certificate_pillow(
 
     # Certificate number fallback for templates not yet configured with Cert position.
     if cert_number and not cert_drawn_from_mapping:
-        cert_font = _load_font(max(20, int(img_w * 0.025)))
+        cert_font = _load_font(max(12, int(img_w * 0.025) - 8))
         cert_x = int(img_w * 0.83)
         cert_y = int(img_h * 0.048)
         draw.text((cert_x, cert_y), cert_number, font=cert_font, fill=(44, 61, 127, 255), anchor="lm")

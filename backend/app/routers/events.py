@@ -19,7 +19,7 @@ from ..models.participant import Participant
 from ..models.field_position import FieldPosition
 from ..schemas.event import EventCreate, EventUpdate, EventResponse
 from ..services.signature_service import process_signature, save_logo
-from ..services.storage_service import storage_path_to_url
+from ..services.storage_service import storage_path_to_url, storage_url_to_path
 from ..services.excel_service import generate_excel_template, get_active_role_names
 
 router = APIRouter(prefix="/clubs/{club_id}/events", tags=["Events"])
@@ -54,15 +54,17 @@ async def _count_event_certificates(event_id: PydanticObjectId) -> int:
 
 
 def _assets_complete(assets: EventAssets) -> bool:
-    return bool(assets.logo_path and assets.signature_path)
+    return bool((assets.logo_path or assets.logo_url) and (assets.signature_path or assets.signature_url))
 
 
 def _assets_files_exist(assets: EventAssets) -> bool:
+    logo_path = assets.logo_path or (storage_url_to_path(assets.logo_url) if assets.logo_url else None)
+    sig_path = assets.signature_path or (storage_url_to_path(assets.signature_url) if assets.signature_url else None)
     return bool(
-        assets.logo_path
-        and assets.signature_path
-        and Path(assets.logo_path).exists()
-        and Path(assets.signature_path).exists()
+        logo_path
+        and sig_path
+        and Path(logo_path).exists()
+        and Path(sig_path).exists()
     )
 
 
@@ -148,10 +150,20 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         if normalized_logo_url != normalized_assets.logo_url:
             normalized_assets.logo_url = normalized_logo_url
             asset_urls_changed = True
+    elif normalized_assets.logo_url:
+        inferred_logo_path = storage_url_to_path(normalized_assets.logo_url)
+        if inferred_logo_path and Path(inferred_logo_path).exists():
+            normalized_assets.logo_path = inferred_logo_path
+            asset_urls_changed = True
     if normalized_assets.signature_path:
         normalized_sig_url = storage_path_to_url(normalized_assets.signature_path)
         if normalized_sig_url != normalized_assets.signature_url:
             normalized_assets.signature_url = normalized_sig_url
+            asset_urls_changed = True
+    elif normalized_assets.signature_url:
+        inferred_sig_path = storage_url_to_path(normalized_assets.signature_url)
+        if inferred_sig_path and Path(inferred_sig_path).exists():
+            normalized_assets.signature_path = inferred_sig_path
             asset_urls_changed = True
     if asset_urls_changed:
         updates["assets"] = normalized_assets.model_dump()

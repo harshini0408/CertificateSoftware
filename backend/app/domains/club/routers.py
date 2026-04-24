@@ -1,4 +1,5 @@
 import hashlib
+from pathlib import Path
 from typing import List
 
 from beanie import PydanticObjectId
@@ -13,7 +14,7 @@ from ...models.participant import Participant
 from ...schemas.club import ClubResponse
 from ...schemas.user import UserResponse
 from ...services.signature_service import process_signature, save_logo
-from ...services.storage_service import storage_path_to_url
+from ...services.storage_service import storage_path_to_url, storage_url_to_path
 
 router = APIRouter(prefix="/clubs", tags=["Clubs"])
 coordinator_router = APIRouter(prefix="/coordinator", tags=["Coordinator"])
@@ -76,7 +77,11 @@ def _user_response(u: User) -> UserResponse:
 
 def _club_assets_ready(club: Club) -> bool:
     assets = getattr(club, "assets", None)
-    return bool(assets and assets.logo_path and assets.signature_path)
+    return bool(
+        assets
+        and (assets.logo_path or assets.logo_url)
+        and (assets.signature_path or assets.signature_url)
+    )
 
 
 # ═══ GET /clubs ══════════════════════════════════════════════════════════════
@@ -181,6 +186,29 @@ async def get_club_assets(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
 
     assets = club.assets
+    updated = False
+
+    if assets.logo_path and (not assets.logo_url or not str(assets.logo_url).startswith("/storage/")):
+        assets.logo_url = storage_path_to_url(assets.logo_path)
+        updated = True
+    if assets.signature_path and (not assets.signature_url or not str(assets.signature_url).startswith("/storage/")):
+        assets.signature_url = storage_path_to_url(assets.signature_path)
+        updated = True
+
+    if not assets.logo_path and assets.logo_url:
+        inferred_logo_path = storage_url_to_path(assets.logo_url)
+        if inferred_logo_path and Path(inferred_logo_path).exists():
+            assets.logo_path = inferred_logo_path
+            updated = True
+    if not assets.signature_path and assets.signature_url:
+        inferred_sig_path = storage_url_to_path(assets.signature_url)
+        if inferred_sig_path and Path(inferred_sig_path).exists():
+            assets.signature_path = inferred_sig_path
+            updated = True
+
+    if updated:
+        await club.set({"assets": assets.model_dump()})
+
     return {
         "logo_url": assets.logo_url,
         "logo_hash": assets.logo_hash,
@@ -188,7 +216,6 @@ async def get_club_assets(
         "signature_hash": assets.signature_hash,
         "is_configured": _club_assets_ready(club),
     }
-
 
 @router.post("/{club_id}/assets")
 async def update_club_assets(

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import Navbar from '../../components/Navbar'
@@ -84,7 +84,8 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     if (!url) return null
     const withVersion = hash ? `${url}${url.includes('?') ? '&' : '?'}v=${hash}` : url
     if (withVersion.startsWith('blob:') || withVersion.startsWith('http')) return withVersion
-    return `${BACKEND_URL}${withVersion}`
+    const normalized = withVersion.startsWith('/') ? withVersion : `/${withVersion}`
+    return `${BACKEND_URL}${normalized}`
   }
 
   return (
@@ -520,11 +521,16 @@ function ParticipantsTab({ clubId, eventId, event }) {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function EventDetail() {
   const { club_id, event_id } = useParams()
-  const [activeTab, setActiveTab] = useState('overview')
+  const [searchParams, setSearchParams] = useSearchParams()
   const role = useAuthStore((s) => s.role)
 
   const navigate = useNavigate()
   const { data: event, isLoading } = useEvent(club_id, event_id)
+  const activeTab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'overview'
+
+  const setActiveTab = (tab) => {
+    setSearchParams(tab === 'overview' ? {} : { tab }, { replace: true })
+  }
 
   if (isLoading) {
     return (

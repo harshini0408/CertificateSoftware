@@ -44,6 +44,15 @@ _COOKIE_DEFAULTS = dict(
 )
 
 
+def _club_assets_configured(club: Club) -> bool:
+    assets = getattr(club, "assets", None)
+    if not assets:
+        return False
+    has_logo = bool(getattr(assets, "logo_path", None) or getattr(assets, "logo_url", None))
+    has_signature = bool(getattr(assets, "signature_path", None) or getattr(assets, "signature_url", None))
+    return has_logo and has_signature
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, response: Response):
     user = await authenticate_user(body.username, body.password)
@@ -76,10 +85,7 @@ async def login(body: LoginRequest, response: Response):
     if user.role == UserRole.CLUB_COORDINATOR and user.club_id:
         club = await Club.get(user.club_id)
         if club:
-            assets = getattr(club, "assets", None)
-            requires_profile_setup = not bool(
-                assets and assets.logo_path and assets.signature_path
-            )
+            requires_profile_setup = not _club_assets_configured(club)
     if user.role == UserRole.DEPT_COORDINATOR:
         department = (user.department or "General").strip() or "General"
         dept_assets = await DeptAsset.find_one(DeptAsset.department == department)
@@ -170,10 +176,7 @@ async def me(current_user: User = Depends(get_current_user)):
     if current_user.role == UserRole.CLUB_COORDINATOR and current_user.club_id:
         club = await Club.get(current_user.club_id)
         if club:
-            assets = getattr(club, "assets", None)
-            requires_profile_setup = not bool(
-                assets and assets.logo_path and assets.signature_path
-            )
+            requires_profile_setup = not _club_assets_configured(club)
     if current_user.role == UserRole.DEPT_COORDINATOR:
         department = (current_user.department or "General").strip() or "General"
         dept_assets = await DeptAsset.find_one(DeptAsset.department == department)
