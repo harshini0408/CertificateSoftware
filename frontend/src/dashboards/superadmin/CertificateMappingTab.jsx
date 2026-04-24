@@ -105,6 +105,32 @@ export default function CertificateMappingTab() {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  const updateFieldPosition = (fieldKey, nextPosition) => {
+    setForm((prev) => ({
+      ...prev,
+      column_positions: {
+        ...(prev.column_positions || {}),
+        [fieldKey]: {
+          ...(prev.column_positions?.[fieldKey] || EMPTY_POSITION),
+          ...nextPosition,
+        },
+      },
+    }))
+  }
+
+  const updateAssetPosition = (assetKey, nextPosition) => {
+    setForm((prev) => ({
+      ...prev,
+      asset_positions: {
+        ...(prev.asset_positions || {}),
+        [assetKey]: {
+          ...((prev.asset_positions || {})[assetKey] || {}),
+          ...nextPosition,
+        },
+      },
+    }))
+  }
+
   // --- Visual Mapper Handlers ---
   const handleImageClick = (e) => {
     if (!pendingFieldId && !pendingAssetKey) {
@@ -116,34 +142,17 @@ export default function CertificateMappingTab() {
     const y = parseFloat((((e.clientY - rect.top) / rect.height) * 100).toFixed(2))
 
     if (pendingFieldId) {
-      setForm((prev) => ({
-        ...prev,
-        column_positions: {
-          ...prev.column_positions,
-          [pendingFieldId]: {
-            ...(prev.column_positions?.[pendingFieldId] || EMPTY_POSITION),
-            x_percent: x,
-            y_percent: y,
-          },
-        },
-      }))
+      updateFieldPosition(pendingFieldId, { x_percent: x, y_percent: y })
       setPendingFieldId(null)
       return
     }
 
     if (pendingAssetKey) {
-      setForm((prev) => ({
-        ...prev,
-        asset_positions: {
-          ...(prev.asset_positions || {}),
-          [pendingAssetKey]: {
-            ...((prev.asset_positions || {})[pendingAssetKey] || {}),
-            x_percent: x,
-            y_percent: y,
-            width_percent: asNumber((prev.asset_positions || {})[pendingAssetKey]?.width_percent, DEFAULT_ASSET_WIDTHS[pendingAssetKey] || 12),
-          },
-        },
-      }))
+      updateAssetPosition(pendingAssetKey, {
+        x_percent: x,
+        y_percent: y,
+        width_percent: asNumber((form.asset_positions || {})[pendingAssetKey]?.width_percent, DEFAULT_ASSET_WIDTHS[pendingAssetKey] || 12),
+      })
       setPendingAssetKey(null)
     }
   }
@@ -489,8 +498,30 @@ export default function CertificateMappingTab() {
                               </div>
                             ) : (
                               <div className="flex gap-2 mt-1">
-                                <div className="flex-1 bg-gray-50 rounded px-2 py-1 text-[10px] font-mono text-gray-600 border border-gray-100">X: {pos.x_percent}%</div>
-                                <div className="flex-1 bg-gray-50 rounded px-2 py-1 text-[10px] font-mono text-gray-600 border border-gray-100">Y: {pos.y_percent}%</div>
+                                    <label className="flex-1 text-[10px] font-mono text-gray-500">
+                                      X
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.01"
+                                        value={pos.x_percent ?? ''}
+                                        onChange={(e) => updateAssetPosition(key, { x_percent: e.target.value === '' ? null : asNumber(e.target.value, 0) })}
+                                        className="mt-1 w-full rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-mono text-gray-700"
+                                      />
+                                    </label>
+                                    <label className="flex-1 text-[10px] font-mono text-gray-500">
+                                      Y
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.01"
+                                        value={pos.y_percent ?? ''}
+                                        onChange={(e) => updateAssetPosition(key, { y_percent: e.target.value === '' ? null : asNumber(e.target.value, 0) })}
+                                        className="mt-1 w-full rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-mono text-gray-700"
+                                      />
+                                    </label>
                               </div>
                             )}
                             {isPending && (
@@ -530,8 +561,30 @@ export default function CertificateMappingTab() {
                           </div>
                         ) : (
                           <div className="flex gap-2">
-                             <div className="flex-1 bg-gray-50 rounded px-2 py-1 text-[10px] font-mono text-gray-600 border border-gray-100">X: {pos.x_percent}%</div>
-                             <div className="flex-1 bg-gray-50 rounded px-2 py-1 text-[10px] font-mono text-gray-600 border border-gray-100">Y: {pos.y_percent}%</div>
+                             <label className="flex-1 text-[10px] font-mono text-gray-500">
+                               X
+                               <input
+                                 type="number"
+                                 min="0"
+                                 max="100"
+                                 step="0.01"
+                                 value={pos.x_percent ?? ''}
+                                 onChange={(e) => updateFieldPosition(field, { x_percent: e.target.value === '' ? null : asNumber(e.target.value, 0) })}
+                                 className="mt-1 w-full rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-mono text-gray-700"
+                               />
+                             </label>
+                             <label className="flex-1 text-[10px] font-mono text-gray-500">
+                               Y
+                               <input
+                                 type="number"
+                                 min="0"
+                                 max="100"
+                                 step="0.01"
+                                 value={pos.y_percent ?? ''}
+                                 onChange={(e) => updateFieldPosition(field, { y_percent: e.target.value === '' ? null : asNumber(e.target.value, 0) })}
+                                 className="mt-1 w-full rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-mono text-gray-700"
+                               />
+                             </label>
                           </div>
                         )}
                       </div>

@@ -24,6 +24,7 @@ from ...models.email_log import EmailLog, EmailStatus
 from ...models.scan_log import ScanLog
 from ...models.credit_rule import CreditRule
 from ...models.student_credit import StudentCredit
+from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
 from ...schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
 from ...schemas.user import UserCreate, UserUpdate, UserResponse
@@ -793,6 +794,105 @@ async def list_users(
 
     users = await User.find(query).to_list()
     return [_user_response(u) for u in users]
+
+
+@router.get("/student-certificates/search")
+async def search_student_certificates(
+    q: str = Query(..., min_length=1),
+    _user: User = _admin,
+):
+    query_text = q.strip()
+    if not query_text:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Search query is required")
+
+    pattern = re.compile(re.escape(query_text), re.IGNORECASE)
+
+    students = await User.find({
+        "role": UserRole.STUDENT,
+        "$or": [
+            {"name": pattern},
+            {"email": pattern},
+            {"registration_number": pattern},
+        ],
+    }).to_list()
+
+    if not students:
+        credits = await StudentCredit.find({
+            "$or": [
+                {"student_email": {"$regex": f"^{re.escape(query_text.lower())}$", "$options": "i"}},
+                {"registration_number": query_text},
+            ]
+        }).to_list()
+        emails = {c.student_email for c in credits if c.student_email}
+        if emails:
+            students = await User.find({"role": UserRole.STUDENT, "email": {"$in": list(emails)}}).to_list()
+
+    results = []
+    for student in students:
+        email = (student.email or "").strip().lower()
+        reg_no = (student.registration_number or "").strip()
+
+        generated_certs = await Certificate.find({
+            "snapshot.email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        }).sort("-issued_at").to_list()
+
+        manual_submissions = await ManualCreditSubmission.find({
+            "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        }).sort("-submitted_at").to_list()
+
+        credit_doc = await StudentCredit.find_one({
+            "$or": [
+                {"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+                {"registration_number": reg_no} if reg_no else {"_id": None},
+            ]
+        })
+
+        credit_points_by_cert: dict[str, int] = {}
+        if credit_doc:
+            for entry in credit_doc.credit_history or []:
+                if entry.cert_number:
+                    credit_points_by_cert[entry.cert_number] = int(entry.points_awarded or 0)
+
+        certificates = []
+        for cert in generated_certs:
+            certificates.append({
+                "source_type": "generated",
+                "cert_number": cert.cert_number,
+                "event_name": cert.snapshot.event_name if cert.snapshot else "",
+                "club_name": cert.snapshot.club_name if cert.snapshot else "",
+                "status": cert.status.value,
+                "issued_at": cert.issued_at,
+                "credit_points": int(credit_points_by_cert.get(cert.cert_number, 0)),
+            })
+
+        for submission in manual_submissions:
+            cert_number = f"STU-MANUAL-{str(submission.id)[-8:].upper()}"
+            certificates.append({
+                "source_type": "manual_upload",
+                "cert_number": cert_number,
+                "event_name": "Student Manual Submission",
+                "club_name": "Student Upload",
+                "status": submission.status.value,
+                "issued_at": submission.submitted_at,
+                "credit_points": int(submission.points_awarded or 0),
+            })
+
+        certificates.sort(key=lambda item: item.get("issued_at") or datetime.min, reverse=True)
+
+        results.append({
+            "student": _user_response(student),
+            "total_certificates": len(certificates),
+            "generated_count": len(generated_certs),
+            "manual_upload_count": len(manual_submissions),
+            "verified_manual_count": sum(1 for s in manual_submissions if s.status == ManualSubmissionStatus.VERIFIED),
+            "certificates": certificates,
+        })
+
+    return {
+        "query": query_text,
+        "count": len(results),
+        "results": results,
+    }
 
 
 @router.get("/tutors/mapping-summary")

@@ -49,6 +49,19 @@ export function useUser(userId) {
   })
 }
 
+export function useStudentCertificateSearch(query) {
+  return useQuery({
+    queryKey: ['admin', 'student-certificates', query],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/admin/student-certificates/search', {
+        params: { q: query },
+      })
+      return data
+    },
+    enabled: !!query,
+  })
+}
+
 export function useTutorMappingSummary() {
   return useQuery({
     queryKey: userKeys.tutorMappingSummary(),

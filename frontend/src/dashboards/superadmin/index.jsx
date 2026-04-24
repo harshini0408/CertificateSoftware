@@ -24,6 +24,7 @@ import {
   useDownloadTutorImportSample,
   useReassignTutorStudents,
   useTutorMappingSummary,
+  useStudentCertificateSearch,
 } from './usersApi'
 import {
   useAdminStats,
@@ -694,6 +695,7 @@ export default function AdminDashboard() {
             {activeTab === 'clubs' && <ClubsTab />}
             {activeTab === 'users' && <UsersTab />}
             {activeTab === 'certificate-mapping' && <CertificateMappingTab />}
+            {activeTab === 'student-certificates' && <StudentCertificatesTab />}
             {activeTab === 'certificates' && <CertificatesTab />}
             {activeTab === 'credit-rules' && <CreditRulesTab />}
           </div>
@@ -821,6 +823,91 @@ function CertificatesTab() {
         confirmLabel="Revoke"
         isLoading={revokeCert.isPending}
       />
+    </div>
+  )
+}
+
+// ── STUDENT CERTIFICATES TAB ────────────────────────────────────────────────
+function StudentCertificatesTab() {
+  const [query, setQuery] = useState('')
+  const [submittedQuery, setSubmittedQuery] = useState('')
+  const { data, isLoading } = useStudentCertificateSearch(submittedQuery)
+
+  const results = data?.results || []
+
+  const columns = [
+    { key: 'source_type', header: 'Source', render: (v) => <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium capitalize text-gray-700">{(v || '').replace(/_/g, ' ')}</span> },
+    { key: 'cert_number', header: 'Cert No.', render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v ?? '—'}</span> },
+    { key: 'event_name', header: 'Event Name', searchKey: true },
+    { key: 'club_name', header: 'Club', render: (v) => <span className="text-xs text-gray-500">{v ?? '—'}</span> },
+    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+    { key: 'credit_points', header: 'Credit Points', align: 'right', render: (v) => <span className="font-bold text-green-700">+{v ?? 0}</span> },
+    { key: 'issued_at', header: 'Issued / Submitted', render: (v) => (v ? fmtDate(v) : '—') },
+  ]
+
+  const handleSearch = (e) => {
+    e.preventDefault()
+    setSubmittedQuery(query.trim())
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Student Certificates</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Search by student name, registration number, or email to see generated and manual certificates.
+        </p>
+      </div>
+
+      <form onSubmit={handleSearch} className="card p-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <input
+          type="search"
+          className="form-input w-full sm:w-96"
+          placeholder="Search by name, registration number, or email"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <button type="submit" className="btn-primary sm:ml-auto">
+          Search
+        </button>
+      </form>
+
+      {submittedQuery && (
+        <div className="space-y-4">
+          {isLoading ? (
+            <div className="card p-6"><LoadingSpinner /></div>
+          ) : results.length === 0 ? (
+            <div className="card p-6 text-sm text-gray-500">No student found for “{submittedQuery}”.</div>
+          ) : (
+            results.map((item) => (
+              <div key={item.student.id} className="card p-5 space-y-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">{item.student.name}</h2>
+                    <p className="text-sm text-gray-500">
+                      {item.student.email} · {item.student.registration_number || '—'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="rounded bg-navy/10 px-2 py-1 font-semibold text-navy">Total: {item.total_certificates}</span>
+                    <span className="rounded bg-green-50 px-2 py-1 font-semibold text-green-700">Generated: {item.generated_count}</span>
+                    <span className="rounded bg-blue-50 px-2 py-1 font-semibold text-blue-700">Manual: {item.manual_upload_count}</span>
+                    <span className="rounded bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">Verified Manual: {item.verified_manual_count}</span>
+                  </div>
+                </div>
+
+                <DataTable
+                  columns={columns}
+                  data={item.certificates}
+                  isLoading={false}
+                  emptyMessage="No certificates found for this student."
+                  rowKey="cert_number"
+                />
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }
