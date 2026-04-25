@@ -3,6 +3,7 @@ import { useRef } from 'react'
 export default function ProfileCard({
   name,
   title,
+  contactEmail,
   handle,
   status,
   avatarUrl,
@@ -129,6 +130,22 @@ export default function ProfileCard({
           min-height: 44px;
         }
 
+        .pc-contact {
+          margin: 0.35rem 0 0;
+          font-size: 0.78rem;
+          color: #334155;
+        }
+
+        .pc-contact a {
+          color: #1d4ed8;
+          text-decoration: none;
+          font-weight: 600;
+        }
+
+        .pc-contact a:hover {
+          text-decoration: underline;
+        }
+
         .pc-row {
           margin-top: 0.78rem;
           display: flex;
@@ -191,6 +208,11 @@ export default function ProfileCard({
         <div className="pc-body">
           <p className="pc-name">{name}</p>
           {showUserInfo ? <p className="pc-title">{title}</p> : null}
+          {contactEmail ? (
+            <p className="pc-contact">
+              Reach out: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
+            </p>
+          ) : null}
 
           <div className="pc-row">
             {status ? <span className="pc-badge">{status}</span> : null}

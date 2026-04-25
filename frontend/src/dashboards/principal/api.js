@@ -4,6 +4,20 @@ import axiosInstance from '../../utils/axiosInstance'
 export const principalKeys = {
   students: (filters) => ['principal', 'students', filters],
   certificates: (studentId) => ['principal', 'student-certificates', studentId],
+  eventsOverview: (filters) => ['principal', 'events-overview', filters],
+}
+
+export function usePrincipalEventsOverview(filters = {}) {
+  return useQuery({
+    queryKey: principalKeys.eventsOverview(filters),
+    queryFn: async () => {
+      const params = {}
+      if (filters.source_type) params.source_type = filters.source_type
+      if (filters.search) params.search = filters.search
+      const { data } = await axiosInstance.get('/principal/events-overview', { params })
+      return data
+    },
+  })
 }
 
 export function usePrincipalStudents(filters = {}) {

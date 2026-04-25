@@ -9,6 +9,11 @@ from ...core.dependencies import require_role
 from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
 from ...models.certificate import Certificate
+from ...models.club import Club
+from ...models.event import Event
+from ...models.dept_event import DeptEvent
+from ...models.dept_certificate import DeptCertificate
+from ...models.credit_rule import CreditRule
 from ...models.manual_credit_submission import ManualCreditSubmission
 
 router = APIRouter(prefix="/principal", tags=["Principal"])
@@ -27,6 +32,29 @@ def _student_summary(user: User, total_credits: int) -> dict:
         "section": user.section,
         "total_credits": int(total_credits or 0),
     }
+
+
+def _normalize_cert_type(value: str | None) -> str:
+    return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+DEFAULT_ROLE_POINTS: dict[str, int] = {
+    "class_representative": 3,
+    "club_member": 2,
+    "coordinator": 3,
+    "first_place": 5,
+    "non_technical_participant": 2,
+    "office_bearer": 3,
+    "organizer": 5,
+    "paper_presenter": 3,
+    "second_place": 5,
+    "student_council_member": 5,
+    "student_volunteer": 2,
+    "technical_talk": 2,
+    "technical_participant": 2,
+    "third_place": 5,
+    "workshop": 3,
+}
 
 
 @router.get("/students")
@@ -166,4 +194,143 @@ async def get_student_certificates(student_id: PydanticObjectId, _user: User = _
         "student": _student_summary(student, int(credit_doc.total_credits if credit_doc else 0)),
         "count": len(certificates),
         "certificates": certificates,
+    }
+
+
+@router.get("/events-overview")
+async def get_events_overview(
+    source_type: Optional[str] = None,
+    search: Optional[str] = None,
+    _user: User = _principal,
+):
+    search_pattern = re.compile(re.escape(search.strip()), re.IGNORECASE) if search and search.strip() else None
+    source_type_normalized = (source_type or "").strip().lower()
+
+    rows = []
+
+    rules = await CreditRule.find_all().to_list()
+    rule_points_by_type = {
+        _normalize_cert_type(rule.cert_type): int(rule.points or 0)
+        for rule in rules
+    }
+
+    def _points_for_type(cert_type: str | None) -> int:
+        normalized = _normalize_cert_type(cert_type)
+        if not normalized:
+            return 0
+        if normalized in rule_points_by_type:
+            return int(rule_points_by_type[normalized] or 0)
+        return int(DEFAULT_ROLE_POINTS.get(normalized, 0))
+
+    include_clubs = source_type_normalized in ("", "club")
+    include_departments = source_type_normalized in ("", "department")
+
+    if include_clubs:
+        club_events = await Event.find_all().to_list()
+        club_ids = list({event.club_id for event in club_events if event.club_id})
+        clubs = await Club.find({"_id": {"$in": club_ids}}).to_list() if club_ids else []
+        club_name_by_id = {str(club.id): club.name for club in clubs}
+
+        event_ids = [event.id for event in club_events if event.id]
+        certificates = await Certificate.find({"event_id": {"$in": event_ids}}).to_list() if event_ids else []
+        certs_by_event: dict[str, list[Certificate]] = {}
+        for cert in certificates:
+            key = str(cert.event_id)
+            certs_by_event.setdefault(key, []).append(cert)
+
+        for event in club_events:
+            event_certs = certs_by_event.get(str(event.id), [])
+
+            participant_map = {}
+            for cert in event_certs:
+                snapshot = cert.snapshot
+                unique_key = "|".join([
+                    (snapshot.email or "").strip().lower(),
+                    (snapshot.registration_number or "").strip(),
+                    (snapshot.name or "").strip().lower(),
+                ])
+                item = participant_map.get(unique_key)
+                if not item:
+                    participant_map[unique_key] = {
+                        "name": snapshot.name,
+                        "email": snapshot.email,
+                        "registration_number": snapshot.registration_number,
+                        "class_name": None,
+                        "contribution": snapshot.cert_type,
+                        "allocated_points": _points_for_type(snapshot.cert_type),
+                    }
+                else:
+                    item["allocated_points"] += _points_for_type(snapshot.cert_type)
+
+            participants = list(participant_map.values())
+            owner_name = club_name_by_id.get(str(event.club_id), "Club")
+            row = {
+                "source_type": "club",
+                "source_name": owner_name,
+                "event_name": event.name,
+                "event_date": event.event_date,
+                "certificates_count": len(event_certs),
+                "participants_count": len(participants),
+                "participants": participants,
+            }
+
+            if search_pattern:
+                haystack = f"{row['event_name']} {row['source_name']}"
+                if not search_pattern.search(haystack):
+                    continue
+            rows.append(row)
+
+    if include_departments:
+        dept_events = await DeptEvent.find_all().to_list()
+        dept_event_ids = [str(event.id) for event in dept_events if event.id]
+        dept_certs = await DeptCertificate.find({"event_id": {"$in": dept_event_ids}}).to_list() if dept_event_ids else []
+        certs_by_event: dict[str, list[DeptCertificate]] = {}
+        for cert in dept_certs:
+            key = str(cert.event_id or "")
+            certs_by_event.setdefault(key, []).append(cert)
+
+        for event in dept_events:
+            event_certs = certs_by_event.get(str(event.id), [])
+
+            participant_map = {}
+            for cert in event_certs:
+                unique_key = "|".join([
+                    (cert.participant_email or "").strip().lower(),
+                    (cert.name or "").strip().lower(),
+                    (cert.class_name or "").strip().lower(),
+                ])
+                item = participant_map.get(unique_key)
+                if not item:
+                    participant_map[unique_key] = {
+                        "name": cert.name,
+                        "email": cert.participant_email,
+                        "registration_number": None,
+                        "class_name": cert.class_name,
+                        "contribution": cert.contribution,
+                        "allocated_points": _points_for_type(cert.contribution),
+                    }
+                else:
+                    item["allocated_points"] += _points_for_type(cert.contribution)
+
+            participants = list(participant_map.values())
+            row = {
+                "source_type": "department",
+                "source_name": event.department,
+                "event_name": event.name,
+                "event_date": event.event_date,
+                "certificates_count": len(event_certs),
+                "participants_count": len(participants),
+                "participants": participants,
+            }
+
+            if search_pattern:
+                haystack = f"{row['event_name']} {row['source_name']}"
+                if not search_pattern.search(haystack):
+                    continue
+            rows.append(row)
+
+    rows.sort(key=lambda item: item.get("event_date") or datetime.min, reverse=True)
+    return {
+        "count": len(rows),
+        "items": rows,
     }
