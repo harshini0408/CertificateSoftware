@@ -1,18 +1,23 @@
 from datetime import datetime
+import io
+from pathlib import Path
 import re
+import zipfile
 from typing import Dict, Optional
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ...core.dependencies import require_role
 from ...models.credit_rule import CreditRule
-from ...models.certificate import Certificate
+from ...models.certificate import Certificate, CertStatus
 from ...models.event import Event
 from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.user import User, UserRole
+from ...services.storage_service import storage_url_to_path
 
 router = APIRouter(tags=["Tutor"])
 
@@ -37,6 +42,30 @@ def _history_key(entry: CreditHistoryEntry) -> str:
 
 def _norm_cert_type(value: str | None) -> str:
     return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _safe_zip_token(value: str | None, fallback: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip())
+    token = token.strip("._-")
+    return token or fallback
+
+
+def _unique_zip_name(used: set[str], name: str) -> str:
+    if name not in used:
+        used.add(name)
+        return name
+
+    stem, dot, suffix = name.rpartition(".")
+    base = stem if dot else name
+    ext = f".{suffix}" if dot else ""
+
+    idx = 2
+    while True:
+        candidate = f"{base}_{idx}{ext}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        idx += 1
 
 
 async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
@@ -203,6 +232,95 @@ async def get_tutor_student_detail(
         "total_credits": total_credits,
         "event_details": event_details,
     }
+
+
+@router.get("/tutor/students/{student_email}/certificates/download-all")
+async def download_all_tutor_student_certificates(
+    student_email: str,
+    current_user: User = Depends(require_role(UserRole.TUTOR)),
+):
+    tutor_email = _norm_email(current_user.email)
+    student_email_norm = _norm_email(student_email)
+
+    doc = await StudentCredit.find_one({
+        "student_email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"},
+        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+    })
+    if not doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found for this tutor")
+
+    linked_docs = await _linked_credit_docs_for_tutor(doc, tutor_email)
+    linked_emails = {_norm_email(d.student_email) for d in linked_docs if d.student_email}
+    linked_regs = {(d.registration_number or "").strip() for d in linked_docs if (d.registration_number or "").strip()}
+
+    email_clauses = [
+        {"snapshot.email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}
+        for email in linked_emails
+    ]
+    certs = await Certificate.find({
+        "$and": [
+            {"status": {"$in": [CertStatus.GENERATED, CertStatus.EMAILED]}},
+            {"$or": email_clauses},
+        ]
+    }).to_list() if email_clauses else []
+
+    submissions = await ManualCreditSubmission.find({
+        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"}
+    }).to_list()
+
+    matched_submissions = []
+    for submission in submissions:
+        sub_email = _norm_email(submission.student_email)
+        sub_reg = (submission.registration_number or "").strip()
+        if sub_email in linked_emails or (sub_reg and sub_reg in linked_regs):
+            matched_submissions.append(submission)
+
+    zip_buffer = io.BytesIO()
+    used_names: set[str] = set()
+    generated_count = 0
+    uploaded_count = 0
+
+    with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for cert in certs:
+            if not cert.png_url:
+                continue
+            cert_path = Path(storage_url_to_path(cert.png_url))
+            if not cert_path.exists() or not cert_path.is_file():
+                continue
+
+            ext = cert_path.suffix.lower() or ".png"
+            base_name = _safe_zip_token(cert.cert_number, f"generated_{generated_count + 1}")
+            archive_name = _unique_zip_name(used_names, f"generated/{base_name}{ext}")
+            zip_file.write(cert_path, archive_name)
+            generated_count += 1
+
+        for submission in matched_submissions:
+            if not submission.certificate_image_url:
+                continue
+            image_path = Path(storage_url_to_path(submission.certificate_image_url))
+            if not image_path.exists() or not image_path.is_file():
+                continue
+
+            ext = image_path.suffix.lower() or ".png"
+            type_token = _safe_zip_token(submission.cert_type, "manual")
+            base_name = f"{type_token}_{(submission.event_date.isoformat() if submission.event_date else 'date_unknown')}"
+            archive_name = _unique_zip_name(used_names, f"uploaded/{base_name}{ext}")
+            zip_file.write(image_path, archive_name)
+            uploaded_count += 1
+
+    if generated_count + uploaded_count == 0:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "No downloadable certificate files found for this student",
+        )
+
+    zip_buffer.seek(0)
+    student_token = _safe_zip_token(doc.student_name or doc.registration_number or doc.student_email, "student")
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{student_token}_certificates.zip"'},
+    )
 
 
 @router.get("/tutor/credit-rules")

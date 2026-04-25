@@ -166,22 +166,19 @@ def _normalize_department_slug(value: str | None) -> str:
 
 
 async def _resolve_department_name(raw_value: str | None) -> str | None:
-    normalized_name = _normalize_department_name(raw_value)
     normalized_slug = _normalize_department_slug(raw_value)
-    if not normalized_name and not normalized_slug:
+    if not normalized_slug:
         return None
 
-    clauses = []
-    if normalized_name:
-        escaped_name = re.escape(normalized_name)
-        clauses.append({"name": {"$regex": f"^{escaped_name}$", "$options": "i"}})
-    if normalized_slug:
-        escaped_slug = re.escape(normalized_slug)
-        clauses.append({"slug": {"$regex": f"^{escaped_slug}$", "$options": "i"}})
-
-    existing = await Department.find_one({"$and": [{"is_active": True}, {"$or": clauses}]})
+    escaped_slug = re.escape(normalized_slug)
+    existing = await Department.find_one({
+        "$and": [
+            {"is_active": True},
+            {"slug": {"$regex": f"^{escaped_slug}$", "$options": "i"}},
+        ]
+    })
     if not existing:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found or inactive")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department slug not found or inactive")
     return existing.name
 
 

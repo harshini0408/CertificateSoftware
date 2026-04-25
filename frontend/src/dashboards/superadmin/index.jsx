@@ -546,7 +546,7 @@ function NewUserModal({ isOpen, onClose }) {
           )}
           {(selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') && (
             <div>
-              <label className="form-label">Department *</label>
+              <label className="form-label">Department Slug *</label>
               <select
                 className={`form-input ${errors.department ? 'form-input-error' : ''}`}
                 value={form.department}
@@ -557,6 +557,7 @@ function NewUserModal({ isOpen, onClose }) {
                   <option key={d.id} value={d.slug}>{d.name} ({d.slug})</option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-gray-500">Select the department by slug. The student will be allocated to that department automatically.</p>
               {(departmentsList || []).length === 0 && (
                 <p className="mt-1 text-xs text-gray-500">No active departments available. Create one in the Departments tab first.</p>
               )}
@@ -941,34 +942,26 @@ function CreditRulesTab() {
   const [localRules, setLocalRules] = useState([])
   const [editingIndex, setEditingIndex] = useState(null)
   const [editValue, setEditValue] = useState('')
+  const [newRuleType, setNewRuleType] = useState('')
+  const [newRulePoints, setNewRulePoints] = useState('0')
 
   useEffect(() => {
-    if (rulesData) setLocalRules(rulesData)
+    if (!rulesData) return
+    const ordered = [...rulesData].sort((a, b) =>
+      String(a?.cert_type || '').localeCompare(String(b?.cert_type || ''), undefined, { sensitivity: 'base' }),
+    )
+    setLocalRules(ordered)
   }, [rulesData])
 
-  const targetRules = [
-    { cert_type: 'Class Representative', points: 3 },
-    { cert_type: 'Club Member', points: 2 },
-    { cert_type: 'Coordinator', points: 3 },
-    { cert_type: 'First Place', points: 5 },
-    { cert_type: 'Non-Technical Participant', points: 2 },
-    { cert_type: 'Office Bearer', points: 3 },
-    { cert_type: 'Organizer', points: 5 },
-    { cert_type: 'Paper Presenter', points: 3 },
-    { cert_type: 'Second Place', points: 5 },
-    { cert_type: 'Student Council Member', points: 5 },
-    { cert_type: 'Student Volunteer', points: 2 },
-    { cert_type: 'Technical Talk', points: 2 },
-    { cert_type: 'Technical Participant', points: 2 },
-    { cert_type: 'Third Place', points: 5 },
-    { cert_type: 'Workshop', points: 3 },
-  ]
-
-  // Ensure all required cert types exist in local array.
-  const orderedRules = targetRules.map((base) => {
-    const r = localRules.find((x) => x.cert_type === base.cert_type)
-    return r || base
-  })
+  const normalizeRuleType = (value) =>
+    (value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/-/g, '_')
+      .replace(/\s+/g, '_')
+      .replace(/[^a-z0-9_]/g, '')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '')
 
   const startEdit = (idx, value) => {
     setEditingIndex(idx)
@@ -977,29 +970,96 @@ function CreditRulesTab() {
 
   const saveInline = () => {
     const numValue = Math.min(1000, Math.max(0, parseInt(editValue) || 0))
-    const updated = [...orderedRules]
+    const updated = [...localRules]
     updated[editingIndex].points = numValue
     setLocalRules(updated)
     setEditingIndex(null)
   }
 
-  const handleSaveAll = () => {
-    updateRules.mutate(orderedRules)
+  const handleAddRule = () => {
+    const certType = normalizeRuleType(newRuleType)
+    const points = Math.min(1000, Math.max(0, parseInt(newRulePoints) || 0))
+    if (!certType) return
+
+    const exists = localRules.some((r) => normalizeRuleType(r.cert_type) === certType)
+    if (exists) return
+
+    const nextRules = [...localRules, { cert_type: certType, points }].sort((a, b) =>
+      String(a?.cert_type || '').localeCompare(String(b?.cert_type || ''), undefined, { sensitivity: 'base' }),
+    )
+    setLocalRules(nextRules)
+    setNewRuleType('')
+    setNewRulePoints('0')
   }
+
+  const handleSaveAll = () => {
+    const map = new Map()
+    for (const rule of localRules) {
+      const certType = normalizeRuleType(rule?.cert_type)
+      if (!certType) continue
+      const points = Math.min(1000, Math.max(0, parseInt(rule?.points) || 0))
+      map.set(certType, { cert_type: certType, points })
+    }
+    updateRules.mutate(Array.from(map.values()))
+  }
+
+  const canAddRule = (() => {
+    const normalized = normalizeRuleType(newRuleType)
+    if (!normalized) return false
+    return !localRules.some((r) => normalizeRuleType(r.cert_type) === normalized)
+  })()
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Credit Points Configuration</h1>
         <p className="mt-1 text-sm text-gray-500">
-          These point values apply globally across all clubs.
+          These point values apply globally across all clubs, tutors, and students.
         </p>
+      </div>
+
+      <div className="card p-4">
+        <h2 className="text-sm font-semibold text-foreground">Add New Credit Rule</h2>
+        <p className="mt-1 text-xs text-gray-500">Example: hackathin with 3 points. This will appear in tutor and student role selections after saving.</p>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <div className="sm:col-span-2">
+            <label className="form-label">Rule Name</label>
+            <input
+              className="form-input"
+              value={newRuleType}
+              onChange={(e) => setNewRuleType(e.target.value)}
+              placeholder="hackathin"
+            />
+          </div>
+          <div>
+            <label className="form-label">Points</label>
+            <input
+              type="number"
+              min={0}
+              max={1000}
+              className="form-input"
+              value={newRulePoints}
+              onChange={(e) => setNewRulePoints(e.target.value)}
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              className="btn-primary w-full"
+              disabled={!canAddRule}
+              onClick={handleAddRule}
+            >
+              Add Rule
+            </button>
+          </div>
+        </div>
       </div>
       
       {isLoading ? (
         <div className="flex py-12 justify-center"><LoadingSpinner /></div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {orderedRules.map((rule, idx) => (
+          {localRules.map((rule, idx) => (
             <div key={rule.cert_type} className="card p-5 flex items-center justify-between shadow-sm">
               <div>
                 <p className="text-sm font-semibold text-foreground capitalize">

@@ -7,6 +7,7 @@ import DataTable from '../../components/DataTable'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import StatCard from '../../components/StatCard'
 import StatusBadge from '../../components/StatusBadge'
+import { useToastStore } from '../../store/uiStore'
 
 import {
   useTutorCreditPointVerifications,
@@ -17,6 +18,7 @@ import {
   useTutorStudentDetail,
   useTutorStudents,
   useTutorVerifyCreditPoint,
+  downloadTutorStudentCertificates,
 } from './api'
 
 function fmtDate(iso) {
@@ -149,12 +151,14 @@ function VerificationTab() {
 
 export default function TutorDashboard() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const addToast = useToastStore((s) => s.addToast)
   const { data: profile, isLoading: profileLoading } = useTutorProfile()
   const { data: students, isLoading: studentsLoading } = useTutorStudents()
   const { data: creditRules, isLoading: rulesLoading } = useTutorCreditRules()
   const manualCertMutation = useTutorManualCertificate()
   const [selectedStudentEmail, setSelectedStudentEmail] = useState(null)
   const [manualEntry, setManualEntry] = useState({ student_email: '', cert_type: '', cert_number: '' })
+  const [downloadingStudentEmail, setDownloadingStudentEmail] = useState(null)
   const activeTab = searchParams.get('tab') === 'verification' ? 'verification' : 'dashboard'
 
   const totalStudents = students?.length || 0
@@ -171,6 +175,41 @@ export default function TutorDashboard() {
 
     setManualEntry((prev) => ({ ...prev, cert_number: '' }))
     setSelectedStudentEmail(manualEntry.student_email)
+  }
+
+  const handleDownloadAllForStudent = async (student) => {
+    const email = student?.student_email
+    if (!email) return
+
+    try {
+      setDownloadingStudentEmail(email)
+      const blob = await downloadTutorStudentCertificates(email)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      const baseName = (student?.student_name || student?.registration_number || 'student')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'student'
+
+      link.href = url
+      link.download = `${baseName}-certificates.zip`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+      addToast({ type: 'success', message: 'Certificate ZIP download started.' })
+    } catch (err) {
+      const status = err?.response?.status
+      addToast({
+        type: 'error',
+        message: status === 404
+          ? 'No certificate files found for this student yet.'
+          : (err?.response?.data?.detail || 'Failed to download certificates.'),
+      })
+    } finally {
+      setDownloadingStudentEmail(null)
+    }
   }
 
   return (
@@ -299,6 +338,25 @@ export default function TutorDashboard() {
                   { key: 'registration_number', header: 'Reg Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
                   { key: 'student_email', header: 'Email', searchKey: true },
                   { key: 'total_credits', header: 'Credit Points', align: 'right', render: (v) => renderCreditAgainstTarget(v) },
+                  {
+                    key: '_actions',
+                    header: 'Actions',
+                    searchKey: false,
+                    align: 'center',
+                    render: (_, row) => (
+                      <button
+                        type="button"
+                        className="rounded bg-navy/10 px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={downloadingStudentEmail === row.student_email}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDownloadAllForStudent(row)
+                        }}
+                      >
+                        {downloadingStudentEmail === row.student_email ? 'Downloading...' : 'Download All Certificates'}
+                      </button>
+                    ),
+                  },
                 ]}
                 data={students || []}
                 isLoading={studentsLoading}

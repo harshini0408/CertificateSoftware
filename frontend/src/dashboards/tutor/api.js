@@ -117,3 +117,11 @@ export function useTutorRejectCreditPoint() {
     },
   })
 }
+
+export async function downloadTutorStudentCertificates(studentEmail) {
+  const { data } = await axiosInstance.get(
+    `/tutor/students/${encodeURIComponent(studentEmail)}/certificates/download-all`,
+    { responseType: 'blob' },
+  )
+  return data
+}
