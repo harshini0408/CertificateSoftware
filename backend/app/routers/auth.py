@@ -60,24 +60,6 @@ async def login(body: LoginRequest, response: Response):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password")
 
     if user.role == UserRole.CLUB_COORDINATOR and not user.first_login_completed:
-        if (body.username or "").strip().lower() != user.username.lower():
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "First login must use faculty ID as username",
-            )
-
-        provided_email = (body.email or "").strip().lower()
-        if not provided_email:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "First login requires faculty Gmail",
-            )
-        if provided_email != user.email.lower():
-            raise HTTPException(
-                status.HTTP_401_UNAUTHORIZED,
-                "Faculty Gmail does not match this account",
-            )
-
         user.first_login_completed = True
         await user.save()
 

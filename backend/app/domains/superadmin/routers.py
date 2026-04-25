@@ -9,12 +9,13 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import File, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...core.dependencies import require_role
-from ...core.security import hash_password
+from ...core.security import hash_password, verify_password
 from ...models.user import User, UserRole
 from ...models.club import Club
+from ...models.department import Department
 from ...models.event import Event
 from ...models.certificate import Certificate, CertStatus
 from ...models.dept_certificate import DeptCertificate
@@ -26,6 +27,7 @@ from ...models.credit_rule import CreditRule
 from ...models.student_credit import StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
+from ...schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
 from ...schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
 from ...schemas.user import UserCreate, UserUpdate, UserResponse
 
@@ -46,6 +48,11 @@ class TutorStudentAssignRequest(BaseModel):
 
 class TutorReassignRequest(BaseModel):
     new_tutor_id: PydanticObjectId
+
+
+class CreditResetRequest(BaseModel):
+    semester: str = Field(min_length=1, max_length=50)
+    admin_password: str = Field(min_length=1, max_length=256)
 
 
 async def _assign_student_to_tutor(
@@ -135,6 +142,47 @@ def _club_response(c: Club) -> ClubResponse:
         is_active=c.is_active,
         created_at=c.created_at,
     )
+
+
+def _department_response(d: Department) -> DepartmentResponse:
+    slug_value = getattr(d, "slug", None) or _normalize_department_slug(getattr(d, "name", "")) or "DEPT"
+    return DepartmentResponse(
+        id=str(d.id),
+        name=d.name,
+        slug=slug_value,
+        is_active=d.is_active,
+        created_at=d.created_at,
+    )
+
+
+def _normalize_department_name(value: str | None) -> str:
+    text = re.sub(r"\s+", " ", (value or "").strip())
+    return text
+
+
+def _normalize_department_slug(value: str | None) -> str:
+    text = re.sub(r"[^A-Za-z0-9]", "", (value or "").strip())
+    return text.upper()
+
+
+async def _resolve_department_name(raw_value: str | None) -> str | None:
+    normalized_name = _normalize_department_name(raw_value)
+    normalized_slug = _normalize_department_slug(raw_value)
+    if not normalized_name and not normalized_slug:
+        return None
+
+    clauses = []
+    if normalized_name:
+        escaped_name = re.escape(normalized_name)
+        clauses.append({"name": {"$regex": f"^{escaped_name}$", "$options": "i"}})
+    if normalized_slug:
+        escaped_slug = re.escape(normalized_slug)
+        clauses.append({"slug": {"$regex": f"^{escaped_slug}$", "$options": "i"}})
+
+    existing = await Department.find_one({"$and": [{"is_active": True}, {"$or": clauses}]})
+    if not existing:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found or inactive")
+    return existing.name
 
 
 def _normalize_cert_type(value: str | None) -> str:
@@ -255,6 +303,144 @@ async def get_club_users(club_id: PydanticObjectId, _user: User = _admin):
     return [_user_response(u) for u in users]
 
 
+# ═══ DEPARTMENTS ═════════════════════════════════════════════════════════════
+
+
+@router.post("/departments", response_model=DepartmentResponse, status_code=201)
+async def create_department(body: DepartmentCreate, _user: User = _admin):
+    normalized_name = _normalize_department_name(body.name)
+    normalized_slug = _normalize_department_slug(body.slug)
+    if not normalized_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department name is required")
+    if not normalized_slug:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department slug is required")
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", normalized_slug):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department slug must use uppercase letters and digits only")
+
+    escaped_name = re.escape(normalized_name)
+    escaped_slug = re.escape(normalized_slug)
+    existing = await Department.find_one({
+        "$or": [
+            {"name": {"$regex": f"^{escaped_name}$", "$options": "i"}},
+            {"slug": {"$regex": f"^{escaped_slug}$", "$options": "i"}},
+        ]
+    })
+    if existing and existing.name.lower() == normalized_name.lower():
+        raise HTTPException(status.HTTP_409_CONFLICT, "Department already exists")
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Department slug already exists")
+
+    department = Department(name=normalized_name, slug=normalized_slug)
+    await department.insert()
+    return _department_response(department)
+
+
+@router.get("/departments", response_model=List[DepartmentResponse])
+async def list_departments(
+    is_active: Optional[bool] = None,
+    search: Optional[str] = None,
+    _user: User = _admin,
+):
+    query = {}
+    if is_active is not None:
+        query["is_active"] = is_active
+    if search:
+        pattern = re.compile(re.escape(search), re.IGNORECASE)
+        query["$or"] = [{"name": pattern}, {"slug": pattern}]
+
+    departments = await Department.find(query).sort("name").to_list()
+
+    # Backfill slug for legacy records that were created before slug support.
+    for d in departments:
+        if getattr(d, "slug", None):
+            continue
+
+        base_slug = _normalize_department_slug(getattr(d, "name", "")) or "DEPT"
+        slug_candidate = base_slug[:20]
+        suffix = 1
+        while True:
+            duplicate = await Department.find_one({"slug": slug_candidate})
+            if not duplicate or duplicate.id == d.id:
+                break
+            suffix_str = str(suffix)
+            keep = max(1, 20 - len(suffix_str))
+            slug_candidate = f"{base_slug[:keep]}{suffix_str}"
+            suffix += 1
+
+        await d.set({"slug": slug_candidate})
+
+    if departments:
+        departments = await Department.find(query).sort("name").to_list()
+
+    return [_department_response(d) for d in departments]
+
+
+@router.patch("/departments/{department_id}", response_model=DepartmentResponse)
+async def update_department(
+    department_id: PydanticObjectId,
+    body: DepartmentUpdate,
+    _user: User = _admin,
+):
+    department = await Department.get(department_id)
+    if not department:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found")
+
+    update_data = body.model_dump(exclude_none=True)
+
+    if "name" in update_data:
+        normalized_name = _normalize_department_name(update_data["name"])
+        if not normalized_name:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department name is required")
+
+        escaped = re.escape(normalized_name)
+        duplicate = await Department.find_one({"name": {"$regex": f"^{escaped}$", "$options": "i"}})
+        if duplicate and duplicate.id != department.id:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Department already exists")
+
+        old_name = department.name
+        if normalized_name != old_name:
+            update_data["name"] = normalized_name
+            await User.find(User.department == old_name).update_many({"$set": {"department": normalized_name}})
+
+    if "slug" in update_data:
+        normalized_slug = _normalize_department_slug(update_data["slug"])
+        if not normalized_slug:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department slug is required")
+        if not re.fullmatch(r"[A-Z0-9]{2,20}", normalized_slug):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department slug must use uppercase letters and digits only")
+
+        escaped_slug = re.escape(normalized_slug)
+        duplicate_slug = await Department.find_one({"slug": {"$regex": f"^{escaped_slug}$", "$options": "i"}})
+        if duplicate_slug and duplicate_slug.id != department.id:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Department slug already exists")
+
+        update_data["slug"] = normalized_slug
+
+    if update_data:
+        await department.set(update_data)
+
+    updated = await Department.get(department_id)
+    if not updated:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found")
+    return _department_response(updated)
+
+
+@router.delete("/departments/{department_id}")
+async def delete_department(department_id: PydanticObjectId, _user: User = _admin):
+    department = await Department.get(department_id)
+    if not department:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found")
+
+    if await User.find_one(User.department == department.name):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Department is assigned to existing users. Reassign them before deleting.",
+        )
+
+    await department.delete()
+    return {"message": "Department deleted"}
+
+
 # ═══ USERS ═══════════════════════════════════════════════════════════════════
 
 
@@ -308,6 +494,12 @@ async def create_user(body: UserCreate, _user: User = _admin):
                 "Registration number already registered",
             )
 
+    department_name = None
+    if body.role in ["dept_coordinator", "student", "tutor"]:
+        department_name = await _resolve_department_name(body.department)
+        if not department_name:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required for this role")
+
     new_user = User(
         username=username,
         name=name,
@@ -318,7 +510,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
         is_active=body.is_active,
         club_id=club_oid,
         event_id=event_oid,
-        department=body.department.strip() if body.department and body.role not in ["guest", "club_coordinator"] else None,
+        department=department_name,
         registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor"] else None,
         batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
         section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
@@ -335,7 +527,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
                 student_email=email,
                 registration_number=body.registration_number.strip() if body.registration_number else body.registration_number,
                 student_name=name,
-                department=body.department.strip() if body.department else body.department,
+                department=department_name,
                 batch=body.batch.strip() if body.batch else body.batch,
                 section=body.section.strip() if body.section else body.section,
                 total_credits=0,
@@ -425,6 +617,10 @@ async def bulk_import_students(
             if len(password) < 8:
                 raise ValueError("Password must be at least 8 characters")
 
+            resolved_dept = await _resolve_department_name(dept)
+            if not resolved_dept:
+                raise ValueError("Department is required")
+
             tutor = None
             if tutor_email:
                 tutor = await _find_tutor_by_email(tutor_email)
@@ -453,7 +649,7 @@ async def bulk_import_students(
                 password_hash=hash_password(password),
                 role=UserRole.STUDENT,
                 is_active=True,
-                department=dept,
+                department=resolved_dept,
                 registration_number=reg_no,
                 batch=batch,
                 section=section,
@@ -468,7 +664,7 @@ async def bulk_import_students(
                     tutor_email=(tutor.email if tutor else None),
                     registration_number=reg_no,
                     student_name=name,
-                    department=dept,
+                    department=resolved_dept,
                     batch=batch,
                     section=section,
                     total_credits=0,
@@ -582,6 +778,10 @@ async def bulk_import_tutors(
             if len(password) < 8:
                 raise ValueError("Password must be at least 8 characters")
 
+            resolved_dept = await _resolve_department_name(department)
+            if not resolved_dept:
+                raise ValueError("Department is required")
+
             if await User.find_one(User.username == username):
                 skipped += 1
                 errors.append({"row": row_idx, "reason": f"Username '{username}' already exists — skipped"})
@@ -600,7 +800,7 @@ async def bulk_import_tutors(
                 role=UserRole.TUTOR,
                 first_login_completed=True,
                 is_active=True,
-                department=department,
+                department=resolved_dept,
                 batch=batch,
                 section=section,
             )
@@ -1147,6 +1347,55 @@ async def upsert_credit_rules(body: CreditRulesUpdateRequest, admin: User = _adm
             await CreditRule(cert_type=rule.cert_type, points=rule.points,
                              updated_by=admin.id, updated_at=datetime.utcnow()).insert()
     return {"message": f"{len(body.rules)} credit rules upserted"}
+
+
+@router.post("/credits/reset")
+async def reset_credit_points(body: CreditResetRequest, admin: User = _admin):
+    semester = body.semester.strip()
+    if not semester:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Semester is required")
+
+    if not verify_password(body.admin_password, admin.password_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid super admin password")
+
+    student_credit_docs = await StudentCredit.find_all().to_list()
+    student_docs_updated = 0
+    credit_entries_updated = 0
+    for doc in student_credit_docs:
+        updated_history = []
+        history_changed = False
+        for entry in doc.credit_history or []:
+            if int(entry.points_awarded or 0) != 0:
+                history_changed = True
+                credit_entries_updated += 1
+                updated_history.append(entry.model_copy(update={"points_awarded": 0}))
+            else:
+                updated_history.append(entry)
+
+        if int(doc.total_credits or 0) != 0 or history_changed:
+            await doc.set({
+                "total_credits": 0,
+                "credit_history": updated_history,
+                "last_updated": datetime.utcnow(),
+            })
+            student_docs_updated += 1
+
+    manual_submissions = await ManualCreditSubmission.find_all().to_list()
+    manual_submissions_updated = 0
+    for submission in manual_submissions:
+        if int(submission.points_awarded or 0) == 0:
+            continue
+        await submission.set({"points_awarded": 0})
+        manual_submissions_updated += 1
+
+    return {
+        "message": f"Credit points reset to 0 for semester {semester}.",
+        "semester": semester,
+        "student_documents_updated": student_docs_updated,
+        "credit_entries_updated": credit_entries_updated,
+        "manual_submissions_updated": manual_submissions_updated,
+        "requested_by": admin.email,
+    }
 
 
 # ═══ PLATFORM STATS ══════════════════════════════════════════════════════════

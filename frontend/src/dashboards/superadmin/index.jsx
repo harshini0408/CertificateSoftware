@@ -29,11 +29,16 @@ import {
 import {
   useAdminStats,
   useAdminClubs,
+  useDepartments,
+  useCreateDepartment,
+  useUpdateDepartment,
+  useDeleteDepartment,
   useAdminCertificates,
   useRevokeCertificate,
   useCreditRules,
   useUpdateCreditRules,
   useBulkImportStudents,
+  useResetStudentCredits,
 } from './api'
 import { useEvents } from '../club/eventsApi'
 
@@ -55,6 +60,7 @@ function fmtDate(iso) {
 
 // ── Role badge colors ─────────────────────────────────────────────────────────
 const roleBadge = {
+  principal: 'bg-amber-50 text-amber-700 ring-amber-200',
   club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
   dept_coordinator: 'bg-purple-50 text-purple-700 ring-purple-200',
   tutor: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
@@ -63,6 +69,7 @@ const roleBadge = {
   super_admin: 'bg-red-50 text-red-700 ring-red-200',
 }
 const roleLabel = {
+  principal: 'Principal',
   club_coordinator: 'Club Coordinator',
   dept_coordinator: 'Dept Coordinator',
   tutor: 'Tutor',
@@ -345,6 +352,7 @@ function EditClubModal({ isOpen, onClose, club }) {
 // NEW USER MODAL (multi-step, role-aware)
 // ═══════════════════════════════════════════════════════════════════════════════
 const roles = [
+  { value: 'principal', label: 'Principal', icon: '🏫', desc: 'College-level student overview' },
   { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
   { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
   { value: 'tutor', label: 'Tutor', icon: '🧑‍🏫', desc: 'Manages one class of students' },
@@ -365,6 +373,7 @@ function NewUserModal({ isOpen, onClose }) {
   const assignTutorStudents = useAssignTutorStudents()
   const bulkImportTutorStudents = useBulkImportTutorStudents()
   const { data: clubsList } = useClubs()
+  const { data: departmentsList } = useDepartments({ is_active: true })
   const { data: eventsList, isFetching: fetchingEvents } = useEvents(
     selectedRole === 'guest' && form.club_id ? form.club_id : null
   )
@@ -538,7 +547,19 @@ function NewUserModal({ isOpen, onClose }) {
           {(selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') && (
             <div>
               <label className="form-label">Department *</label>
-              <input className={`form-input ${errors.department ? 'form-input-error' : ''}`} value={form.department} onChange={(e) => handleChange('department', e.target.value)} placeholder="CSE" />
+              <select
+                className={`form-input ${errors.department ? 'form-input-error' : ''}`}
+                value={form.department}
+                onChange={(e) => handleChange('department', e.target.value)}
+              >
+                <option value="">Select department…</option>
+                {(departmentsList || []).map((d) => (
+                  <option key={d.id} value={d.slug}>{d.name} ({d.slug})</option>
+                ))}
+              </select>
+              {(departmentsList || []).length === 0 && (
+                <p className="mt-1 text-xs text-gray-500">No active departments available. Create one in the Departments tab first.</p>
+              )}
               {errors.department && <p className="form-error">{errors.department}</p>}
             </div>
           )}
@@ -682,7 +703,6 @@ function EditUserModal({ isOpen, onClose, user }) {
 export default function AdminDashboard() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'overview'
-  const setTab = (t) => setSearchParams(t === 'overview' ? {} : { tab: t })
 
   return (
     <>
@@ -693,6 +713,7 @@ export default function AdminDashboard() {
           <div className="page-container">
             {activeTab === 'overview' && <OverviewTab />}
             {activeTab === 'clubs' && <ClubsTab />}
+            {activeTab === 'departments' && <DepartmentsTab />}
             {activeTab === 'users' && <UsersTab />}
             {activeTab === 'certificate-mapping' && <CertificateMappingTab />}
             {activeTab === 'student-certificates' && <StudentCertificatesTab />}
@@ -1024,6 +1045,7 @@ function OverviewTab() {
   const [, setSearchParams] = useSearchParams()
   const { data: stats, isLoading: sl } = useAdminStats()
   const { data: clubs } = useAdminClubs()
+  const [isResetOpen, setIsResetOpen] = useState(false)
 
   const chartData = useMemo(() => {
     return stats?.certs_by_source || []
@@ -1054,7 +1076,23 @@ function OverviewTab() {
   const hasChartData = chartData.some(d => d.count > 0)
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-foreground">Platform Overview</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Platform Overview</h1>
+          <p className="mt-1 text-sm text-gray-500">Monitor the platform and manage global credit resets from one place.</p>
+        </div>
+        <button
+          type="button"
+          className="btn-danger sm:self-start"
+          onClick={() => setIsResetOpen(true)}
+        >
+          Reset Credit Points
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        This will set student and faculty credit points to zero for the new semester. Certificates will remain in place.
+      </div>
       
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard label="Total Clubs" value={stats?.total_clubs ?? 0} accent="navy" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} />
@@ -1110,6 +1148,81 @@ function OverviewTab() {
   )
 }
 
+function CreditResetModal({ isOpen, onClose }) {
+  const [semester, setSemester] = useState('')
+  const [adminPassword, setAdminPassword] = useState('')
+  const resetCredits = useResetStudentCredits()
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSemester('')
+      setAdminPassword('')
+    }
+  }, [isOpen])
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const semesterText = semester.trim()
+    if (!semesterText || !adminPassword || resetCredits.isPending) return
+
+    resetCredits.mutate(
+      { semester: semesterText, adminPassword },
+      {
+        onSuccess: () => {
+          setSemester('')
+          setAdminPassword('')
+          onClose()
+        },
+      },
+    )
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Reset Credit Points">
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          This action will zero all stored credit points for students and faculty views. Generated certificates will stay intact.
+        </div>
+        <div>
+          <label className="form-label">Current semester</label>
+          <input
+            className="form-input"
+            value={semester}
+            onChange={(e) => setSemester(e.target.value)}
+            placeholder="2025-26 even"
+            autoComplete="off"
+          />
+          <p className="mt-1 text-xs text-gray-500">Enter the semester label before confirming the reset.</p>
+        </div>
+        <div>
+          <label className="form-label">Super Admin Password</label>
+          <input
+            type="password"
+            className="form-input"
+            value={adminPassword}
+            onChange={(e) => setAdminPassword(e.target.value)}
+            placeholder="Enter your password"
+            autoComplete="current-password"
+          />
+          <p className="mt-1 text-xs text-gray-500">Password verification is required to complete this reset.</p>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={resetCredits.isPending}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn-danger min-w-[160px]"
+            disabled={resetCredits.isPending || !semester.trim() || !adminPassword}
+          >
+            {resetCredits.isPending ? <LoadingSpinner size="sm" label="" /> : 'Reset Credit Points'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 // ── CLUBS TAB ─────────────────────────────────────────────────────────────────
 function ClubsTab() {
   const [search, setSearch] = useState('')
@@ -1151,6 +1264,171 @@ function ClubsTab() {
       <NewClubModal isOpen={showNew} onClose={() => setShowNew(false)} />
       <EditClubModal isOpen={!!editClub} onClose={() => setEditClub(null)} club={editClub} />
       {detailClubId && <ClubDetailPanel clubId={detailClubId} onClose={() => setDetailClubId(null)} onEdit={(c) => { setDetailClubId(null); setEditClub(c) }} />}
+    </div>
+  )
+}
+
+function DepartmentModal({ isOpen, onClose, department }) {
+  const [name, setName] = useState('')
+  const [slug, setSlug] = useState('')
+  const [error, setError] = useState('')
+  const createDepartment = useCreateDepartment()
+  const updateDepartment = useUpdateDepartment()
+
+  useEffect(() => {
+    if (!isOpen) return
+    setName(department?.name || '')
+    setSlug(department?.slug || '')
+    setError('')
+  }, [isOpen, department])
+
+  const isEdit = !!department
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const normalized = name.trim()
+    const normalizedSlug = slug.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+    if (!normalized) {
+      setError('Department name is required')
+      return
+    }
+    if (!normalizedSlug) {
+      setError('Department slug is required')
+      return
+    }
+
+    const payload = { name: normalized, slug: normalizedSlug }
+    const mutation = isEdit
+      ? updateDepartment.mutateAsync({ departmentId: department.id, ...payload })
+      : createDepartment.mutateAsync(payload)
+
+    mutation
+      .then(() => onClose())
+      .catch((err) => {
+        setError(err?.response?.data?.detail || 'Unable to save department')
+      })
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? 'Edit Department' : 'New Department'}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="form-label">Department Name *</label>
+          <input
+            className={`form-input ${error ? 'form-input-error' : ''}`}
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value)
+              if (error) setError('')
+            }}
+            placeholder="Computer Science and Engineering"
+          />
+          {error && <p className="form-error">{error}</p>}
+        </div>
+        <div>
+          <label className="form-label">Slug *</label>
+          <input
+            className="form-input font-mono"
+            value={slug}
+            onChange={(e) => {
+              setSlug(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+              if (error) setError('')
+            }}
+            placeholder="CSE"
+          />
+          <p className="mt-1 text-xs text-gray-500">Uppercase letters and digits only.</p>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="submit"
+            className="btn-primary min-w-[140px]"
+            disabled={createDepartment.isPending || updateDepartment.isPending}
+          >
+            {(createDepartment.isPending || updateDepartment.isPending)
+              ? <LoadingSpinner size="sm" label="" />
+              : (isEdit ? 'Save Changes' : 'Create Department')}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function DepartmentsTab() {
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search)
+  const filters = useMemo(() => {
+    const f = {}
+    if (debouncedSearch) f.search = debouncedSearch
+    return f
+  }, [debouncedSearch])
+
+  const { data: departments, isLoading } = useDepartments(filters)
+  const removeDepartment = useDeleteDepartment()
+
+  const [showNew, setShowNew] = useState(false)
+  const [editDepartment, setEditDepartment] = useState(null)
+  const [removeTarget, setRemoveTarget] = useState(null)
+
+  const columns = [
+    { key: 'name', header: 'Department Name', sortable: true, render: (v) => <span className="font-semibold">{v}</span> },
+    { key: 'slug', header: 'Slug', render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span> },
+    { key: 'created_at', header: 'Created', sortable: true, render: (v) => fmtDate(v) },
+    { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <button
+          title="Edit"
+          onClick={() => setEditDepartment(row)}
+          className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+        </button>
+        <button
+          title="Remove"
+          onClick={() => setRemoveTarget(row)}
+          className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0l1 12a1 1 0 001 1h6a1 1 0 001-1l1-12" /></svg>
+        </button>
+      </div>
+    )},
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-foreground">Departments</h1>
+        <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Department</button>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="search" placeholder="Search departments…" value={search} onChange={(e) => setSearch(e.target.value)} className="form-input w-72" />
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={departments || []}
+        isLoading={isLoading}
+        emptyMessage="No departments found. Create your first department."
+      />
+
+      <DepartmentModal isOpen={showNew} onClose={() => setShowNew(false)} />
+      <DepartmentModal isOpen={!!editDepartment} onClose={() => setEditDepartment(null)} department={editDepartment} />
+
+      <ConfirmModal
+        isOpen={!!removeTarget}
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={() => {
+          if (!removeTarget?.id) return
+          removeDepartment.mutate(removeTarget.id, {
+            onSuccess: () => setRemoveTarget(null),
+          })
+        }}
+        title="Remove Department?"
+        message={`Remove ${removeTarget?.name || 'this department'}? This is blocked if users are still assigned to it.`}
+        confirmLabel="Remove"
+        isLoading={removeDepartment.isPending}
+      />
     </div>
   )
 }
@@ -1496,6 +1774,7 @@ function UsersTab() {
   }, [clubs])
 
   const getScope = (u) => {
+    if (u.role === 'principal') return 'College'
     if (u.role === 'club_coordinator') return clubMap[u.club_id] || u.club_id || '—'
     if (u.role === 'dept_coordinator') return u.department || '—'
     if (u.role === 'tutor') return `${u.department || ''} ${u.batch || ''} ${u.section || ''}`.trim() || '—'
@@ -1562,6 +1841,7 @@ function UsersTab() {
         <input type="search" placeholder="Search users…" value={search} onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
         <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="form-input w-44">
           <option value="">All Roles</option>
+          <option value="principal">Principal</option>
           <option value="club_coordinator">Club Coordinator</option>
           <option value="dept_coordinator">Dept Coordinator</option>
           <option value="tutor">Tutor</option>

@@ -12,6 +12,7 @@ import EventDetail from './dashboards/club/EventDetail'
 import DeptCoordinatorDashboard from './dashboards/dept'
 import TutorDashboard from './dashboards/tutor'
 import StudentDashboard from './dashboards/student'
+import PrincipalDashboard from './dashboards/principal'
 import VerifyPage from './pages/Verify'
 import TemplateSelector from './dashboards/club/TemplateSelector'
 import GuestDashboard from './dashboards/guest/GuestDashboard'
@@ -22,6 +23,7 @@ import Authors from './Authors'
 // ── Role constants ─────────────────────────────────────────────────────────────
 const ROLES = {
   SUPER_ADMIN: 'super_admin',
+  PRINCIPAL: 'principal',
   CLUB_COORD: 'club_coordinator',
   DEPT_COORD: 'dept_coordinator',
   TUTOR: 'tutor',
@@ -48,6 +50,16 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.SUPER_ADMIN]}>
               <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Principal ─────────────────────────────────────────────────── */}
+        <Route
+          path="/principal"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.PRINCIPAL, ROLES.SUPER_ADMIN]}>
+              <PrincipalDashboard />
             </ProtectedRoute>
           }
         />

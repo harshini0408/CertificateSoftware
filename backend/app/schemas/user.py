@@ -16,7 +16,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     role: Literal[
-        "club_coordinator", "dept_coordinator", "tutor", "student", "guest"
+        "principal", "club_coordinator", "dept_coordinator", "tutor", "student", "guest"
     ]
     is_active: bool = True
 

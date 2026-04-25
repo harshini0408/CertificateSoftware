@@ -54,6 +54,8 @@ def build_redirect(user: User) -> str:
     """Return the frontend redirect path based on user role."""
     if user.role == UserRole.SUPER_ADMIN:
         return "/admin"
+    if user.role == UserRole.PRINCIPAL:
+        return "/principal"
     if user.role == UserRole.CLUB_COORDINATOR:
         return f"/club/{user.club_id}"
     if user.role == UserRole.DEPT_COORDINATOR:

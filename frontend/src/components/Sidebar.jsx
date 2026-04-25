@@ -30,6 +30,11 @@ const icons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
     </svg>
   ),
+  departments: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 21h16M6 21V7a1 1 0 011-1h10a1 1 0 011 1v14M9 10h.01M9 13h.01M9 16h.01M12 10h.01M12 13h.01M12 16h.01M15 10h.01M15 13h.01M15 16h.01" />
+    </svg>
+  ),
   users: (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -92,11 +97,17 @@ function useNavItems() {
       return [
         { to: '/admin',                          icon: icons.dashboard,   label: 'Overview',      end: true },
         { to: '/admin?tab=clubs',                icon: icons.clubs,       label: 'Clubs' },
+        { to: '/admin?tab=departments',          icon: icons.departments, label: 'Departments' },
         { to: '/admin?tab=users',                icon: icons.users,       label: 'Users' },
         { to: '/admin?tab=certificate-mapping',  icon: icons.template,    label: 'Certificate Mapping' },
         { to: '/admin?tab=student-certificates', icon: icons.student,     label: 'Student Certificates' },
         { to: '/admin?tab=certificates',         icon: icons.certificate, label: 'Certificates' },
         { to: '/admin?tab=credit-rules',         icon: icons.creditCard,  label: 'Credit Rules' },
+      ]
+
+    case 'principal':
+      return [
+        { to: '/principal', icon: icons.dashboard, label: 'Dashboard', end: true },
       ]
 
     case 'club_coordinator':

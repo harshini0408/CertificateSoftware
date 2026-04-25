@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field
 
 class LoginRequest(BaseModel):
     username: str
-    email: Optional[str] = None
     password: str
 
 

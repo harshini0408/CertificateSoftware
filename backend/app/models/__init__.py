@@ -1,4 +1,5 @@
 from .club import Club
+from .department import Department
 from .user import User, UserRole
 from .token_blacklist import TokenBlacklist
 from .event import Event, EventStatus, EventAssets
@@ -25,6 +26,7 @@ from ..certificate_config.model import CertificateTemplateConfig
 
 ALL_MODELS = [
     Club,
+    Department,
     User,
     TokenBlacklist,
     Event,
@@ -52,6 +54,7 @@ ALL_MODELS = [
 
 __all__ = [
     "Club",
+    "Department",
     "User", "UserRole",
     "TokenBlacklist",
     "Event", "EventStatus", "EventAssets",

@@ -6,12 +6,44 @@ import { useToastStore } from '../../store/uiStore'
 export const adminKeys = {
   stats:     ()            => ['admin', 'stats'],
   clubs:     ()            => ['admin', 'clubs'],
+  departments: ()          => ['admin', 'departments'],
   users:     ()            => ['admin', 'users'],
   roleMappings: ()         => ['admin', 'role-mappings'],
   certs:     (filters, p) => ['admin', 'certificates', filters, p],
   scanLogs:  (filters, p) => ['admin', 'scan-logs', filters, p],
   creditRules: ()          => ['admin', 'credit-rules'],
   activity:  ()            => ['admin', 'activity'],
+}
+
+export function useResetStudentCredits() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ semester, adminPassword }) =>
+      axiosInstance.post('/admin/credits/reset', {
+        semester,
+        admin_password: adminPassword,
+      }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: adminKeys.stats() })
+      qc.invalidateQueries({ queryKey: ['credits', 'me'] })
+      qc.invalidateQueries({ queryKey: ['credits', 'manual-submissions'] })
+      qc.invalidateQueries({ queryKey: ['student', 'me', 'profile'] })
+      qc.invalidateQueries({ queryKey: ['tutor', 'students'] })
+      qc.invalidateQueries({ queryKey: ['tutor', 'credit-point-verifications'] })
+      addToast({
+        type: 'success',
+        message: data?.message || 'Credit points reset successfully.',
+      })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to reset credit points.',
+      })
+    },
+  })
 }
 
 // ── useAdminStats ─────────────────────────────────────────────────────────────
@@ -46,6 +78,74 @@ export function useAdminClubs() {
     queryFn: async () => {
       const { data } = await axiosInstance.get('/admin/clubs')
       return data
+    },
+  })
+}
+
+// ── Departments (admin) ─────────────────────────────────────────────────────
+export function useDepartments(filters = {}) {
+  return useQuery({
+    queryKey: [...adminKeys.departments(), filters],
+    queryFn: async () => {
+      const params = {}
+      if (filters.search) params.search = filters.search
+      if (filters.is_active !== undefined && filters.is_active !== null) {
+        params.is_active = filters.is_active
+      }
+      const { data } = await axiosInstance.get('/admin/departments', { params })
+      return data
+    },
+  })
+}
+
+export function useCreateDepartment() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (payload) => axiosInstance.post('/admin/departments', payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: adminKeys.departments() })
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Department created successfully.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to create department.' })
+    },
+  })
+}
+
+export function useUpdateDepartment() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ departmentId, ...payload }) =>
+      axiosInstance.patch(`/admin/departments/${departmentId}`, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: adminKeys.departments() })
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Department updated.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to update department.' })
+    },
+  })
+}
+
+export function useDeleteDepartment() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (departmentId) => axiosInstance.delete(`/admin/departments/${departmentId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: adminKeys.departments() })
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Department removed.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to remove department.' })
     },
   })
 }
