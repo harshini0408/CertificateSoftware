@@ -56,6 +56,8 @@ def build_redirect(user: User) -> str:
         return "/admin"
     if user.role == UserRole.PRINCIPAL:
         return "/principal"
+    if user.role == UserRole.HOD:
+        return "/hod"
     if user.role == UserRole.CLUB_COORDINATOR:
         return f"/club/{user.club_id}"
     if user.role == UserRole.DEPT_COORDINATOR:

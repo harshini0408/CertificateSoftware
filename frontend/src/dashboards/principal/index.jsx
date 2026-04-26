@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
@@ -22,8 +23,57 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+function buildCreditPredicate(rawExpression) {
+  const expr = (rawExpression || '').trim()
+  if (!expr) return { fn: () => true, error: '' }
+
+  const compact = expr.replace(/\s+/g, '')
+
+  const rangeMatch = compact.match(/^(\d+)\-(\d+)$/)
+  if (rangeMatch) {
+    const low = Number(rangeMatch[1])
+    const high = Number(rangeMatch[2])
+    if (low > high) {
+      return { fn: () => false, error: 'Invalid range. Use lower-higher (example: 10-20).' }
+    }
+    return {
+      fn: (value) => {
+        const points = Number(value || 0)
+        return points >= low && points <= high
+      },
+      error: '',
+    }
+  }
+
+  const comparatorMatch = compact.match(/^(<=|>=|<|>|=)?(\d+)$/)
+  if (comparatorMatch) {
+    const operator = comparatorMatch[1] || '='
+    const target = Number(comparatorMatch[2])
+    return {
+      fn: (value) => {
+        const points = Number(value || 0)
+        switch (operator) {
+          case '<': return points < target
+          case '<=': return points <= target
+          case '>': return points > target
+          case '>=': return points >= target
+          default: return points === target
+        }
+      },
+      error: '',
+    }
+  }
+
+  return {
+    fn: () => false,
+    error: 'Invalid format. Try <10, >=20, =15 or 10-20.',
+  }
+}
+
 export default function PrincipalDashboard() {
-  const [viewMode, setViewMode] = useState('dashboard')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialView = searchParams.get('view') === 'student-search' ? 'student-search' : 'dashboard'
+  const [viewMode, setViewMode] = useState(initialView)
 
   const [eventSearch, setEventSearch] = useState('')
   const [eventSourceType, setEventSourceType] = useState('')
@@ -33,6 +83,7 @@ export default function PrincipalDashboard() {
   const [department, setDepartment] = useState('')
   const [batch, setBatch] = useState('')
   const [className, setClassName] = useState('')
+  const [creditRangeExpression, setCreditRangeExpression] = useState('')
   const [selectedStudent, setSelectedStudent] = useState(null)
 
   const debouncedSearch = useDebounce(search)
@@ -59,6 +110,14 @@ export default function PrincipalDashboard() {
 
   const { data: studentsResp, isLoading: loadingStudents } = usePrincipalStudents(filters)
   const students = studentsResp?.items || []
+  const creditFilter = useMemo(
+    () => buildCreditPredicate(creditRangeExpression),
+    [creditRangeExpression],
+  )
+  const filteredStudents = useMemo(
+    () => students.filter((student) => creditFilter.fn(student.total_credits)),
+    [students, creditFilter],
+  )
 
   const { data: certResp, isLoading: loadingCerts } = usePrincipalStudentCertificates(selectedStudent?.id)
   const certificates = certResp?.certificates || []
@@ -140,6 +199,19 @@ export default function PrincipalDashboard() {
     { key: 'allocated_points', header: 'Allocated Points', align: 'right', render: (v) => <span className="font-semibold text-green-700">{v || 0}</span> },
   ]
 
+  useEffect(() => {
+    const viewFromQuery = searchParams.get('view') === 'student-search' ? 'student-search' : 'dashboard'
+    setViewMode((prev) => (prev === viewFromQuery ? prev : viewFromQuery))
+  }, [searchParams])
+
+  const handleViewModeChange = (nextView) => {
+    setViewMode(nextView)
+    const nextParams = new URLSearchParams(searchParams)
+    if (nextView === 'student-search') nextParams.set('view', 'student-search')
+    else nextParams.delete('view')
+    setSearchParams(nextParams, { replace: true })
+  }
+
   return (
     <>
       <Navbar />
@@ -154,7 +226,7 @@ export default function PrincipalDashboard() {
 
             <div className="card p-4">
               <label className="form-label">View</label>
-              <select className="form-input max-w-xs" value={viewMode} onChange={(e) => setViewMode(e.target.value)}>
+              <select className="form-input max-w-xs" value={viewMode} onChange={(e) => handleViewModeChange(e.target.value)}>
                 <option value="dashboard">Dashboard</option>
                 <option value="student-search">Student Search</option>
               </select>
@@ -215,7 +287,7 @@ export default function PrincipalDashboard() {
             ) : (
               <>
                 <div className="card p-4">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                     <input
                       type="search"
                       placeholder="Search name / reg no / email"
@@ -235,12 +307,20 @@ export default function PrincipalDashboard() {
                       <option value="">All Classes</option>
                       {classOptions.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={creditRangeExpression}
+                      onChange={(e) => setCreditRangeExpression(e.target.value)}
+                      placeholder="Credits: <10, >=20, 10-20"
+                    />
                   </div>
+                  {creditFilter.error && <p className="mt-2 text-xs text-red-600">{creditFilter.error}</p>}
                 </div>
 
                 <DataTable
                   columns={studentColumns}
-                  data={students}
+                  data={filteredStudents}
                   isLoading={loadingStudents}
                   emptyMessage="No students found for selected filters."
                   onRowClick={(row) => setSelectedStudent(row)}

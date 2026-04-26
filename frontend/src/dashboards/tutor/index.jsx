@@ -18,12 +18,59 @@ import {
   useTutorStudentDetail,
   useTutorStudents,
   useTutorVerifyCreditPoint,
+  downloadTutorAllAssignedCertificates,
   downloadTutorStudentCertificates,
 } from './api'
 
 function fmtDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+function buildCreditPredicate(rawExpression) {
+  const expr = (rawExpression || '').trim()
+  if (!expr) return { fn: () => true, error: '' }
+
+  const compact = expr.replace(/\s+/g, '')
+  const rangeMatch = compact.match(/^(\d+)\-(\d+)$/)
+  if (rangeMatch) {
+    const low = Number(rangeMatch[1])
+    const high = Number(rangeMatch[2])
+    if (low > high) {
+      return { fn: () => false, error: 'Invalid range. Use lower-higher (example: 10-20).' }
+    }
+    return {
+      fn: (value) => {
+        const points = Number(value || 0)
+        return points >= low && points <= high
+      },
+      error: '',
+    }
+  }
+
+  const comparatorMatch = compact.match(/^(<=|>=|<|>|=)?(\d+)$/)
+  if (comparatorMatch) {
+    const operator = comparatorMatch[1] || '='
+    const target = Number(comparatorMatch[2])
+    return {
+      fn: (value) => {
+        const points = Number(value || 0)
+        switch (operator) {
+          case '<': return points < target
+          case '<=': return points <= target
+          case '>': return points > target
+          case '>=': return points >= target
+          default: return points === target
+        }
+      },
+      error: '',
+    }
+  }
+
+  return {
+    fn: () => false,
+    error: 'Invalid format. Try <10, >=20, =15 or 10-20.',
+  }
 }
 
 const CREDIT_TARGET = 20
@@ -159,9 +206,13 @@ export default function TutorDashboard() {
   const [selectedStudentEmail, setSelectedStudentEmail] = useState(null)
   const [manualEntry, setManualEntry] = useState({ student_email: '', cert_type: '', cert_number: '' })
   const [downloadingStudentEmail, setDownloadingStudentEmail] = useState(null)
+  const [isDownloadingAllAssigned, setIsDownloadingAllAssigned] = useState(false)
+  const [creditRangeExpression, setCreditRangeExpression] = useState('')
   const activeTab = searchParams.get('tab') === 'verification' ? 'verification' : 'dashboard'
 
   const totalStudents = students?.length || 0
+  const creditFilter = buildCreditPredicate(creditRangeExpression)
+  const filteredStudents = (students || []).filter((student) => creditFilter.fn(student.total_credits))
 
   const handleManualSubmit = async (e) => {
     e.preventDefault()
@@ -209,6 +260,32 @@ export default function TutorDashboard() {
       })
     } finally {
       setDownloadingStudentEmail(null)
+    }
+  }
+
+  const handleDownloadAllAssigned = async () => {
+    try {
+      setIsDownloadingAllAssigned(true)
+      const blob = await downloadTutorAllAssignedCertificates()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'assigned-students-certificates.zip'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      addToast({ type: 'success', message: 'Combined certificate ZIP download started.' })
+    } catch (err) {
+      const status = err?.response?.status
+      addToast({
+        type: 'error',
+        message: status === 404
+          ? 'No downloadable certificate files found for assigned students.'
+          : (err?.response?.data?.detail || 'Failed to download assigned student certificates.'),
+      })
+    } finally {
+      setIsDownloadingAllAssigned(false)
     }
   }
 
@@ -321,7 +398,27 @@ export default function TutorDashboard() {
             </div>
 
             <div>
-              <h2 className="section-title mb-3">Students</h2>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="section-title">Students</h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    className="form-input w-64"
+                    value={creditRangeExpression}
+                    onChange={(e) => setCreditRangeExpression(e.target.value)}
+                    placeholder="Credits: <10, >=20, 10-20"
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={isDownloadingAllAssigned}
+                    onClick={handleDownloadAllAssigned}
+                  >
+                    {isDownloadingAllAssigned ? 'Preparing ZIP...' : 'Download All Assigned Certificates'}
+                  </button>
+                </div>
+              </div>
+              {creditFilter.error && <p className="mb-2 text-xs text-red-600">{creditFilter.error}</p>}
               <DataTable
                 columns={[
                   {
@@ -358,7 +455,7 @@ export default function TutorDashboard() {
                     ),
                   },
                 ]}
-                data={students || []}
+                data={filteredStudents}
                 isLoading={studentsLoading}
                 emptyMessage="No students mapped to this tutor yet."
                 searchable

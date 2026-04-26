@@ -16,7 +16,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     role: Literal[
-        "principal", "club_coordinator", "dept_coordinator", "tutor", "student", "guest"
+        "principal", "hod", "club_coordinator", "dept_coordinator", "tutor", "student", "guest"
     ]
     is_active: bool = True
 
@@ -39,9 +39,9 @@ class UserCreate(BaseModel):
         elif role == "guest":
             pass
 
-        elif role == "dept_coordinator":
+        elif role in ["dept_coordinator", "hod"]:
             if not self.department:
-                raise ValueError("department is required for dept_coordinator role")
+                raise ValueError("department is required for dept_coordinator and hod roles")
 
         elif role == "tutor":
             missing = []

@@ -1,4 +1,4 @@
-import { NavLink, useParams } from 'react-router-dom'
+import { NavLink, useLocation, useParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useUiStore } from '../store/uiStore'
 
@@ -65,12 +65,21 @@ const icons = {
 
 // ── Nav item component ────────────────────────────────────────────────────────
 function NavItem({ to, icon, label, end = false, sidebarOpen }) {
+  const location = useLocation()
+  const [toPath, toQuery = ''] = to.split('?')
+  const isPathMatch = end ? location.pathname === toPath : location.pathname.startsWith(toPath)
+  const currentQuery = location.search.startsWith('?') ? location.search.slice(1) : ''
+  const hasQuery = toQuery.length > 0
+  const isActive = hasQuery
+    ? (isPathMatch && currentQuery === toQuery)
+    : (isPathMatch && currentQuery.length === 0)
+
   return (
     <NavLink
       to={to}
       end={end}
       title={label}
-      className={({ isActive }) =>
+      className={() =>
         `flex items-center rounded-lg py-2.5 text-sm font-medium transition-colors duration-150 ${
           sidebarOpen ? 'justify-start gap-3 px-3' : 'justify-center px-0'
         } ${
@@ -108,6 +117,12 @@ function useNavItems() {
     case 'principal':
       return [
         { to: '/principal', icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: '/principal?view=student-search', icon: icons.student, label: 'Student Search' },
+      ]
+
+    case 'hod':
+      return [
+        { to: '/hod', icon: icons.dashboard, label: 'Dashboard', end: true },
       ]
 
     case 'club_coordinator':

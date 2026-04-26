@@ -218,6 +218,7 @@ from .domains.tutor.routers import router as tutor_router
 from .domains.guest.routers import router as guest_router
 from .domains.dept.routers import router as dept_router
 from .domains.principal.routers import router as principal_router
+from .domains.hod.routers import router as hod_router
 from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
 from .domains.superadmin.routers import router as superadmin_router
 from .certificate_config.routes import router as cert_config_router
@@ -236,6 +237,7 @@ app.include_router(student_router)
 app.include_router(tutor_router)
 app.include_router(dept_router)
 app.include_router(principal_router)
+app.include_router(hod_router)
 app.include_router(image_templates.router)
 app.include_router(guest_router)
 app.include_router(role_presets_router)

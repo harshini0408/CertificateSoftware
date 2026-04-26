@@ -37,6 +37,7 @@ import {
   useRevokeCertificate,
   useCreditRules,
   useUpdateCreditRules,
+  useDeleteCreditRule,
   useBulkImportStudents,
   useResetStudentCredits,
 } from './api'
@@ -61,6 +62,7 @@ function fmtDate(iso) {
 // ── Role badge colors ─────────────────────────────────────────────────────────
 const roleBadge = {
   principal: 'bg-amber-50 text-amber-700 ring-amber-200',
+  hod: 'bg-cyan-50 text-cyan-700 ring-cyan-200',
   club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
   dept_coordinator: 'bg-purple-50 text-purple-700 ring-purple-200',
   tutor: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
@@ -70,6 +72,7 @@ const roleBadge = {
 }
 const roleLabel = {
   principal: 'Principal',
+  hod: 'HOD',
   club_coordinator: 'Club Coordinator',
   dept_coordinator: 'Dept Coordinator',
   tutor: 'Tutor',
@@ -353,6 +356,7 @@ function EditClubModal({ isOpen, onClose, club }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 const roles = [
   { value: 'principal', label: 'Principal', icon: '🏫', desc: 'College-level student overview' },
+  { value: 'hod', label: 'HOD', icon: '🧭', desc: 'Students are auto-mapped by selected department' },
   { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
   { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
   { value: 'tutor', label: 'Tutor', icon: '🧑‍🏫', desc: 'Manages one class of students' },
@@ -403,7 +407,7 @@ function NewUserModal({ isOpen, onClose }) {
     if (!form.email.trim()) errs.email = 'Required'
     if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
-    if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
+    if ((selectedRole === 'dept_coordinator' || selectedRole === 'hod') && !form.department) errs.department = 'Required'
     if (selectedRole === 'tutor') {
       if (!form.department) errs.department = 'Required'
       if (!form.batch) errs.batch = 'Required'
@@ -456,7 +460,7 @@ function NewUserModal({ isOpen, onClose }) {
     if (selectedRole === 'club_coordinator') {
       payload.club_id = form.club_id
     }
-    if (selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') {
+    if (selectedRole === 'dept_coordinator' || selectedRole === 'hod' || selectedRole === 'student' || selectedRole === 'tutor') {
       payload.department = form.department.trim()
     }
     if (selectedRole === 'student' || selectedRole === 'tutor') {
@@ -544,9 +548,9 @@ function NewUserModal({ isOpen, onClose }) {
               {errors.club_id && <p className="form-error">{errors.club_id}</p>}
             </div>
           )}
-          {(selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') && (
+          {(selectedRole === 'dept_coordinator' || selectedRole === 'hod' || selectedRole === 'student' || selectedRole === 'tutor') && (
             <div>
-              <label className="form-label">Department Slug *</label>
+              <label className="form-label">Department (Name or Slug) *</label>
               <select
                 className={`form-input ${errors.department ? 'form-input-error' : ''}`}
                 value={form.department}
@@ -557,12 +561,17 @@ function NewUserModal({ isOpen, onClose }) {
                   <option key={d.id} value={d.slug}>{d.name} ({d.slug})</option>
                 ))}
               </select>
-              <p className="mt-1 text-xs text-gray-500">Select the department by slug. The student will be allocated to that department automatically.</p>
+              <p className="mt-1 text-xs text-gray-500">Select by department name or slug. Student and HOD scope mapping is applied automatically using this department.</p>
               {(departmentsList || []).length === 0 && (
                 <p className="mt-1 text-xs text-gray-500">No active departments available. Create one in the Departments tab first.</p>
               )}
               {errors.department && <p className="form-error">{errors.department}</p>}
             </div>
+          )}
+          {selectedRole === 'hod' && (
+            <p className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-800">
+              HOD visibility is applied automatically for all students in the selected department.
+            </p>
           )}
           {selectedRole === 'tutor' && (
             <>
@@ -938,12 +947,14 @@ function StudentCertificatesTab() {
 function CreditRulesTab() {
   const { data: rulesData, isLoading } = useCreditRules()
   const updateRules = useUpdateCreditRules()
+  const deleteRule = useDeleteCreditRule()
 
   const [localRules, setLocalRules] = useState([])
   const [editingIndex, setEditingIndex] = useState(null)
   const [editValue, setEditValue] = useState('')
   const [newRuleType, setNewRuleType] = useState('')
   const [newRulePoints, setNewRulePoints] = useState('0')
+  const [deletingRuleId, setDeletingRuleId] = useState(null)
 
   useEffect(() => {
     if (!rulesData) return
@@ -1001,6 +1012,24 @@ function CreditRulesTab() {
       map.set(certType, { cert_type: certType, points })
     }
     updateRules.mutate(Array.from(map.values()))
+  }
+
+  const handleDeleteRule = async (rule) => {
+    if (!rule?.id) return
+    const ok = window.confirm(`Delete credit rule "${rule.cert_type}"? This action cannot be undone.`)
+    if (!ok) return
+
+    try {
+      setDeletingRuleId(rule.id)
+      await deleteRule.mutateAsync(rule.id)
+      setLocalRules((prev) => prev.filter((r) => r.id !== rule.id))
+      if (editingIndex !== null) {
+        setEditingIndex(null)
+        setEditValue('')
+      }
+    } finally {
+      setDeletingRuleId(null)
+    }
   }
 
   const canAddRule = (() => {
@@ -1082,6 +1111,15 @@ function CreditRulesTab() {
                     <span className="text-3xl font-black text-navy">{rule.points}</span>
                     <button onClick={() => startEdit(idx, rule.points)} className="p-1 text-gray-400 hover:text-navy transition-colors">
                       ✎
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRule(rule)}
+                      disabled={deleteRule.isPending && deletingRuleId === rule.id}
+                      className="rounded px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Delete this rule"
+                    >
+                      {deleteRule.isPending && deletingRuleId === rule.id ? 'Deleting...' : 'Delete'}
                     </button>
                   </div>
                 )}
@@ -1204,6 +1242,11 @@ function OverviewTab() {
           rowKey="_row_key"
         />
       </div>
+
+      <CreditResetModal
+        isOpen={isResetOpen}
+        onClose={() => setIsResetOpen(false)}
+      />
     </div>
   )
 }
@@ -1835,6 +1878,7 @@ function UsersTab() {
 
   const getScope = (u) => {
     if (u.role === 'principal') return 'College'
+    if (u.role === 'hod') return `${u.department || '—'}${u.batch ? ` / ${u.batch}` : ''}${u.section ? ` / ${u.section}` : ''}`
     if (u.role === 'club_coordinator') return clubMap[u.club_id] || u.club_id || '—'
     if (u.role === 'dept_coordinator') return u.department || '—'
     if (u.role === 'tutor') return `${u.department || ''} ${u.batch || ''} ${u.section || ''}`.trim() || '—'
@@ -1902,6 +1946,7 @@ function UsersTab() {
         <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="form-input w-44">
           <option value="">All Roles</option>
           <option value="principal">Principal</option>
+          <option value="hod">HOD</option>
           <option value="club_coordinator">Club Coordinator</option>
           <option value="dept_coordinator">Dept Coordinator</option>
           <option value="tutor">Tutor</option>

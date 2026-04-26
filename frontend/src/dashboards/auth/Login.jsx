@@ -82,6 +82,7 @@ export default function Login() {
     const redirectMap = {
       super_admin:      '/admin',
       principal:        '/principal',
+      hod:              '/hod',
       club_coordinator: `/club/${club_id}`,
       dept_coordinator: '/dept',
       tutor: '/tutor',
@@ -162,7 +163,7 @@ export default function Login() {
             {/* Username */}
             <div>
               <label htmlFor="username" className="form-label">
-                Faculty ID (Username)
+                Username
               </label>
               <input
                 id="username"

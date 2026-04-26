@@ -166,19 +166,29 @@ def _normalize_department_slug(value: str | None) -> str:
 
 
 async def _resolve_department_name(raw_value: str | None) -> str | None:
-    normalized_slug = _normalize_department_slug(raw_value)
-    if not normalized_slug:
+    raw_text = _normalize_department_name(raw_value)
+    if not raw_text:
         return None
 
+    normalized_slug = _normalize_department_slug(raw_text)
     escaped_slug = re.escape(normalized_slug)
-    existing = await Department.find_one({
-        "$and": [
-            {"is_active": True},
-            {"slug": {"$regex": f"^{escaped_slug}$", "$options": "i"}},
-        ]
-    })
+    escaped_name = re.escape(raw_text)
+
+    existing = await Department.find_one(
+        {
+            "$and": [
+                {"is_active": True},
+                {
+                    "$or": [
+                        {"slug": {"$regex": f"^{escaped_slug}$", "$options": "i"}},
+                        {"name": {"$regex": f"^{escaped_name}$", "$options": "i"}},
+                    ]
+                },
+            ]
+        }
+    )
     if not existing:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department slug not found or inactive")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found or inactive")
     return existing.name
 
 
@@ -492,10 +502,22 @@ async def create_user(body: UserCreate, _user: User = _admin):
             )
 
     department_name = None
-    if body.role in ["dept_coordinator", "student", "tutor"]:
+    if body.role in ["dept_coordinator", "hod", "student", "tutor"]:
         department_name = await _resolve_department_name(body.department)
         if not department_name:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required for this role")
+
+    # Enforce only one HOD account per department.
+    if body.role == "hod" and department_name:
+        existing_hod = await User.find_one(
+            User.role == UserRole.HOD,
+            User.department == department_name,
+        )
+        if existing_hod:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"HOD already exists for department '{department_name}'",
+            )
 
     new_user = User(
         username=username,
@@ -509,8 +531,8 @@ async def create_user(body: UserCreate, _user: User = _admin):
         event_id=event_oid,
         department=department_name,
         registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor"] else None,
-        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
-        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator"] else None,
+        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod"] else None,
+        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod"] else None,
     )
     await new_user.insert()
 
@@ -1344,6 +1366,16 @@ async def upsert_credit_rules(body: CreditRulesUpdateRequest, admin: User = _adm
             await CreditRule(cert_type=rule.cert_type, points=rule.points,
                              updated_by=admin.id, updated_at=datetime.utcnow()).insert()
     return {"message": f"{len(body.rules)} credit rules upserted"}
+
+
+@router.delete("/credit-rules/{rule_id}")
+async def delete_credit_rule(rule_id: PydanticObjectId, _user: User = _admin):
+    rule = await CreditRule.get(rule_id)
+    if not rule:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Credit rule not found")
+
+    await rule.delete()
+    return {"message": f"Credit rule '{rule.cert_type}' deleted"}
 
 
 @router.post("/credits/reset")

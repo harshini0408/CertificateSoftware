@@ -323,6 +323,109 @@ async def download_all_tutor_student_certificates(
     )
 
 
+@router.get("/tutor/certificates/download-all")
+async def download_all_assigned_students_certificates(
+    current_user: User = Depends(require_role(UserRole.TUTOR)),
+):
+    tutor_email = _norm_email(current_user.email)
+    docs = await StudentCredit.find({
+        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"}
+    }).to_list()
+
+    if not docs:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No students mapped to this tutor")
+
+    linked_emails = {_norm_email(d.student_email) for d in docs if d.student_email}
+    linked_regs = {(d.registration_number or "").strip() for d in docs if (d.registration_number or "").strip()}
+
+    student_token_by_email: Dict[str, str] = {}
+    student_token_by_reg: Dict[str, str] = {}
+    for doc in docs:
+        student_token = _safe_zip_token(doc.student_name or doc.registration_number or doc.student_email, "student")
+        email_key = _norm_email(doc.student_email)
+        reg_key = (doc.registration_number or "").strip()
+        if email_key and email_key not in student_token_by_email:
+            student_token_by_email[email_key] = student_token
+        if reg_key and reg_key not in student_token_by_reg:
+            student_token_by_reg[reg_key] = student_token
+
+    email_clauses = [
+        {"snapshot.email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}
+        for email in linked_emails
+    ]
+    certs = await Certificate.find({
+        "$and": [
+            {"status": {"$in": [CertStatus.GENERATED, CertStatus.EMAILED]}},
+            {"$or": email_clauses},
+        ]
+    }).to_list() if email_clauses else []
+
+    submissions = await ManualCreditSubmission.find({
+        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"}
+    }).to_list()
+
+    matched_submissions = []
+    for submission in submissions:
+        sub_email = _norm_email(submission.student_email)
+        sub_reg = (submission.registration_number or "").strip()
+        if sub_email in linked_emails or (sub_reg and sub_reg in linked_regs):
+            matched_submissions.append(submission)
+
+    zip_buffer = io.BytesIO()
+    used_names: set[str] = set()
+    generated_count = 0
+    uploaded_count = 0
+
+    with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for cert in certs:
+            if not cert.png_url:
+                continue
+            cert_path = Path(storage_url_to_path(cert.png_url))
+            if not cert_path.exists() or not cert_path.is_file():
+                continue
+
+            snapshot_email = _norm_email((cert.snapshot.email if cert.snapshot else None))
+            student_folder = student_token_by_email.get(snapshot_email, "student")
+
+            ext = cert_path.suffix.lower() or ".png"
+            base_name = _safe_zip_token(cert.cert_number, f"generated_{generated_count + 1}")
+            archive_name = _unique_zip_name(used_names, f"generated/{student_folder}/{base_name}{ext}")
+            zip_file.write(cert_path, archive_name)
+            generated_count += 1
+
+        for submission in matched_submissions:
+            if not submission.certificate_image_url:
+                continue
+            image_path = Path(storage_url_to_path(submission.certificate_image_url))
+            if not image_path.exists() or not image_path.is_file():
+                continue
+
+            sub_email = _norm_email(submission.student_email)
+            sub_reg = (submission.registration_number or "").strip()
+            student_folder = student_token_by_email.get(sub_email) or student_token_by_reg.get(sub_reg) or "student"
+
+            ext = image_path.suffix.lower() or ".png"
+            type_token = _safe_zip_token(submission.cert_type, "manual")
+            base_name = f"{type_token}_{(submission.event_date.isoformat() if submission.event_date else 'date_unknown')}"
+            archive_name = _unique_zip_name(used_names, f"uploaded/{student_folder}/{base_name}{ext}")
+            zip_file.write(image_path, archive_name)
+            uploaded_count += 1
+
+    if generated_count + uploaded_count == 0:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "No downloadable certificate files found for assigned students",
+        )
+
+    zip_buffer.seek(0)
+    tutor_token = _safe_zip_token(current_user.name or current_user.username or current_user.email, "tutor")
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{tutor_token}_assigned_students_certificates.zip"'},
+    )
+
+
 @router.get("/tutor/credit-rules")
 async def list_tutor_credit_rules(current_user: User = Depends(require_role(UserRole.TUTOR))):
     _ = current_user

@@ -379,6 +379,25 @@ export function useUpdateCreditRules() {
   })
 }
 
+export function useDeleteCreditRule() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (ruleId) => axiosInstance.delete(`/admin/credit-rules/${ruleId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: adminKeys.creditRules() })
+      addToast({ type: 'success', message: 'Credit rule deleted.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to delete credit rule.',
+      })
+    },
+  })
+}
+
 // ── Role-Based Certificate Mapping ───────────────────────────────────────────
 export function useRoleMappings(includeInactive = true) {
   return useQuery({

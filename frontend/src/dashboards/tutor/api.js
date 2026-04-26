@@ -125,3 +125,8 @@ export async function downloadTutorStudentCertificates(studentEmail) {
   )
   return data
 }
+
+export async function downloadTutorAllAssignedCertificates() {
+  const { data } = await axiosInstance.get('/tutor/certificates/download-all', { responseType: 'blob' })
+  return data
+}

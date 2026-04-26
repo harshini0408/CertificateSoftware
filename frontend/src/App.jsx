@@ -13,6 +13,7 @@ import DeptCoordinatorDashboard from './dashboards/dept'
 import TutorDashboard from './dashboards/tutor'
 import StudentDashboard from './dashboards/student'
 import PrincipalDashboard from './dashboards/principal'
+import HodDashboard from './dashboards/hod'
 import VerifyPage from './pages/Verify'
 import TemplateSelector from './dashboards/club/TemplateSelector'
 import GuestDashboard from './dashboards/guest/GuestDashboard'
@@ -24,6 +25,7 @@ import Authors from './Authors'
 const ROLES = {
   SUPER_ADMIN: 'super_admin',
   PRINCIPAL: 'principal',
+  HOD: 'hod',
   CLUB_COORD: 'club_coordinator',
   DEPT_COORD: 'dept_coordinator',
   TUTOR: 'tutor',
@@ -60,6 +62,16 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.PRINCIPAL, ROLES.SUPER_ADMIN]}>
               <PrincipalDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── HOD ───────────────────────────────────────────────────────── */}
+        <Route
+          path="/hod"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.HOD, ROLES.SUPER_ADMIN]}>
+              <HodDashboard />
             </ProtectedRoute>
           }
         />

@@ -9,6 +9,7 @@ from pydantic import Field
 class UserRole(str, Enum):
     SUPER_ADMIN = "super_admin"
     PRINCIPAL = "principal"
+    HOD = "hod"
     CLUB_COORDINATOR = "club_coordinator"
     DEPT_COORDINATOR = "dept_coordinator"
     TUTOR = "tutor"
