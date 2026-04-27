@@ -2,8 +2,10 @@ import secrets
 import string
 import io
 import re
+import math
 from datetime import datetime
 from typing import List, Optional
+from decimal import Decimal
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -194,6 +196,34 @@ async def _resolve_department_name(raw_value: str | None) -> str | None:
 
 def _normalize_cert_type(value: str | None) -> str:
     return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _excel_cell_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return str(int(value))
+        text = format(value.normalize(), "f")
+        return text.rstrip("0").rstrip(".")
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return ""
+        if value.is_integer():
+            return str(int(value))
+        text = format(value, "f")
+        return text.rstrip("0").rstrip(".")
+    return str(value).strip()
+
+
+def _excel_row_is_empty(row_vals) -> bool:
+    return all(_excel_cell_text(v) == "" for v in row_vals)
 
 
 async def _find_credit_rule(cert_type_raw: str) -> Optional[CreditRule]:
@@ -600,7 +630,7 @@ async def bulk_import_students(
         try:
             idx = headers.index(field)
             v = row_vals[idx]
-            return str(v).strip() if v is not None else ""
+            return _excel_cell_text(v)
         except (ValueError, IndexError):
             return ""
 
@@ -610,7 +640,7 @@ async def bulk_import_students(
 
     for row_idx, row_vals in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         # Skip fully empty rows
-        if all(v is None or str(v).strip() == "" for v in row_vals):
+        if _excel_row_is_empty(row_vals):
             continue
 
         name      = col(row_vals, "name")
@@ -759,7 +789,7 @@ async def bulk_import_tutors(
         try:
             idx = headers.index(field)
             v = row_vals[idx]
-            return str(v).strip() if v is not None else ""
+            return _excel_cell_text(v)
         except (ValueError, IndexError):
             return ""
 
@@ -768,7 +798,7 @@ async def bulk_import_tutors(
     errors = []
 
     for row_idx, row_vals in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        if all(v is None or str(v).strip() == "" for v in row_vals):
+        if _excel_row_is_empty(row_vals):
             continue
 
         name = col(row_vals, "name")
@@ -914,12 +944,12 @@ async def bulk_import_tutor_students(
     errors = []
 
     for row_idx, row_vals in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        if all(v is None or str(v).strip() == "" for v in row_vals):
+        if _excel_row_is_empty(row_vals):
             continue
 
-        name = str(row_vals[name_idx]).strip() if name_idx < len(row_vals) and row_vals[name_idx] is not None else ""
-        email = str(row_vals[email_idx]).strip().lower() if email_idx < len(row_vals) and row_vals[email_idx] is not None else ""
-        reg_no = str(row_vals[reg_idx]).strip() if reg_idx < len(row_vals) and row_vals[reg_idx] is not None else ""
+        name = _excel_cell_text(row_vals[name_idx]) if name_idx < len(row_vals) else ""
+        email = (_excel_cell_text(row_vals[email_idx]) if email_idx < len(row_vals) else "").lower()
+        reg_no = _excel_cell_text(row_vals[reg_idx]) if reg_idx < len(row_vals) else ""
 
         if not name or not email or not reg_no:
             skipped += 1
