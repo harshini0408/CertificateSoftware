@@ -26,7 +26,14 @@ class Event(Document):
     name: str
     description: Optional[str] = None
     event_date: Optional[datetime] = None
-    academic_year: Optional[Literal["2025-2026(EVEN)", "2026-2027(ODD)"]] = None
+    academic_year: Optional[
+        Literal[
+            "2025-2026(EVEN)",
+            "2026-2027(ODD)",
+            "2026-27 ODD",
+            "2026-27 EVEN",
+        ]
+    ] = None
     status: EventStatus = EventStatus.DRAFT
 
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)

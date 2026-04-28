@@ -3,7 +3,7 @@ import string
 import io
 import re
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from decimal import Decimal
 
@@ -118,6 +118,10 @@ async def _find_tutor_by_email(email: str | None) -> User | None:
 # ── Helper: Build UserResponse from User document ────────────────────────────
 
 def _user_response(u: User) -> UserResponse:
+    user_departments = getattr(u, "departments", None)
+    if not user_departments and u.role == UserRole.HOD and u.department:
+        user_departments = [u.department]
+
     return UserResponse(
         id=str(u.id),
         username=u.username,
@@ -129,6 +133,7 @@ def _user_response(u: User) -> UserResponse:
         club_id=str(u.club_id) if u.club_id else None,
         event_id=str(u.event_id) if u.event_id else None,
         department=u.department,
+        departments=user_departments,
         registration_number=u.registration_number,
         batch=u.batch,
         section=u.section,
@@ -532,22 +537,56 @@ async def create_user(body: UserCreate, _user: User = _admin):
             )
 
     department_name = None
+    department_names = None
     if body.role in ["dept_coordinator", "hod", "student", "tutor"]:
-        department_name = await _resolve_department_name(body.department)
-        if not department_name:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required for this role")
+        if body.role == "hod":
+            raw_departments = list(body.departments or [])
+            if body.department:
+                raw_departments.append(body.department)
 
-    # Enforce only one HOD account per department.
-    if body.role == "hod" and department_name:
-        existing_hod = await User.find_one(
-            User.role == UserRole.HOD,
-            User.department == department_name,
-        )
-        if existing_hod:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                f"HOD already exists for department '{department_name}'",
+            resolved_departments = []
+            seen_departments = set()
+            for raw_dep in raw_departments:
+                resolved = await _resolve_department_name(raw_dep)
+                if not resolved:
+                    continue
+                key = resolved.lower()
+                if key in seen_departments:
+                    continue
+                seen_departments.add(key)
+                resolved_departments.append(resolved)
+
+            if not resolved_departments:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "At least one department is required for HOD role")
+
+            department_names = resolved_departments
+            department_name = resolved_departments[0]
+        else:
+            department_name = await _resolve_department_name(body.department)
+            if not department_name:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required for this role")
+
+    # Enforce only one HOD account per department assignment.
+    if body.role == "hod":
+        for dep_name in (department_names or []):
+            existing_hod = await User.find_one(
+                {
+                    "$and": [
+                        {"role": UserRole.HOD.value},
+                        {
+                            "$or": [
+                                {"department": dep_name},
+                                {"departments": dep_name},
+                            ]
+                        },
+                    ]
+                }
             )
+            if existing_hod:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"HOD already exists for department '{dep_name}'",
+                )
 
     new_user = User(
         username=username,
@@ -560,6 +599,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
         club_id=club_oid,
         event_id=event_oid,
         department=department_name,
+        departments=department_names if body.role == "hod" else None,
         registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor"] else None,
         batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod"] else None,
         section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod"] else None,
@@ -1023,23 +1063,29 @@ async def list_users(
     search: Optional[str] = None,
     _user: User = _admin,
 ):
-    query = {}
+    filters = []
     if role:
-        query["role"] = role
+        filters.append({"role": role})
     if club_id:
-        query["club_id"] = PydanticObjectId(club_id)
+        filters.append({"club_id": PydanticObjectId(club_id)})
     if department:
-        query["department"] = department
+        filters.append({"$or": [{"department": department}, {"departments": department}]})
     if is_active is not None:
-        query["is_active"] = is_active
+        filters.append({"is_active": is_active})
     if search:
         import re
         pattern = re.compile(re.escape(search), re.IGNORECASE)
-        query["$or"] = [
-            {"name": pattern},
-            {"username": pattern},
-            {"email": pattern},
-        ]
+        filters.append(
+            {
+                "$or": [
+                    {"name": pattern},
+                    {"username": pattern},
+                    {"email": pattern},
+                ]
+            }
+        )
+
+    query = {"$and": filters} if len(filters) > 1 else (filters[0] if filters else {})
 
     users = await User.find(query).to_list()
     return [_user_response(u) for u in users]
@@ -1149,10 +1195,23 @@ async def tutor_mapping_summary(
     _user: User = _admin,
 ):
     tutors = await User.find(User.role == UserRole.TUTOR).to_list()
+    active_students = await User.find(
+        User.role == UserRole.STUDENT,
+        User.is_active == True,
+    ).to_list()
+    active_student_emails = {
+        (s.email or "").strip().lower()
+        for s in active_students
+        if (s.email or "").strip()
+    }
+
     credits = await StudentCredit.find_all().to_list()
 
     mapped_by_tutor = {}
     for credit in credits:
+        student_email = (credit.student_email or "").strip().lower()
+        if student_email not in active_student_emails:
+            continue
         email = (credit.tutor_email or "").strip().lower()
         if not email:
             continue
@@ -1248,18 +1307,138 @@ async def reset_user_password(user_id: PydanticObjectId, _user: User = _admin):
 
 
 @router.delete("/users/{user_id}")
-async def deactivate_user(user_id: PydanticObjectId, _user: User = _admin):
+async def delete_user(user_id: PydanticObjectId, _user: User = _admin):
     target = await User.get(user_id)
     if not target:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     if target.role == UserRole.SUPER_ADMIN:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Cannot deactivate the super admin account",
+            "Cannot delete the super admin account",
         )
 
-    await target.set({"is_active": False})
-    return {"message": "User deactivated successfully"}
+    user_email = (target.email or "").strip().lower()
+
+    # Remove student credit profile when deleting a student account.
+    if target.role == UserRole.STUDENT and user_email:
+        await StudentCredit.find(StudentCredit.student_email == user_email).delete()
+
+    # Detach tutor mappings when deleting a tutor account.
+    if target.role == UserRole.TUTOR and user_email:
+        await StudentCredit.find(StudentCredit.tutor_email == user_email).update_many(
+            {
+                "$set": {
+                    "tutor_email": None,
+                    "last_updated": datetime.utcnow(),
+                }
+            }
+        )
+
+    await target.delete()
+    return {"message": "User deleted successfully"}
+
+
+@router.post("/users/purge-inactive")
+async def purge_inactive_users(
+    dry_run: bool = Query(False),
+    older_than_days: Optional[int] = Query(None, ge=0),
+    _user: User = _admin,
+):
+    filters = [
+        User.is_active == False,
+        User.role != UserRole.SUPER_ADMIN,
+    ]
+    cutoff = None
+    if older_than_days is not None:
+        cutoff = datetime.utcnow() - timedelta(days=int(older_than_days))
+        filters.append(User.created_at <= cutoff)
+
+    inactive_users = await User.find(*filters).to_list()
+    if not inactive_users:
+        return {
+            "message": "No inactive users matched the purge criteria.",
+            "dry_run": dry_run,
+            "older_than_days": older_than_days,
+            "matched_users": 0,
+            "deleted_users": 0,
+            "student_credit_docs_deleted": 0,
+            "student_credit_mappings_cleared": 0,
+            "matched_roles": {},
+        }
+
+    role_counts = {}
+    user_ids = []
+    student_emails = []
+    tutor_emails = []
+
+    for user in inactive_users:
+        role_key = user.role.value
+        role_counts[role_key] = role_counts.get(role_key, 0) + 1
+        user_ids.append(user.id)
+        email = (user.email or "").strip().lower()
+        if not email:
+            continue
+        if user.role == UserRole.STUDENT:
+            student_emails.append(email)
+        elif user.role == UserRole.TUTOR:
+            tutor_emails.append(email)
+
+    if dry_run:
+        return {
+            "message": "Dry run completed. No records were deleted.",
+            "dry_run": True,
+            "older_than_days": older_than_days,
+            "cutoff_utc": cutoff,
+            "matched_users": len(user_ids),
+            "deleted_users": 0,
+            "student_credit_docs_deleted": 0,
+            "student_credit_mappings_cleared": 0,
+            "matched_roles": role_counts,
+        }
+
+    student_credit_docs_deleted = 0
+    if student_emails:
+        student_email_set = list(set(student_emails))
+        student_credit_docs_deleted = await StudentCredit.find(
+            {"student_email": {"$in": student_email_set}}
+        ).count()
+        if student_credit_docs_deleted > 0:
+            await StudentCredit.find(
+                {"student_email": {"$in": student_email_set}}
+            ).delete()
+
+    student_credit_mappings_cleared = 0
+    if tutor_emails:
+        tutor_email_set = list(set(tutor_emails))
+        student_credit_mappings_cleared = await StudentCredit.find(
+            {"tutor_email": {"$in": tutor_email_set}}
+        ).count()
+        if student_credit_mappings_cleared > 0:
+            await StudentCredit.find(
+                {"tutor_email": {"$in": tutor_email_set}}
+            ).update_many(
+                {
+                    "$set": {
+                        "tutor_email": None,
+                        "last_updated": datetime.utcnow(),
+                    }
+                }
+            )
+
+    deleted_users = len(user_ids)
+    await User.find({"_id": {"$in": user_ids}}).delete()
+
+    return {
+        "message": "Inactive users purged successfully.",
+        "dry_run": False,
+        "older_than_days": older_than_days,
+        "cutoff_utc": cutoff,
+        "matched_users": len(user_ids),
+        "deleted_users": deleted_users,
+        "student_credit_docs_deleted": student_credit_docs_deleted,
+        "student_credit_mappings_cleared": student_credit_mappings_cleared,
+        "matched_roles": role_counts,
+    }
 
 
 # ═══ CERTIFICATES ════════════════════════════════════════════════════════════
@@ -1470,8 +1649,14 @@ async def platform_stats(_user: User = _admin):
 
     # ── Simple counts ────────────────────────────────────────────────────
     total_clubs = await Club.find(Club.is_active == True).count()
-    total_users = await User.find(User.role != UserRole.SUPER_ADMIN).count()
-    total_students = await User.find(User.role == UserRole.STUDENT).count()
+    total_users = await User.find(
+        User.role != UserRole.SUPER_ADMIN,
+        User.is_active == True,
+    ).count()
+    total_students = await User.find(
+        User.role == UserRole.STUDENT,
+        User.is_active == True,
+    ).count()
     club_certificates = await Certificate.find_all().count()
     dept_certificates = await DeptCertificate.find_all().count()
     guest_sessions = await GuestSession.find_all().to_list()

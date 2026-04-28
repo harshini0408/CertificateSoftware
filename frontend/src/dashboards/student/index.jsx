@@ -6,7 +6,7 @@ import DataTable from '../../components/DataTable'
 import StatusBadge from '../../components/StatusBadge'
 import StatCard from '../../components/StatCard'
 import LoadingSpinner from '../../components/LoadingSpinner'
-import axiosInstance from '../../utils/axiosInstance'
+import axiosInstance, { BACKEND_URL } from '../../utils/axiosInstance'
 import { useToastStore } from '../../store/uiStore'
 import {
   useMyCredits,
@@ -242,47 +242,64 @@ export default function StudentDashboard() {
       render: (v) => <StatusBadge status={v} />,
     },
     {
-      key: '_download',
-      header: 'Download',
+      key: '_actions',
+      header: 'Actions',
       align: 'center',
       render: (_, row) => {
         const certNumber = row?.cert_number
         const isDownloading = downloadingId === row._id
-        const canDownload = row.status === 'emailed'
+        const canDownload = ['generated', 'emailed'].includes(String(row?.status || '').toLowerCase())
+        const viewUrl = row?.png_url
+          ? (String(row.png_url).startsWith('http') ? row.png_url : `${BACKEND_URL}${row.png_url}`)
+          : null
 
         if (!canDownload) {
           return <span className="text-xs text-gray-300">Not ready</span>
         }
 
         return (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              handleDownload(certNumber, row._id)
-            }}
-            disabled={isDownloading}
-            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium
-              text-navy border border-navy/30 hover:bg-navy hover:text-white
-              transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Download certificate as PNG"
-          >
-            {isDownloading ? (
-              <>
-                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-                Saving…
-              </>
-            ) : (
-              <>
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                PNG
-              </>
+          <div className="inline-flex items-center gap-2">
+            {viewUrl && (
+              <a
+                href={viewUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                title="View certificate"
+              >
+                View
+              </a>
             )}
-          </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleDownload(certNumber, row._id)
+              }}
+              disabled={isDownloading}
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium
+                text-navy border border-navy/30 hover:bg-navy hover:text-white
+                transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Download certificate as PNG"
+            >
+              {isDownloading ? (
+                <>
+                  <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  PNG
+                </>
+              )}
+            </button>
+          </div>
         )
       },
     },

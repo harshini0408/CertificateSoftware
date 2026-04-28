@@ -21,15 +21,28 @@ def _normalize_optional(value: Optional[str]) -> Optional[str]:
     return text or None
 
 
-def _build_hod_scope(current_user: User) -> dict[str, str]:
-    department = _normalize_optional(current_user.department)
-    if not department:
+def _build_hod_scope(current_user: User) -> dict:
+    departments = []
+
+    primary_department = _normalize_optional(current_user.department)
+    if primary_department:
+        departments.append(primary_department)
+
+    for dep in (getattr(current_user, "departments", None) or []):
+        normalized = _normalize_optional(dep)
+        if normalized and normalized not in departments:
+            departments.append(normalized)
+
+    if not departments:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Department is not configured for this HOD account.",
+            "Departments are not configured for this HOD account.",
         )
 
-    scope: dict[str, str] = {"department": department}
+    scope = {
+        "department": departments[0],
+        "departments": departments,
+    }
     mapped_batch = _normalize_optional(current_user.batch)
     mapped_section = _normalize_optional(current_user.section)
 
@@ -62,6 +75,7 @@ async def get_hod_profile(current_user: User = _hod):
         "name": current_user.name,
         "email": current_user.email,
         "department": scope.get("department"),
+        "departments": scope.get("departments", []),
         "batch": scope.get("batch"),
         "section": scope.get("section"),
     }
@@ -79,7 +93,7 @@ async def list_hod_students(
     query: dict = {
         "role": UserRole.STUDENT,
         "is_active": True,
-        "department": scope["department"],
+        "department": {"$in": scope["departments"]},
     }
 
     mapped_batch = scope.get("batch")
@@ -156,7 +170,7 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
     if not student or student.role != UserRole.STUDENT:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found")
 
-    if _normalize_optional(student.department) != scope["department"]:
+    if _normalize_optional(student.department) not in set(scope["departments"]):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this student")
 
     mapped_batch = scope.get("batch")
@@ -210,6 +224,7 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
                 "status": cert.status.value,
                 "issued_at": cert.issued_at,
                 "credit_points": int(credit_points_by_cert.get(cert.cert_number, 0)),
+                "certificate_image_url": cert.png_url,
             }
         )
 
@@ -224,6 +239,7 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
                 "status": submission.status.value,
                 "issued_at": submission.submitted_at,
                 "credit_points": int(submission.points_awarded or 0),
+                "certificate_image_url": submission.certificate_image_url,
             }
         )
 

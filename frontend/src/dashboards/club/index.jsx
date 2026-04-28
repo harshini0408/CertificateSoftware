@@ -218,6 +218,8 @@ function EventsTab({ clubId }) {
                   <option value="" disabled>Select academic year</option>
                   <option value="2025-2026(EVEN)">2025-2026(EVEN)</option>
                   <option value="2026-2027(ODD)">2026-2027(ODD)</option>
+                  <option value="2026-27 ODD">2026-27 ODD</option>
+                  <option value="2026-27 EVEN">2026-27 EVEN</option>
                 </select>
                 {errors.academic_year && <p className="form-error">{errors.academic_year.message}</p>}
               </div>

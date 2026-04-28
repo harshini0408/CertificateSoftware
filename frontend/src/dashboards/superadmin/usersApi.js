@@ -115,6 +115,53 @@ export function useUpdateUser() {
   })
 }
 
+export function useDeleteUser() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (userId) => axiosInstance.delete(`/admin/users/${userId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'User deleted successfully.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to delete user.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useBulkDeleteUsers() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (userIds) => {
+      const ids = Array.isArray(userIds) ? userIds : []
+      const results = await Promise.allSettled(
+        ids.map((id) => axiosInstance.delete(`/admin/users/${id}`)),
+      )
+
+      const success = results.filter((r) => r.status === 'fulfilled').length
+      const failed = results.length - success
+      return { success, failed }
+    },
+    onSuccess: ({ success, failed }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      if (failed === 0) {
+        addToast({ type: 'success', message: `${success} user${success !== 1 ? 's' : ''} deleted successfully.` })
+      } else {
+        addToast({ type: 'error', message: `${success} deleted, ${failed} failed. Please retry failed items.` })
+      }
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to delete selected users.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
 export function useAssignTutorStudents() {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)

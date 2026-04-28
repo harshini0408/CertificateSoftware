@@ -21,6 +21,7 @@ import {
   downloadTutorAllAssignedCertificates,
   downloadTutorStudentCertificates,
 } from './api'
+import { BACKEND_URL } from '../../utils/axiosInstance'
 
 function fmtDate(iso) {
   if (!iso) return '—'
@@ -97,7 +98,7 @@ function DetailModal({ email, onClose }) {
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h2 className="text-lg font-bold text-foreground">Student Event Details</h2>
-            <p className="text-xs text-gray-500">Certificate files are intentionally hidden for tutor view.</p>
+            <p className="text-xs text-gray-500">Use View to open each certificate file for verification.</p>
           </div>
           <button className="btn-secondary" onClick={onClose}>Close</button>
         </div>
@@ -120,6 +121,27 @@ function DetailModal({ email, onClose }) {
                 { key: 'certificate_number', header: 'Certificate Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
                 { key: 'event_date', header: 'Event Date', render: (v, row) => fmtDate(v || row?.awarded_at) },
                 { key: 'credit_points', header: 'Credit Points', align: 'right', render: (v) => <span className="font-bold text-green-700">+{v || 0}</span> },
+                {
+                  key: '_actions',
+                  header: 'Actions',
+                  align: 'center',
+                  render: (_, row) => {
+                    const raw = row?.certificate_image_url
+                    if (!raw) return <span className="text-xs text-gray-400">—</span>
+                    const href = String(raw).startsWith('http') ? raw : `${BACKEND_URL}${raw}`
+                    return (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        View
+                      </a>
+                    )
+                  },
+                },
               ]}
               data={data?.event_details || []}
               isLoading={false}
@@ -441,17 +463,29 @@ export default function TutorDashboard() {
                     searchKey: false,
                     align: 'center',
                     render: (_, row) => (
-                      <button
-                        type="button"
-                        className="rounded bg-navy/10 px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy/20 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={downloadingStudentEmail === row.student_email}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDownloadAllForStudent(row)
-                        }}
-                      >
-                        {downloadingStudentEmail === row.student_email ? 'Downloading...' : 'Download All Certificates'}
-                      </button>
+                      <div className="inline-flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="rounded bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-200"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedStudentEmail(row.student_email)
+                          }}
+                        >
+                          View Certificates
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded bg-navy/10 px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy/20 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={downloadingStudentEmail === row.student_email}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDownloadAllForStudent(row)
+                          }}
+                        >
+                          {downloadingStudentEmail === row.student_email ? 'Downloading...' : 'Download All Certificates'}
+                        </button>
+                      </div>
                     ),
                   },
                 ]}

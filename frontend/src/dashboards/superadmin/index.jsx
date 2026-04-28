@@ -24,6 +24,8 @@ import {
   useDownloadTutorImportSample,
   useReassignTutorStudents,
   useTutorMappingSummary,
+  useDeleteUser,
+  useBulkDeleteUsers,
   useStudentCertificateSearch,
 } from './usersApi'
 import {
@@ -356,7 +358,7 @@ function EditClubModal({ isOpen, onClose, club }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 const roles = [
   { value: 'principal', label: 'Principal', icon: '🏫', desc: 'College-level student overview' },
-  { value: 'hod', label: 'HOD', icon: '🧭', desc: 'Students are auto-mapped by selected department' },
+  { value: 'hod', label: 'HOD', icon: '🧭', desc: 'Can be assigned to multiple departments' },
   { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
   { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
   { value: 'tutor', label: 'Tutor', icon: '🧑‍🏫', desc: 'Manages one class of students' },
@@ -367,7 +369,7 @@ const roles = [
 function NewUserModal({ isOpen, onClose }) {
   const [step, setStep] = useState(1)
   const [selectedRole, setSelectedRole] = useState('')
-  const [form, setForm] = useState({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' })
+  const [form, setForm] = useState({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', departments: [], registration_number: '', batch: '', section: '' })
   const [tutorStudents, setTutorStudents] = useState([])
   const [studentDraft, setStudentDraft] = useState({ name: '', email: '', registration_number: '' })
   const [tutorImportFile, setTutorImportFile] = useState(null)
@@ -390,7 +392,7 @@ function NewUserModal({ isOpen, onClose }) {
   const resetModal = () => {
     setStep(1)
     setSelectedRole('')
-    setForm({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', registration_number: '', batch: '', section: '' })
+    setForm({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', departments: [], registration_number: '', batch: '', section: '' })
     setTutorStudents([])
     setStudentDraft({ name: '', email: '', registration_number: '' })
     setTutorImportFile(null)
@@ -407,7 +409,8 @@ function NewUserModal({ isOpen, onClose }) {
     if (!form.email.trim()) errs.email = 'Required'
     if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
-    if ((selectedRole === 'dept_coordinator' || selectedRole === 'hod') && !form.department) errs.department = 'Required'
+    if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
+    if (selectedRole === 'hod' && (!Array.isArray(form.departments) || form.departments.length === 0)) errs.departments = 'Select at least one department'
     if (selectedRole === 'tutor') {
       if (!form.department) errs.department = 'Required'
       if (!form.batch) errs.batch = 'Required'
@@ -460,8 +463,11 @@ function NewUserModal({ isOpen, onClose }) {
     if (selectedRole === 'club_coordinator') {
       payload.club_id = form.club_id
     }
-    if (selectedRole === 'dept_coordinator' || selectedRole === 'hod' || selectedRole === 'student' || selectedRole === 'tutor') {
+    if (selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') {
       payload.department = form.department.trim()
+    }
+    if (selectedRole === 'hod') {
+      payload.departments = (form.departments || []).map((d) => d.trim()).filter(Boolean)
     }
     if (selectedRole === 'student' || selectedRole === 'tutor') {
       payload.batch = form.batch.trim()
@@ -493,6 +499,28 @@ function NewUserModal({ isOpen, onClose }) {
       else if (d.toLowerCase().includes('registration')) setErrors({ registration_number: d })
     }
   }
+
+  const addHodDepartment = () => {
+    const next = (form.department || '').trim()
+    if (!next) return
+    if ((form.departments || []).includes(next)) return
+    setForm((prev) => ({
+      ...prev,
+      departments: [...(prev.departments || []), next],
+      department: '',
+    }))
+    setErrors((prev) => ({ ...prev, departments: undefined }))
+  }
+
+  const removeHodDepartment = (slug) => {
+    setForm((prev) => ({
+      ...prev,
+      departments: (prev.departments || []).filter((d) => d !== slug),
+    }))
+  }
+
+  const canAddHodDepartment = !!(form.department || '').trim() && !(form.departments || []).includes((form.department || '').trim())
+
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={step === 1 ? 'New User — Select Role' : `New User — ${roleLabel[selectedRole]}`} wide>
       {step === 1 ? (
@@ -548,7 +576,7 @@ function NewUserModal({ isOpen, onClose }) {
               {errors.club_id && <p className="form-error">{errors.club_id}</p>}
             </div>
           )}
-          {(selectedRole === 'dept_coordinator' || selectedRole === 'hod' || selectedRole === 'student' || selectedRole === 'tutor') && (
+          {(selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') && (
             <div>
               <label className="form-label">Department (Name or Slug) *</label>
               <select
@@ -569,9 +597,54 @@ function NewUserModal({ isOpen, onClose }) {
             </div>
           )}
           {selectedRole === 'hod' && (
-            <p className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-800">
-              HOD visibility is applied automatically for all students in the selected department.
-            </p>
+            <div>
+              <label className="form-label">Department (Name or Slug) *</label>
+              <div className="flex gap-2">
+                <select
+                  className={`form-input ${errors.departments ? 'form-input-error' : ''}`}
+                  value={form.department}
+                  onChange={(e) => handleChange('department', e.target.value)}
+                >
+                  <option value="">Select department…</option>
+                  {(departmentsList || []).map((d) => (
+                    <option key={d.id} value={d.slug}>{d.name} ({d.slug})</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn-secondary whitespace-nowrap"
+                  onClick={addHodDepartment}
+                  disabled={!canAddHodDepartment}
+                >
+                  Add
+                </button>
+              </div>
+              {(form.departments || []).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(form.departments || []).map((slug) => {
+                    const dep = (departmentsList || []).find((d) => d.slug === slug)
+                    const label = dep ? `${dep.name} (${dep.slug})` : slug
+                    return (
+                      <span key={slug} className="inline-flex items-center gap-2 rounded-full bg-cyan-50 px-3 py-1 text-xs text-cyan-800 ring-1 ring-cyan-200">
+                        {label}
+                        <button
+                          type="button"
+                          className="font-semibold text-cyan-900 hover:text-cyan-700"
+                          onClick={() => removeHodDepartment(slug)}
+                          title="Remove department"
+                        >
+                          x
+                        </button>
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+              {errors.departments && <p className="form-error">{errors.departments}</p>}
+              <p className="mt-2 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-800">
+                HOD visibility is automatically applied to students belonging to the selected departments.
+              </p>
+            </div>
           )}
           {selectedRole === 'tutor' && (
             <>
@@ -1853,7 +1926,7 @@ function UsersTab() {
   const [roleFilter, setRoleFilter] = useState('')
   const debouncedSearch = useDebounce(search)
   const filters = useMemo(() => {
-    const f = {}
+    const f = { is_active: true }
     if (debouncedSearch) f.search = debouncedSearch
     if (roleFilter) f.role = roleFilter
     return f
@@ -1862,6 +1935,8 @@ function UsersTab() {
   const { data: clubs } = useClubs()
   const { data: tutors } = useUsers({ role: 'tutor' })
   const { data: tutorMappingSummary, isLoading: tutorMappingLoading } = useTutorMappingSummary()
+  const deleteUser = useDeleteUser()
+  const bulkDeleteUsers = useBulkDeleteUsers()
 
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [showTutorBulkImport, setShowTutorBulkImport] = useState(false)
@@ -1869,6 +1944,57 @@ function UsersTab() {
   const [showNew, setShowNew] = useState(false)
   const [editUser, setEditUser] = useState(null)
   const [selectedTutorForSwitch, setSelectedTutorForSwitch] = useState(null)
+  const [deletingUserId, setDeletingUserId] = useState(null)
+  const [selectedUserIds, setSelectedUserIds] = useState([])
+
+  useEffect(() => {
+    const validIds = new Set((users || []).map((u) => u.id))
+    setSelectedUserIds((prev) => prev.filter((id) => validIds.has(id)))
+  }, [users])
+
+  const handleDeleteUser = async (user) => {
+    if (!user?.id) return
+    if (user.role === 'super_admin') return
+
+    const confirmed = window.confirm(`Delete user \"${user.name}\" (${user.username})?`)
+    if (!confirmed) return
+
+    try {
+      setDeletingUserId(user.id)
+      await deleteUser.mutateAsync(user.id)
+    } finally {
+      setDeletingUserId(null)
+    }
+  }
+
+  const selectableUserIds = useMemo(
+    () => (users || []).filter((u) => u.role !== 'super_admin').map((u) => u.id),
+    [users],
+  )
+
+  const allSelected = selectableUserIds.length > 0 && selectableUserIds.every((id) => selectedUserIds.includes(id))
+
+  const toggleSelectAllUsers = () => {
+    if (allSelected) setSelectedUserIds([])
+    else setSelectedUserIds(selectableUserIds)
+  }
+
+  const toggleUserSelection = (userId) => {
+    setSelectedUserIds((prev) => (
+      prev.includes(userId)
+        ? prev.filter((id) => id !== userId)
+        : [...prev, userId]
+    ))
+  }
+
+  const handleBulkDeleteSelected = async () => {
+    if (selectedUserIds.length === 0) return
+    const confirmed = window.confirm(`Delete ${selectedUserIds.length} selected user(s)?`)
+    if (!confirmed) return
+
+    await bulkDeleteUsers.mutateAsync(selectedUserIds)
+    setSelectedUserIds([])
+  }
 
   const clubMap = useMemo(() => {
     const m = {}
@@ -1878,7 +2004,10 @@ function UsersTab() {
 
   const getScope = (u) => {
     if (u.role === 'principal') return 'College'
-    if (u.role === 'hod') return `${u.department || '—'}${u.batch ? ` / ${u.batch}` : ''}${u.section ? ` / ${u.section}` : ''}`
+    if (u.role === 'hod') {
+      if (Array.isArray(u.departments) && u.departments.length > 0) return u.departments.join(', ')
+      return u.department || '—'
+    }
     if (u.role === 'club_coordinator') return clubMap[u.club_id] || u.club_id || '—'
     if (u.role === 'dept_coordinator') return u.department || '—'
     if (u.role === 'tutor') return `${u.department || ''} ${u.batch || ''} ${u.section || ''}`.trim() || '—'
@@ -1888,6 +2017,31 @@ function UsersTab() {
   }
 
   const columns = [
+    {
+      key: '_select',
+      header: (
+        <input
+          type="checkbox"
+          checked={allSelected}
+          onChange={toggleSelectAllUsers}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Select all users"
+        />
+      ),
+      searchKey: false,
+      align: 'center',
+      width: '48px',
+      render: (_, row) => (
+        <input
+          type="checkbox"
+          checked={selectedUserIds.includes(row.id)}
+          disabled={row.role === 'super_admin'}
+          onChange={() => toggleUserSelection(row.id)}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Select ${row.username}`}
+        />
+      ),
+    },
     { key: 'name', header: 'Name', sortable: true },
     { key: 'username', header: 'Username', render: (v) => <span className="font-mono text-xs">{v}</span> },
     { key: 'role', header: 'Role', render: (v) => <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[v] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>{roleLabel[v] || v}</span> },
@@ -1909,6 +2063,22 @@ function UsersTab() {
         <button title="Edit" onClick={() => setEditUser(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
         </button>
+        {row.role !== 'super_admin' && (
+          <button
+            title="Delete user"
+            onClick={() => handleDeleteUser(row)}
+            disabled={deleteUser.isPending && deletingUserId === row.id}
+            className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {deleteUser.isPending && deletingUserId === row.id ? (
+              <span className="text-[10px] font-semibold">...</span>
+            ) : (
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7" />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
     )},
   ]
@@ -1917,6 +2087,13 @@ function UsersTab() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Users</h1>
         <div className="flex items-center gap-2">
+          <button
+            className="btn-danger"
+            onClick={handleBulkDeleteSelected}
+            disabled={selectedUserIds.length === 0 || bulkDeleteUsers.isPending}
+          >
+            {bulkDeleteUsers.isPending ? 'Deleting...' : `Delete Selected${selectedUserIds.length ? ` (${selectedUserIds.length})` : ''}`}
+          </button>
           <button
             className="btn-secondary"
             onClick={() => setShowBulkImport(true)}

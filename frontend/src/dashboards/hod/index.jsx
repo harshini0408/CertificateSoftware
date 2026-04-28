@@ -5,6 +5,7 @@ import Sidebar from '../../components/Sidebar'
 import DataTable from '../../components/DataTable'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import StatusBadge from '../../components/StatusBadge'
+import { BACKEND_URL } from '../../utils/axiosInstance'
 
 import { useHodProfile, useHodStudents, useHodStudentCertificates } from './api'
 
@@ -15,6 +16,15 @@ function fmtDate(iso) {
 
 export default function HodDashboard() {
   const { data: profile } = useHodProfile()
+
+  const assignedDepartments = useMemo(() => {
+    const multi = Array.isArray(profile?.departments)
+      ? profile.departments.map((d) => (d || '').trim()).filter(Boolean)
+      : []
+    if (multi.length > 0) return multi
+    const single = (profile?.department || '').trim()
+    return single ? [single] : []
+  }, [profile])
 
   const [search, setSearch] = useState('')
   const [batch, setBatch] = useState('')
@@ -97,6 +107,38 @@ export default function HodDashboard() {
       render: (v) => <span className="font-semibold text-green-700">{v || 0}</span>,
     },
     { key: 'issued_at', header: 'Date', render: (v) => fmtDate(v) },
+    {
+      key: '_actions',
+      header: 'Actions',
+      align: 'center',
+      searchKey: false,
+      render: (_, row) => {
+        const raw = row?.certificate_image_url
+        if (!raw) return <span className="text-xs text-gray-400">—</span>
+        const href = String(raw).startsWith('http') ? raw : `${BACKEND_URL}${raw}`
+        return (
+          <div className="inline-flex items-center gap-2">
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              onClick={(e) => e.stopPropagation()}
+            >
+              View
+            </a>
+            <a
+              href={href}
+              download={`${row?.cert_number || 'certificate'}.png`}
+              className="inline-flex items-center rounded-md border border-navy/30 px-2 py-1 text-xs font-medium text-navy hover:bg-navy hover:text-white"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Download
+            </a>
+          </div>
+        )
+      },
+    },
   ]
 
   return (
@@ -109,7 +151,7 @@ export default function HodDashboard() {
             <div>
               <h1 className="text-2xl font-bold text-foreground">HOD Dashboard</h1>
               <p className="mt-1 text-sm text-gray-500">
-                Department: {profile?.department || '—'}
+                {assignedDepartments.length > 1 ? 'Departments' : 'Department'}: {assignedDepartments.length ? assignedDepartments.join(', ') : '—'}
                 {profile?.batch ? ` · Batch ${profile.batch}` : ''}
                 {profile?.section ? ` · Section ${profile.section}` : ''}
               </p>

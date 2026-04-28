@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
@@ -24,6 +24,7 @@ class UserCreate(BaseModel):
     club_id: Optional[str] = None
     event_id: Optional[str] = None
     department: Optional[str] = None
+    departments: Optional[List[str]] = None
     registration_number: Optional[str] = None
     batch: Optional[str] = None
     section: Optional[str] = None
@@ -39,9 +40,15 @@ class UserCreate(BaseModel):
         elif role == "guest":
             pass
 
-        elif role in ["dept_coordinator", "hod"]:
+        elif role == "dept_coordinator":
             if not self.department:
-                raise ValueError("department is required for dept_coordinator and hod roles")
+                raise ValueError("department is required for dept_coordinator role")
+
+        elif role == "hod":
+            has_department = bool((self.department or "").strip())
+            has_departments = bool(self.departments and len([d for d in self.departments if (d or "").strip()]) > 0)
+            if not has_department and not has_departments:
+                raise ValueError("At least one department is required for hod role")
 
         elif role == "tutor":
             missing = []
@@ -97,6 +104,7 @@ class UserResponse(BaseModel):
     club_id: Optional[str] = None
     event_id: Optional[str] = None
     department: Optional[str] = None
+    departments: Optional[List[str]] = None
     registration_number: Optional[str] = None
     batch: Optional[str] = None
     section: Optional[str] = None

@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 from beanie import Document, Indexed, PydanticObjectId
 from pydantic import Field
@@ -34,6 +34,7 @@ class User(Document):
     club_id: Optional[PydanticObjectId] = None        # club_coordinator, guest
     event_id: Optional[PydanticObjectId] = None       # guest only
     department: Optional[str] = None                   # dept_coordinator, student
+    departments: Optional[List[str]] = None            # hod only (multi-department scope)
     registration_number: Optional[str] = None          # student only (unique)
     batch: Optional[str] = None                        # student only  e.g. "2022-2026"
     section: Optional[str] = None                      # student only

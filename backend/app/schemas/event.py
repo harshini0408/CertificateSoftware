@@ -8,7 +8,12 @@ class EventCreate(BaseModel):
     name: str
     description: Optional[str] = None
     event_date: Optional[datetime] = None
-    academic_year: Literal["2025-2026(EVEN)", "2026-2027(ODD)"]
+    academic_year: Literal[
+        "2025-2026(EVEN)",
+        "2026-2027(ODD)",
+        "2026-27 ODD",
+        "2026-27 EVEN",
+    ]
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
 
 
@@ -16,7 +21,14 @@ class EventUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     event_date: Optional[datetime] = None
-    academic_year: Optional[Literal["2025-2026(EVEN)", "2026-2027(ODD)"]] = None
+    academic_year: Optional[
+        Literal[
+            "2025-2026(EVEN)",
+            "2026-2027(ODD)",
+            "2026-27 ODD",
+            "2026-27 EVEN",
+        ]
+    ] = None
     status: Optional[str] = None
     template_map: Optional[Dict[str, Optional[str]]] = None
     mapping_confirmed: Optional[bool] = None
@@ -28,7 +40,14 @@ class EventResponse(BaseModel):
     name: str
     description: Optional[str] = None
     event_date: Optional[datetime] = None
-    academic_year: Optional[Literal["2025-2026(EVEN)", "2026-2027(ODD)"]] = None
+    academic_year: Optional[
+        Literal[
+            "2025-2026(EVEN)",
+            "2026-2027(ODD)",
+            "2026-27 ODD",
+            "2026-27 EVEN",
+        ]
+    ] = None
     status: str
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
     assets: dict = Field(default_factory=dict)

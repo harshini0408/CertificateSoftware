@@ -217,6 +217,7 @@ async def get_tutor_student_detail(
                 "event_date": event_date,
                 "credit_points": entry.points_awarded,
                 "awarded_at": entry.awarded_at,
+                "certificate_image_url": cert.png_url if cert else None,
             }
         )
 

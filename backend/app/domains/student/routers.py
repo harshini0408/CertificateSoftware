@@ -195,6 +195,7 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
             "club_name": getattr(snap, "club_name", "") if snap else "",
             "issued_at": c.issued_at,
             "status": c.status.value,
+            "png_url": c.png_url,
             "pdf_url": getattr(c, "pdf_url", None),
         })
 
