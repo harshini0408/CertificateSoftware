@@ -527,12 +527,12 @@ def _render_guest_certificate(
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h
         draw.text(
-            (x, y),
+            (int(x), int(y)),
             value,
             font=font,
             fill=(30, 30, 30, 255),
             anchor="mm",
-            stroke_width=1.5,
+            stroke_width=1,
             stroke_fill=(30, 30, 30, 255),
         )
 

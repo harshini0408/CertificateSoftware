@@ -50,7 +50,8 @@ async def _filter_emailed_credit_entries(entries: list):
             continue
 
         status_value = (cert_status_map.get(cert_number) or "").lower()
-        if status_value == CertStatus.EMAILED.value:
+        if status_value == CertStatus.EMAILED.value or cert_number.startswith("DPT-"):
+            # Allow department certificates (DPT-) regardless of email status if they were awarded
             filtered.append(entry)
 
     return filtered
@@ -203,10 +204,9 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
             "pdf_url": getattr(c, "pdf_url", None),
         })
 
-    # Get department certificates (only emailed ones)
+    # Get department certificates (even if not yet emailed)
     dept_certs = await DeptCertificate.find({
-        "participant_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
-        "emailed_at": {"$ne": None},
+        "participant_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
     }).to_list()
 
     for dc in dept_certs:
@@ -216,8 +216,8 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
             "cert_type": dc.contribution or "participant",
             "event_name": "",  # Department events don't have event_name in DeptCertificate
             "club_name": dc.department,
-            "issued_at": dc.emailed_at,
-            "status": "emailed",
+            "issued_at": dc.emailed_at or dc.created_at,
+            "status": "emailed" if dc.emailed_at else "generated",
             "png_url": dc.png_url,
             "pdf_url": None,
         })

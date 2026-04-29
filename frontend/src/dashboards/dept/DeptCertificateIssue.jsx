@@ -66,11 +66,18 @@ export default function DeptCertificateIssue({ event }) {
   const addToast = useToastStore((s) => s.addToast)
   const [isDownloadingZip, setIsDownloadingZip] = useState(false)
   const [localPreviewPayload, setLocalPreviewPayload] = useState(null)
+  const { data: eventState } = useDeptEvent(event?.id)
+  const { data: certs, isLoading: certsLoading } = useDeptEventCertificates(event?.id)
+
   const [allocateCredits, setAllocateCredits] = useState(false)
   const [manualPointsPerCert, setManualPointsPerCert] = useState(0)
 
-  const { data: eventState } = useDeptEvent(event?.id)
-  const { data: certs, isLoading: certsLoading } = useDeptEventCertificates(event?.id)
+  useEffect(() => {
+    if (eventState) {
+      setAllocateCredits(!!eventState.allocate_points)
+      setManualPointsPerCert(eventState.points_per_cert || 0)
+    }
+  }, [eventState])
   const { data: assets } = useDeptAssets()
   const { data: eventTemplate } = useDeptEventTemplate(event?.id)
   const { data: mapping } = useDeptEventMapping(event?.id)
@@ -150,7 +157,10 @@ export default function DeptCertificateIssue({ event }) {
       addToast({ type: 'warning', message: 'Approve the preview certificate before generating all certificates.' })
       return
     }
-    await generateMutation.mutateAsync()
+    await generateMutation.mutateAsync({
+      allocate_points: allocateCredits,
+      manual_points: manualPointsPerCert,
+    })
   }
 
   const handleGeneratePreview = async () => {
@@ -322,6 +332,41 @@ export default function DeptCertificateIssue({ event }) {
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
               Participant Excel rows are persisted from the Overview step.
             </div>
+
+            <div className="rounded-lg border border-navy/10 bg-navy/[0.02] p-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="allocateCredits"
+                  checked={allocateCredits}
+                  onChange={(e) => {
+                    setAllocateCredits(e.target.checked)
+                    if (!e.target.checked) setManualPointsPerCert(0)
+                  }}
+                  className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
+                />
+                <label htmlFor="allocateCredits" className="text-sm font-medium text-foreground cursor-pointer">
+                  Allocate credit points
+                </label>
+              </div>
+              {allocateCredits && (
+                <div className="ml-7 flex items-center gap-3">
+                  <span className="text-xs font-medium text-gray-700">Points:</span>
+                  <input
+                    id="pointsPerCert"
+                    type="number"
+                    min="0"
+                    value={manualPointsPerCert}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? 0 : parseInt(e.target.value, 10)
+                      setManualPointsPerCert(isNaN(val) ? 0 : Math.max(0, val))
+                    }}
+                    className="w-20 px-2 py-1 rounded border border-gray-300 text-sm focus:border-navy focus:ring-1 focus:ring-navy"
+                  />
+                </div>
+              )}
+            </div>
+
             <button className="btn-secondary w-full" onClick={handleGeneratePreview} disabled={previewMutation.isPending || !allReady}>
               {previewMutation.isPending ? 'Generating Preview...' : (hasPreview ? 'Regenerate Preview' : 'Generate Preview')}
             </button>
@@ -351,39 +396,7 @@ export default function DeptCertificateIssue({ event }) {
 
           <div className="flex flex-col items-end gap-3">
             <div className="w-full border-t pt-4">
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    id="allocateCredits"
-                    checked={allocateCredits}
-                    onChange={(e) => {
-                      setAllocateCredits(e.target.checked)
-                      if (!e.target.checked) setManualPointsPerCert(0)
-                    }}
-                    className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
-                  />
-                  <label htmlFor="allocateCredits" className="text-sm font-medium text-foreground cursor-pointer">
-                    Allocate credit points to students
-                  </label>
-                </div>
-                {allocateCredits && (
-                  <div className="ml-7">
-                    <label htmlFor="pointsPerCert" className="block text-xs font-medium text-gray-700 mb-1">
-                      Points per certificate
-                    </label>
-                    <input
-                      id="pointsPerCert"
-                      type="number"
-                      min="0"
-                      value={manualPointsPerCert}
-                      onChange={(e) => setManualPointsPerCert(Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-24 px-2 py-1.5 rounded border border-gray-300 text-sm focus:border-navy focus:ring-1 focus:ring-navy"
-                      placeholder="Enter points"
-                    />
-                  </div>
-                )}
-              </div>
+              {/* Credits logic moved up */}
             </div>
 
             <button className="btn-secondary text-sm w-full" disabled={sendMutation.isPending || pendingEmailCount === 0} onClick={() => sendMutation.mutate({ allocateCredits, manualPointsPerCert: allocateCredits ? manualPointsPerCert : undefined })}>

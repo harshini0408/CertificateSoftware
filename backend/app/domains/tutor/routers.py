@@ -16,6 +16,7 @@ from ...models.certificate import Certificate, CertStatus
 from ...models.event import Event
 from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
+from ...models.dept_certificate import DeptCertificate
 from ...models.user import User, UserRole
 from ...services.storage_service import storage_url_to_path
 
@@ -182,6 +183,10 @@ async def get_tutor_student_detail(
     linked_docs = await _linked_credit_docs_for_tutor(doc, tutor_email)
     total_credits, rolled_history = _rollup_credit_docs(linked_docs)
 
+    cert_points_map: Dict[str, int] = {
+        entry.cert_number: int(entry.points_awarded or 0)
+        for entry in rolled_history if entry.cert_number
+    }
     cert_numbers = [entry.cert_number for entry in rolled_history if entry.cert_number]
     certs = await Certificate.find({"cert_number": {"$in": cert_numbers}}).to_list() if cert_numbers else []
     cert_by_number: Dict[str, Certificate] = {c.cert_number: c for c in certs}
@@ -200,15 +205,39 @@ async def get_tutor_student_detail(
         events = await Event.find({"_id": {"$in": event_ids}}).to_list()
         event_by_id = {str(e.id): e for e in events}
 
+    # Fetch relevant DeptCertificates to handle images for department events
+    dept_certs = await DeptCertificate.find({
+        "participant_email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"}
+    }).to_list()
+    dept_cert_by_number = {dc.cert_number: dc for dc in dept_certs if dc.cert_number}
+
     event_details = []
     for entry in rolled_history:
-        cert = cert_by_number.get(entry.cert_number)
+        cert = cert_by_number.get(entry.cert_number) or dept_cert_by_number.get(entry.cert_number)
         event_date = None
-        if cert and cert.event_id:
+        
+        # If it's a club certificate, get date from event
+        if cert and isinstance(cert, Certificate) and cert.event_id:
             event = event_by_id.get(str(cert.event_id))
             if event:
                 event_date = event.event_date
-
+        # If it's a dept certificate, it might not have a direct event link in the same way, 
+        # or it might have a created_at we can use as fallback
+        elif cert and isinstance(cert, DeptCertificate):
+            dc = cert
+            event_details.append(
+                {
+                    "event_name": "Department Event",
+                    "role": dc.contribution or "Participant",
+                    "certificate_number": dc.cert_number,
+                    "event_date": dc.created_at,
+                    "credit_points": int(cert_points_map.get(dc.cert_number, 0)),
+                    "awarded_at": dc.created_at,
+                    "certificate_image_url": dc.png_url,
+                }
+            )
+            continue
+            
         event_details.append(
             {
                 "event_name": entry.event_name,
@@ -269,6 +298,10 @@ async def download_all_tutor_student_certificates(
         "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"}
     }).to_list()
 
+    dept_certs = await DeptCertificate.find({
+        "participant_email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"}
+    }).to_list()
+
     matched_submissions = []
     for submission in submissions:
         sub_email = _norm_email(submission.student_email)
@@ -292,7 +325,31 @@ async def download_all_tutor_student_certificates(
             ext = cert_path.suffix.lower() or ".png"
             base_name = _safe_zip_token(cert.cert_number, f"generated_{generated_count + 1}")
             archive_name = _unique_zip_name(used_names, f"generated/{base_name}{ext}")
-            zip_file.write(cert_path, archive_name)
+            generated_count += 1
+
+        for dc in dept_certs:
+            if not dc.png_url:
+                continue
+            dc_path = Path(storage_url_to_path(dc.png_url))
+            if not dc_path.exists() or not dc_path.is_file():
+                continue
+            ext = dc_path.suffix.lower() or ".png"
+            base_name = _safe_zip_token(dc.cert_number, f"dept_{generated_count + 1}")
+            archive_name = _unique_zip_name(used_names, f"generated/{base_name}{ext}")
+            zip_file.write(dc_path, archive_name)
+            generated_count += 1
+
+        for dc in dept_certs:
+            if not dc.png_url:
+                continue
+            dc_path = Path(storage_url_to_path(dc.png_url))
+            if not dc_path.exists() or not dc_path.is_file():
+                continue
+            
+            ext = dc_path.suffix.lower() or ".png"
+            base_name = _safe_zip_token(dc.cert_number, f"dept_{generated_count + 1}")
+            archive_name = _unique_zip_name(used_names, f"generated/{base_name}{ext}")
+            zip_file.write(dc_path, archive_name)
             generated_count += 1
 
         for submission in matched_submissions:
@@ -365,6 +422,10 @@ async def download_all_assigned_students_certificates(
         "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"}
     }).to_list()
 
+    dept_certs = await DeptCertificate.find({
+        "participant_email": {"$in": list(linked_emails)}
+    }).to_list() if linked_emails else []
+
     matched_submissions = []
     for submission in submissions:
         sub_email = _norm_email(submission.student_email)
@@ -392,6 +453,20 @@ async def download_all_assigned_students_certificates(
             base_name = _safe_zip_token(cert.cert_number, f"generated_{generated_count + 1}")
             archive_name = _unique_zip_name(used_names, f"generated/{student_folder}/{base_name}{ext}")
             zip_file.write(cert_path, archive_name)
+            generated_count += 1
+
+        for dc in dept_certs:
+            if not dc.png_url:
+                continue
+            dc_path = Path(storage_url_to_path(dc.png_url))
+            if not dc_path.exists() or not dc_path.is_file():
+                continue
+            dc_email = _norm_email(dc.participant_email)
+            st_folder = student_token_by_email.get(dc_email, "student")
+            ext = dc_path.suffix.lower() or ".png"
+            base_name = _safe_zip_token(dc.cert_number, f"dept_{generated_count + 1}")
+            archive_name = _unique_zip_name(used_names, f"generated/{st_folder}/{base_name}{ext}")
+            zip_file.write(dc_path, archive_name)
             generated_count += 1
 
         for submission in matched_submissions:

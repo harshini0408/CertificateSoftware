@@ -56,12 +56,18 @@ class DeptEventCreateRequest(BaseModel):
     name: str
     event_date: Optional[datetime] = None
     semester: Optional[str] = ""
+    allocate_points: bool = False
+    points_per_cert: int = 0
+
+
+class DeptEventGenerateRequest(BaseModel):
+    allocate_points: bool = False
+    manual_points: int = 0
 
 
 class DeptEventFieldMappingRequest(BaseModel):
     selected_fields: list[str]
     field_positions: Dict[str, Dict[str, float]]
-
 
 def _event_response(evt: DeptEvent) -> dict:
     return {
@@ -72,6 +78,8 @@ def _event_response(evt: DeptEvent) -> dict:
         "status": evt.status.value,
         "participant_count": evt.participant_count,
         "cert_count": evt.cert_count,
+        "allocate_points": bool(evt.allocate_points),
+        "points_per_cert": int(evt.points_per_cert or 0),
         "excel_headers": evt.excel_headers,
         "source_rows_count": len(evt.excel_rows or []),
         "preview_row": evt.excel_preview_row,
@@ -421,10 +429,10 @@ def _render_dept_certificate(
     contrib_font = _load_font(max(1, int(ts)))
     cert_font = _load_font(max(1, int(zs)))
 
-    draw.text((w * nx, h * ny), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm", stroke_width=1.5, stroke_fill=(28, 35, 70, 255))
-    draw.text((w * cx, h * cy), f"Class: {class_name}", fill=(45, 45, 45, 255), font=class_font, anchor="mm", stroke_width=1.5, stroke_fill=(45, 45, 45, 255))
-    draw.text((w * tx, h * ty), f"Contribution: {contribution}", fill=(45, 45, 45, 255), font=contrib_font, anchor="mm", stroke_width=1.5, stroke_fill=(45, 45, 45, 255))
-    draw.text((w * zx, h * zy), cert_number, fill=(44, 61, 127, 255), font=cert_font, anchor="lm", stroke_width=1.5, stroke_fill=(44, 61, 127, 255))
+    draw.text((int(w * nx), int(h * ny)), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm", stroke_width=1, stroke_fill=(28, 35, 70, 255))
+    draw.text((int(w * cx), int(h * cy)), f"Class: {class_name}", fill=(45, 45, 45, 255), font=class_font, anchor="mm", stroke_width=1, stroke_fill=(45, 45, 45, 255))
+    draw.text((int(w * tx), int(h * ty)), f"Contribution: {contribution}", fill=(45, 45, 45, 255), font=contrib_font, anchor="mm", stroke_width=1, stroke_fill=(45, 45, 45, 255))
+    draw.text((int(w * zx), int(h * zy)), cert_number, fill=(44, 61, 127, 255), font=cert_font, anchor="lm", stroke_width=1, stroke_fill=(44, 61, 127, 255))
 
     def _paste_scaled(path: Optional[str], field_id: str, def_x: float, def_y: float, max_w_ratio: float, max_h_ratio: float):
         if not path:
@@ -492,18 +500,18 @@ def _render_dept_certificate_dynamic(
             value = _clean_text_value(row.get(field))
 
         if value:
-            draw.text((w * x / 100, h * y / 100), value, fill=(28, 35, 70, 255), font=font, anchor="mm", stroke_width=1.5, stroke_fill=(28, 35, 70, 255))
+            draw.text((int(w * x / 100), int(h * y / 100)), value, fill=(28, 35, 70, 255), font=font, anchor="mm", stroke_width=1, stroke_fill=(28, 35, 70, 255))
 
     cert_pos = field_positions.get("_cert_number")
     if cert_pos:
         cert_font = _load_font(max(1, int(float(cert_pos.get("font_size", 24)))))
         draw.text(
-            (w * float(cert_pos.get("x_percent", 82.0)) / 100, h * float(cert_pos.get("y_percent", 5.0)) / 100),
+            (int(w * float(cert_pos.get("x_percent", 82.0)) / 100), int(h * float(cert_pos.get("y_percent", 5.0)) / 100)),
             cert_number,
             fill=(44, 61, 127, 255),
             font=cert_font,
             anchor="lm",
-            stroke_width=1.5,
+            stroke_width=1,
             stroke_fill=(44, 61, 127, 255),
         )
 
@@ -702,6 +710,8 @@ async def create_dept_event(
         status=DeptEventStatus.DRAFT,
         participant_count=0,
         cert_count=0,
+        allocate_points=body.allocate_points,
+        points_per_cert=body.points_per_cert,
     )
     await evt.insert()
     return _event_response(evt)
@@ -1076,6 +1086,7 @@ async def approve_dept_event_certificate_preview(
 @router.post("/dept/events/{event_id}/certificates/generate")
 async def generate_dept_event_certificates(
     event_id: str,
+    payload: DeptEventGenerateRequest,
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
@@ -1096,6 +1107,13 @@ async def generate_dept_event_certificates(
 
     asset = await _get_or_create_dept_asset(department)
     rows = evt.excel_rows
+
+    await evt.set({
+        "allocate_points": payload.allocate_points,
+        "points_per_cert": payload.manual_points,
+    })
+    evt.allocate_points = payload.allocate_points
+    evt.points_per_cert = payload.manual_points
 
     dept_slug = _slugify(department)
     year = datetime.utcnow().year
@@ -1179,6 +1197,13 @@ async def generate_dept_event_certificates(
             created_at=datetime.utcnow(),
         )
         await doc.insert()
+
+        if evt.allocate_points and evt.points_per_cert > 0:
+            try:
+                await _award_manual_dept_credits(evt, doc, evt.points_per_cert)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error("Failed to award credits for %s: %s", participant_email, exc)
 
         existing_emails.add(participant_email)
 

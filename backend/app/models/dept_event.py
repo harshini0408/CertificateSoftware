@@ -34,6 +34,8 @@ class DeptEvent(Document):
     preview_approved_by_user_id: Optional[str] = None
     participant_count: int = 0
     cert_count: int = 0
+    allocate_points: bool = False
+    points_per_cert: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:

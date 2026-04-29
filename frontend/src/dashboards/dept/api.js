@@ -198,8 +198,8 @@ export function useGenerateDeptEventCertificates(eventId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: async () => {
-      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/generate`)
+    mutationFn: async (payload) => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/generate`, payload || {})
       return data
     },
     onSuccess: (data) => {

@@ -185,6 +185,24 @@ async def get_student_certificates(student_id: PydanticObjectId, _user: User = _
             }
         )
 
+    # Get department certificates
+    dept_certs = await DeptCertificate.find({
+        "participant_email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"}
+    }).to_list()
+
+    for dc in dept_certs:
+        certificates.append({
+            "source_type": "dept_event",
+            "cert_number": dc.cert_number,
+            "cert_type": dc.contribution or "Participant",
+            "event_name": "Department Event",
+            "issuer": dc.department,
+            "status": "emailed" if dc.emailed_at else "generated",
+            "issued_at": dc.emailed_at or dc.created_at,
+            "credit_points": int(credit_points_by_cert.get(dc.cert_number, 0)),
+            "certificate_image_url": dc.png_url,
+        })
+
     certificates.sort(
         key=lambda item: item.get("issued_at") or datetime.min,
         reverse=True,
