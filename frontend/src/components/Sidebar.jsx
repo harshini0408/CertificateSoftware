@@ -133,7 +133,7 @@ function useNavItems() {
 
     case 'guest':
       return [
-        { to: '/guest',         icon: icons.dashboard,   label: 'Home',    end: true },
+        { to: '/guest?home=1',  icon: icons.dashboard,   label: 'Home',    end: true },
         { to: '/guest/history', icon: icons.certificate, label: 'History', end: false },
       ]
 

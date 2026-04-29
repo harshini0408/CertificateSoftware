@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { useToastStore } from '../../store/uiStore'
 import axiosInstance from '../../utils/axiosInstance'
@@ -12,13 +12,23 @@ export default function GuestDashboard() {
   const user = useAuthStore((s) => s.user)
   const addToast = useToastStore((s) => s.addToast)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [eventName, setEventName] = useState('')
   const [submittedName, setSubmittedName] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isRestoring, setIsRestoring] = useState(true)
+  const forceFresh = searchParams.get('new') === '1' || searchParams.get('home') === '1'
+  const [isRestoring, setIsRestoring] = useState(!forceFresh)
 
   useEffect(() => {
+    if (forceFresh) {
+      setSubmittedName('')
+      setIsRestoring(false)
+    }
+  }, [forceFresh])
+
+  useEffect(() => {
+    if (forceFresh) return
     let mounted = true
 
     const restoreSession = async () => {

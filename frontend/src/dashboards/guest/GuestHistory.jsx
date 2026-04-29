@@ -86,7 +86,7 @@ export default function GuestHistory() {
           </p>
         </div>
         <Link
-          to="/guest"
+          to="/guest?new=1"
           className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition"
         >
           + New Session
@@ -97,7 +97,7 @@ export default function GuestHistory() {
         <div className="bg-white p-12 rounded-2xl border border-gray-100 shadow-sm text-center">
           <p className="text-gray-500 mb-4">No certificate history yet.</p>
           <Link
-            to="/guest"
+            to="/guest?new=1"
             className="text-indigo-600 font-semibold hover:underline"
           >
             Start a new session from the dashboard.
