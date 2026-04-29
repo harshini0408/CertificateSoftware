@@ -1305,7 +1305,6 @@ async def reset_user_password(user_id: PydanticObjectId, _user: User = _admin):
 
     return {"message": "Password reset successfully", "temp_password": tmp_pw}
 
-
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: PydanticObjectId, _user: User = _admin):
     target = await User.get(user_id)

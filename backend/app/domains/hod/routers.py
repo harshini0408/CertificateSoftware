@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...core.dependencies import require_role
 from ...models.certificate import Certificate
+from ...models.dept_certificate import DeptCertificate
 from ...models.manual_credit_submission import ManualCreditSubmission
 from ...models.student_credit import StudentCredit
 from ...models.user import User, UserRole
@@ -244,9 +245,19 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
         )
 
     # Get department certificates
+    # First try to match by email
     dept_certs = await DeptCertificate.find({
         "participant_email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"}
     }).to_list()
+
+    # If no certificates found by email and student has name/batch, try fallback matching
+    if not dept_certs and student.name and student.batch:
+        student_name_normalized = (student.name or "").strip().lower()
+        # Try to find certificates by name and batch (for cases where email doesn't match)
+        dept_certs = await DeptCertificate.find({
+            "name": {"$regex": f"^{re.escape(student_name_normalized)}$", "$options": "i"},
+            "class_name": {"$regex": f"^{re.escape(student.batch)}$", "$options": "i"}
+        }).to_list()
 
     for dc in dept_certs:
         certificates.append({

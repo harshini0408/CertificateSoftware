@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { useToastStore } from '../../store/uiStore'
@@ -16,6 +16,29 @@ export default function GuestDashboard() {
   const [eventName, setEventName] = useState('')
   const [submittedName, setSubmittedName] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isRestoring, setIsRestoring] = useState(true)
+
+  useEffect(() => {
+    let mounted = true
+
+    const restoreSession = async () => {
+      try {
+        const { data } = await axiosInstance.get('/guest/status')
+        if (mounted && data?.event_name) {
+          setSubmittedName(data.event_name)
+        }
+      } catch {
+        // No active session; stay on the start form.
+      } finally {
+        if (mounted) setIsRestoring(false)
+      }
+    }
+
+    restoreSession()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   // Start fresh wrapper
   const handleStartSession = async (e) => {
@@ -36,6 +59,20 @@ export default function GuestDashboard() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  if (isRestoring) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <Navbar />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto p-6 flex justify-center py-24">
+            <LoadingSpinner label="Restoring session..." />
+          </main>
+        </div>
+      </div>
+    )
   }
 
   // Once a session is successfully created and we have the submittedName,

@@ -233,8 +233,14 @@ function EventsTab() {
 
 function EventDetailView({ eventId }) {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { data: event, isLoading } = useDeptEvent(eventId)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTabState] = useState(() => searchParams.get('eventTab') || 'overview')
+
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab)
+    setSearchParams({ eventTab: tab })
+  }
 
   if (isLoading) {
     return <LoadingSpinner fullPage label="Loading event..." />

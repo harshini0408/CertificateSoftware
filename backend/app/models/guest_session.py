@@ -34,6 +34,11 @@ class GuestSession(Document):
     guest_generated_certs: Optional[List[str]] = None
     # Whether emails have been sent for this session
     guest_emails_sent: bool = False
+    # Per-row email delivery status for the guest session
+    guest_email_statuses: Optional[List[Dict[str, Any]]] = None
+    # Optional credit allocation for guest certificates
+    guest_allocate_points: bool = False
+    guest_points_per_cert: int = 0
 
     class Settings:
         name = "guest_sessions"

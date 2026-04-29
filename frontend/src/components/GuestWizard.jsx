@@ -10,8 +10,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import FileUpload from './FileUpload'
 import LoadingSpinner from './LoadingSpinner'
+import DataTable from './DataTable'
+import StatusBadge from './StatusBadge'
 import { useToastStore } from '../store/uiStore'
-import { useAuthStore } from '../store/authStore'
 import axiosInstance, { BACKEND_URL } from '../utils/axiosInstance'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,6 +83,13 @@ function StepCard({ title, subtitle, children }) {
       {children}
     </div>
   )
+}
+
+function formatDateTime(value) {
+  if (!value) return '—'
+  const dt = new Date(value)
+  if (Number.isNaN(dt.getTime())) return '—'
+  return dt.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -674,7 +682,7 @@ function Step4Sample({ onBack, onComplete }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 4 — Generate certificates
 // ─────────────────────────────────────────────────────────────────────────────
-function Step4({ rowCount, onComplete, onBack }) {
+function Step4({ rowCount, emailColumn, allocatePoints, pointsPerCert, onAllocatePointsChange, onPointsChange, onComplete, onBack }) {
   const addToast = useToastStore((s) => s.addToast)
   const [generating, setGenerating] = useState(false)
   const [result, setResult]         = useState(null)
@@ -683,7 +691,11 @@ function Step4({ rowCount, onComplete, onBack }) {
     setGenerating(true)
     setResult(null)
     try {
-      const { data } = await axiosInstance.post(`/guest/generate`)
+      const payload = {
+        allocate_points: !!allocatePoints,
+        points_per_cert: allocatePoints ? Number(pointsPerCert || 0) : 0,
+      }
+      const { data } = await axiosInstance.post(`/guest/generate`, payload)
       setResult(data)
       if (data.generated > 0) addToast({ type: 'success', message: `${data.generated} certificate(s) generated!` })
     } catch (err) {
@@ -701,6 +713,45 @@ function Step4({ rowCount, onComplete, onBack }) {
       subtitle={`Click the button below to generate certificates for all ${rowCount} participant(s).`}
     >
       <div className="space-y-6">
+        <div className="card p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Credit Allocation</p>
+              <p className="text-xs text-gray-500">Optionally assign credit points for each generated certificate.</p>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                checked={!!allocatePoints}
+                onChange={(e) => onAllocatePointsChange(e.target.checked)}
+                disabled={!emailColumn}
+              />
+              Allocate points
+            </label>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="text-sm font-medium text-gray-700" htmlFor="guest-points-per-cert">
+              Points per certificate
+            </label>
+            <input
+              id="guest-points-per-cert"
+              type="number"
+              min={0}
+              step={1}
+              value={pointsPerCert}
+              onChange={(e) => onPointsChange(e.target.value)}
+              disabled={!allocatePoints || !emailColumn}
+              className="form-input w-full sm:w-40"
+            />
+            <span className="text-xs text-gray-400">Applies to all rows with a valid student email.</span>
+          </div>
+          {!emailColumn && (
+            <p className="mt-2 text-xs text-amber-600">Select an Email column in Step 2 to enable credit allocation.</p>
+          )}
+        </div>
+
         <div className="flex flex-col items-center justify-center py-10 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
           {generating ? (
             <div className="flex flex-col items-center gap-4">
@@ -775,19 +826,33 @@ function Step4({ rowCount, onComplete, onBack }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 5 — Send emails + ZIP download
 // ─────────────────────────────────────────────────────────────────────────────
-function Step5({ generatedCount, emailsSent: initialEmailsSent, emailColumn, onBack }) {
+function Step5({
+  generatedCount,
+  emailColumn,
+  emailStatuses,
+  emailCounts,
+  onEmailStatusUpdate,
+  onBack,
+}) {
   const addToast   = useToastStore((s) => s.addToast)
   const [sending, setSending]         = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [emailResult, setEmailResult] = useState(null)
-  const [emailsSent, setEmailsSent]   = useState(initialEmailsSent)
 
-  const sendEmails = async () => {
+  const sendEmails = async (rowIndexes) => {
     setSending(true)
     try {
-      const { data } = await axiosInstance.post(`/guest/send-emails`)
+      const payload = rowIndexes?.length ? { row_indexes: rowIndexes } : undefined
+      const { data } = await axiosInstance.post(`/guest/send-emails`, payload)
       setEmailResult(data)
-      if (data.sent > 0) { setEmailsSent(true); addToast({ type: 'success', message: `${data.sent} email(s) sent!` }) }
+      if (data.sent > 0) {
+        addToast({ type: 'success', message: `${data.sent} email(s) sent!` })
+      } else if (data.failed > 0) {
+        addToast({ type: 'warning', message: 'Some emails failed. Please retry the failed rows.' })
+      }
+      if (data.email_statuses) {
+        onEmailStatusUpdate(data)
+      }
     } catch (err) {
       addToast({ type: 'error', message: err?.response?.data?.detail || 'Email send failed.' })
     } finally {
@@ -810,24 +875,44 @@ function Step5({ generatedCount, emailsSent: initialEmailsSent, emailColumn, onB
     }
   }
 
+  const rows = (emailStatuses || []).map((entry, idx) => ({
+    row_index: entry?.row_index ?? idx,
+    recipient_name: entry?.recipient_name || '—',
+    recipient_email: entry?.recipient_email || '—',
+    status: entry?.status || 'pending',
+    sent_at: entry?.sent_at,
+    error: entry?.error,
+  }))
+
+  const emailStats = emailCounts || { sent: 0, failed: 0, pending: 0, total: 0 }
+
   return (
     <StepCard
       title="Send & Download"
       subtitle={`${generatedCount} certificate(s) are ready. Send them via email or download as a ZIP file.`}
     >
       <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-2xl p-5 text-center border border-indigo-100">
             <div className="text-4xl font-black text-indigo-700">{generatedCount}</div>
             <p className="text-xs font-semibold text-indigo-500 mt-1">Certificates Generated</p>
           </div>
-          <div className={`rounded-2xl p-5 text-center border ${emailsSent ? 'bg-gradient-to-br from-green-50 to-green-100 border-green-100' : 'bg-gradient-to-br from-gray-50 to-gray-100 border-gray-100'}`}>
-            <div className={`text-4xl font-black ${emailsSent ? 'text-green-600' : 'text-gray-400'}`}>
-              {emailsSent ? '✓' : '—'}
+          <div className="rounded-2xl p-5 border bg-white border-gray-100">
+            <div className="text-xs font-semibold text-gray-500">Email Delivery</div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+              <div>
+                <div className="text-lg font-bold text-green-600">{emailStats.sent}</div>
+                <div className="text-[11px] text-gray-400">Sent</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-amber-600">{emailStats.pending}</div>
+                <div className="text-[11px] text-gray-400">Pending</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-red-500">{emailStats.failed}</div>
+                <div className="text-[11px] text-gray-400">Failed</div>
+              </div>
             </div>
-            <p className={`text-xs font-semibold mt-1 ${emailsSent ? 'text-green-500' : 'text-gray-400'}`}>
-              {emailsSent ? 'Emails Sent' : 'Emails Pending'}
-            </p>
           </div>
         </div>
 
@@ -858,10 +943,14 @@ function Step5({ generatedCount, emailsSent: initialEmailsSent, emailColumn, onB
             <button
               id="guest-send-emails-btn"
               className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              onClick={sendEmails}
-              disabled={sending || !emailColumn}
+              onClick={() => sendEmails()}
+              disabled={sending || !emailColumn || emailStats.pending === 0}
             >
-              {sending ? <><LoadingSpinner size="sm" label="" /> Sending…</> : emailsSent ? '↺ Resend Emails' : '✉ Send Emails'}
+              {sending ? (
+                <><LoadingSpinner size="sm" label="" /> Sending…</>
+              ) : (
+                `✉ Send Remaining (${emailStats.pending})`
+              )}
             </button>
             {!emailColumn && (
               <p className="mt-2 text-xs text-amber-600">Choose an Email column in Step 2 to enable sending.</p>
@@ -892,6 +981,57 @@ function Step5({ generatedCount, emailsSent: initialEmailsSent, emailColumn, onB
           </div>
         </div>
 
+        <div className="card p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-sm font-semibold text-foreground">Email Delivery Status</p>
+            <span className="text-xs text-gray-500">
+              {emailStats.total} recipient{emailStats.total !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <DataTable
+            columns={[
+              { key: 'recipient_name', header: 'Name', searchKey: true },
+              { key: 'recipient_email', header: 'Email', searchKey: true },
+              {
+                key: 'status',
+                header: 'Status',
+                render: (v) => <StatusBadge status={v || 'pending'} size="sm" />,
+              },
+              { key: 'sent_at', header: 'Sent At', render: (v) => formatDateTime(v) },
+              {
+                key: 'error',
+                header: 'Error',
+                render: (v) => (v ? <span className="text-xs text-red-600" title={v}>{v}</span> : '—'),
+              },
+              {
+                key: '_actions',
+                header: 'Action',
+                align: 'center',
+                render: (_, row) => {
+                  if (!emailColumn) return '—'
+                  if (row.status === 'emailed') return '—'
+                  return (
+                    <button
+                      className="rounded bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                      onClick={() => sendEmails([row.row_index])}
+                      disabled={sending}
+                    >
+                      {row.status === 'failed' ? 'Retry' : 'Send'}
+                    </button>
+                  )
+                },
+              },
+            ]}
+            data={rows}
+            isLoading={false}
+            emptyMessage="No recipients loaded yet."
+            searchable
+            searchPlaceholder="Search recipients..."
+            rowKey="row_index"
+          />
+        </div>
+
         <div className="flex justify-start pt-2">
           <button
             className="px-5 py-2 rounded-xl border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
@@ -910,6 +1050,7 @@ function Step5({ generatedCount, emailsSent: initialEmailsSent, emailColumn, onB
 // ─────────────────────────────────────────────────────────────────────────────
 export default function GuestWizard({ eventName }) {
   const [step, setStep]         = useState(1)
+  const [isRestoring, setIsRestoring] = useState(true)
 
   // Per-step state carried between wizard steps
   const [templateUrl,    setTemplateUrl]    = useState(null)  // server path /storage/guest_templates/…
@@ -917,6 +1058,110 @@ export default function GuestWizard({ eventName }) {
   const [excelState,     setExcelState]     = useState(null)  // { headers, rowCount, selectedColumns, emailColumn }
   const [fieldPositions, setFieldPositions] = useState(null)  // { positions }
   const [generatedCount, setGeneratedCount] = useState(0)
+  const [emailStatuses, setEmailStatuses] = useState([])
+  const [emailCounts, setEmailCounts] = useState({ sent: 0, failed: 0, pending: 0, total: 0 })
+  const [allocatePoints, setAllocatePoints] = useState(false)
+  const [pointsPerCert, setPointsPerCert] = useState(0)
+
+  const deriveCounts = (statuses = []) => {
+    let sent = 0
+    let failed = 0
+    let pending = 0
+    statuses.forEach((entry) => {
+      const status = (entry?.status || 'pending').toLowerCase()
+      if (status === 'emailed') sent += 1
+      else if (status === 'failed') failed += 1
+      else pending += 1
+    })
+    return { sent, failed, pending, total: statuses.length }
+  }
+
+  useEffect(() => {
+    let mounted = true
+
+    const restoreProgress = async () => {
+      try {
+        const { data } = await axiosInstance.get('/guest/status')
+        if (!mounted || !data) return
+
+        if (data.template_url) setTemplateUrl(data.template_url)
+        if (data.step2_complete) {
+          setExcelState({
+            headers: data.all_excel_headers,
+            rowCount: data.excel_row_count,
+            selectedColumns: data.selected_columns,
+            emailColumn: data.email_column,
+          })
+        }
+        if (data.step3_complete && data.field_positions?.column_positions) {
+          setFieldPositions({ positions: data.field_positions.column_positions })
+        }
+        if (data.step4_complete) setGeneratedCount(data.generated_count || 0)
+        if (typeof data.guest_allocate_points === 'boolean') {
+          setAllocatePoints(data.guest_allocate_points)
+        }
+        if (typeof data.guest_points_per_cert === 'number') {
+          setPointsPerCert(data.guest_points_per_cert)
+        }
+        const statusRows = data.email_statuses || []
+        setEmailStatuses(statusRows)
+        if (typeof data.email_sent_count === 'number') {
+          setEmailCounts({
+            sent: data.email_sent_count,
+            failed: data.email_failed_count || 0,
+            pending: data.email_pending_count || 0,
+            total: data.email_total_count || statusRows.length,
+          })
+        } else {
+          setEmailCounts(deriveCounts(statusRows))
+        }
+
+        if (data.step4_complete) {
+          setStep(6)
+        } else if (data.step3_complete) {
+          setStep(4)
+        } else if (data.step2_complete) {
+          setStep(3)
+        } else if (data.step1_complete) {
+          setStep(2)
+        } else {
+          setStep(1)
+        }
+      } catch {
+        if (mounted) setStep(1)
+      } finally {
+        if (mounted) setIsRestoring(false)
+      }
+    }
+
+    restoreProgress()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const handleEmailStatusUpdate = (data) => {
+    const statusRows = data?.email_statuses || []
+    setEmailStatuses(statusRows)
+    if (typeof data?.email_sent_count === 'number') {
+      setEmailCounts({
+        sent: data.email_sent_count,
+        failed: data.email_failed_count || 0,
+        pending: data.email_pending_count || 0,
+        total: data.email_total_count || statusRows.length,
+      })
+    } else {
+      setEmailCounts(deriveCounts(statusRows))
+    }
+  }
+
+  if (isRestoring) {
+    return (
+      <div className="flex justify-center py-12">
+        <LoadingSpinner label="Restoring progress..." />
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -963,16 +1208,28 @@ export default function GuestWizard({ eventName }) {
       {step === 5 && (
         <Step4
           rowCount={excelState?.rowCount || 0}
+          emailColumn={excelState?.emailColumn}
+          allocatePoints={allocatePoints}
+          pointsPerCert={pointsPerCert}
+          onAllocatePointsChange={setAllocatePoints}
+          onPointsChange={(value) => setPointsPerCert(value)}
           onBack={() => setStep(4)}
-          onComplete={({ generated }) => { setGeneratedCount(generated); setStep(6) }}
+          onComplete={({ generated }) => {
+            setGeneratedCount(generated)
+            setEmailStatuses([])
+            setEmailCounts({ sent: 0, failed: 0, pending: 0, total: 0 })
+            setStep(6)
+          }}
         />
       )}
 
       {step === 6 && (
         <Step5
           generatedCount={generatedCount}
-          emailsSent={false}
           emailColumn={excelState?.emailColumn}
+          emailStatuses={emailStatuses}
+          emailCounts={emailCounts}
+          onEmailStatusUpdate={handleEmailStatusUpdate}
           onBack={() => setStep(5)}
         />
       )}

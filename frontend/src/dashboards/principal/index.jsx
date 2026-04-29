@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
@@ -70,6 +71,77 @@ function buildCreditPredicate(rawExpression) {
   }
 }
 
+function StudentDetailModal({ studentId, studentName, onClose }) {
+  const { data: certResp, isLoading: loadingCerts } = usePrincipalStudentCertificates(studentId)
+  const certificates = certResp?.certificates || []
+
+  if (!studentId) return null
+
+  const eventDetailColumns = [
+    { key: 'event_name', header: 'Event', sortable: true, searchKey: true },
+    { key: 'club_name', header: 'Club / Department', sortable: true },
+    { key: 'cert_type', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
+    { key: 'cert_number', header: 'Certificate Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
+    { key: 'issued_at', header: 'Issued Date', render: (v) => fmtDate(v) },
+    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} size="sm" /> },
+    { key: 'credit_points', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
+    {
+      key: '_actions',
+      header: 'View',
+      align: 'center',
+      render: (_, row) => {
+        const url = row?.png_url || row?.certificate_image_url
+        if (!url) return <span className="text-xs text-gray-400">—</span>
+        const href = String(url).startsWith('http') ? url : `${String(url)}`
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            onClick={(e) => e.stopPropagation()}
+          >
+            View
+          </a>
+        )
+      },
+    },
+  ]
+
+  return createPortal(
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="max-h-[80vh] w-full max-w-4xl overflow-auto rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-foreground">Student Event Certificates</h2>
+            <p className="text-xs text-gray-500">Use View to open each certificate file for verification.</p>
+          </div>
+          <button className="btn-secondary" onClick={onClose}>Close</button>
+        </div>
+
+        {loadingCerts ? (
+          <LoadingSpinner label="Loading certificates..." />
+        ) : (
+          <>
+            <div className="rounded-lg border border-gray-200 p-3 text-sm mb-4">
+              <span className="text-gray-500">Student Name:</span> <span className="font-semibold">{studentName || '—'}</span>
+            </div>
+            <DataTable
+              columns={eventDetailColumns}
+              data={certificates}
+              isLoading={false}
+              emptyMessage="No certificates found for this student."
+              searchable
+              searchPlaceholder="Search events..."
+            />
+          </>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 export default function PrincipalDashboard() {
   const [searchParams, setSearchParams] = useSearchParams()
   const initialView = searchParams.get('view') === 'student-search' ? 'student-search' : 'dashboard'
@@ -84,7 +156,8 @@ export default function PrincipalDashboard() {
   const [batch, setBatch] = useState('')
   const [className, setClassName] = useState('')
   const [creditRangeExpression, setCreditRangeExpression] = useState('')
-  const [selectedStudent, setSelectedStudent] = useState(null)
+  const [selectedStudentId, setSelectedStudentId] = useState(null)
+  const [selectedStudentName, setSelectedStudentName] = useState(null)
 
   const debouncedSearch = useDebounce(search)
   const debouncedEventSearch = useDebounce(eventSearch)
@@ -119,9 +192,6 @@ export default function PrincipalDashboard() {
     [students, creditFilter],
   )
 
-  const { data: certResp, isLoading: loadingCerts } = usePrincipalStudentCertificates(selectedStudent?.id)
-  const certificates = certResp?.certificates || []
-
   const departmentOptions = useMemo(
     () => [...new Set((students || []).map((s) => s.department).filter(Boolean))].sort(),
     [students],
@@ -136,23 +206,38 @@ export default function PrincipalDashboard() {
   )
 
   const studentColumns = [
-    { key: 'name', header: 'Student Name', sortable: true, render: (v) => <span className="font-semibold">{v}</span> },
+    { key: 'name', header: 'Student Name', sortable: true, searchKey: true, render: (v, row) => (
+      <button className="text-navy hover:underline font-semibold" onClick={() => {
+        setSelectedStudentId(row.id)
+        setSelectedStudentName(v)
+      }}>
+        {v}
+      </button>
+    ) },
     { key: 'registration_number', header: 'Reg Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
     { key: 'department', header: 'Department', sortable: true },
     { key: 'batch', header: 'Batch', sortable: true },
     { key: 'section', header: 'Class', sortable: true },
     { key: 'total_credits', header: 'Credit Points', sortable: true, align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
-  ]
-
-  const certificateColumns = [
-    { key: 'source_type', header: 'Source', render: (v) => <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium capitalize text-gray-700">{(v || '').replace('_', ' ')}</span> },
-    { key: 'cert_number', header: 'Certificate No.', render: (v) => <span className="font-mono text-xs">{v}</span> },
-    { key: 'cert_type', header: 'Type' },
-    { key: 'event_name', header: 'Event' },
-    { key: 'issuer', header: 'Issuer' },
-    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} size="sm" /> },
-    { key: 'credit_points', header: 'Points', align: 'right', render: (v) => <span className="font-semibold text-green-700">{v || 0}</span> },
-    { key: 'issued_at', header: 'Date', render: (v) => fmtDate(v) },
+    {
+      key: '_actions',
+      header: 'Actions',
+      searchKey: false,
+      align: 'center',
+      render: (_, row) => (
+        <button
+          type="button"
+          className="rounded bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-200"
+          onClick={(e) => {
+            e.stopPropagation()
+            setSelectedStudentId(row.id)
+            setSelectedStudentName(row.name)
+          }}
+        >
+          View Certificates
+        </button>
+      ),
+    },
   ]
 
   const eventColumns = [
@@ -323,37 +408,23 @@ export default function PrincipalDashboard() {
                   data={filteredStudents}
                   isLoading={loadingStudents}
                   emptyMessage="No students found for selected filters."
-                  onRowClick={(row) => setSelectedStudent(row)}
+                  searchable
+                  searchPlaceholder="Search by name, email, reg no..."
                 />
-
-                <div className="card p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-foreground">Student Certificates</h2>
-                    {selectedStudent && (
-                      <span className="text-sm text-gray-500">
-                        {selectedStudent.name} ({selectedStudent.registration_number || '—'})
-                      </span>
-                    )}
-                  </div>
-
-                  {!selectedStudent ? (
-                    <p className="text-sm text-gray-500">Select a student from the list above to view certificates.</p>
-                  ) : loadingCerts ? (
-                    <div className="py-6"><LoadingSpinner /></div>
-                  ) : (
-                    <DataTable
-                      columns={certificateColumns}
-                      data={certificates}
-                      isLoading={false}
-                      emptyMessage="No certificates found for this student."
-                    />
-                  )}
-                </div>
               </>
             )}
           </div>
         </main>
       </div>
-    </>
+
+      <StudentDetailModal 
+        studentId={selectedStudentId} 
+        studentName={selectedStudentName}
+        onClose={() => {
+          setSelectedStudentId(null)
+          setSelectedStudentName(null)
+        }} 
+      />
+    </> 
   )
 }

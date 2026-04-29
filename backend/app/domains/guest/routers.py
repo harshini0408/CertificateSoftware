@@ -21,6 +21,7 @@ GET  /guest/sessions/{session_id}/zip    — Re-download ZIP for a past session
 import asyncio
 import io
 import logging
+import re
 import uuid
 import zipfile
 from datetime import datetime, timedelta
@@ -28,15 +29,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
 from ...config import get_settings
 from ...core.dependencies import require_guest
+from ...models.dept_certificate import DeptCertificate
 from ...models.field_position import FieldPosition
 from ...models.guest_session import GuestSession
-from ...models.user import User
+from ...models.student_credit import CreditHistoryEntry, StudentCredit
+from ...models.user import User, UserRole
+from ...services.storage_service import storage_path_to_url
 from ...services.email_service import send_certificate_email
 
 logger = logging.getLogger(__name__)
@@ -83,6 +87,15 @@ async def _resolve_active_session(user: User) -> GuestSession:
             "No active guest session. Please start a new session from the dashboard.",
         )
     return session
+
+
+class SendGuestEmailsRequest(BaseModel):
+    row_indexes: Optional[List[int]] = None
+
+
+class GuestGenerateRequest(BaseModel):
+    allocate_points: bool = False
+    points_per_cert: int = 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -230,6 +243,9 @@ async def upload_guest_excel(
         "guest_email_column": None,
         "guest_generated_certs": None,
         "guest_emails_sent": False,
+        "guest_email_statuses": None,
+        "guest_allocate_points": False,
+        "guest_points_per_cert": 0,
     })
 
     return {
@@ -271,6 +287,9 @@ async def save_guest_config(
         "guest_email_column": email_column,
         "guest_generated_certs": None,
         "guest_emails_sent": False,
+        "guest_email_statuses": None,
+        "guest_allocate_points": False,
+        "guest_points_per_cert": 0,
     })
 
     return {
@@ -419,6 +438,7 @@ async def generate_guest_sample_preview(
 
 @router.post("/generate")
 async def generate_guest_certificates(
+    payload: GuestGenerateRequest = Body(default=GuestGenerateRequest()),
     current_user: User = Depends(require_guest),
 ):
     """Generate one PNG certificate per Excel row using the Pillow pipeline."""
@@ -456,6 +476,129 @@ async def generate_guest_certificates(
 
     generated: List[str] = []
     errors: List[str] = []
+    credits_awarded = 0
+
+    def _normalize_email(value: Optional[str]) -> str:
+        return (value or "").strip().lower()
+
+    def _pick_row_value(row: dict, keys: tuple[str, ...]) -> str:
+        for key in keys:
+            value = row.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
+    async def _award_guest_credits(
+        *,
+        cert_number: str,
+        student_email: str,
+        student_name: str,
+        points: int,
+        event_name: str,
+    ) -> bool:
+        if not student_email or points <= 0:
+            return False
+
+        credit_doc = await StudentCredit.find_one(
+            {
+                "student_email": {
+                    "$regex": f"^{re.escape(student_email)}$",
+                    "$options": "i",
+                }
+            }
+        )
+
+        user_student = await User.find_one(
+            {
+                "email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"},
+                "role": UserRole.STUDENT,
+            }
+        )
+
+        mapped_doc_for_reg = None
+        if user_student and user_student.registration_number:
+            mapped_doc_for_reg = await StudentCredit.find_one(
+                {
+                    "registration_number": user_student.registration_number,
+                    "tutor_email": {"$ne": None},
+                }
+            )
+
+        entry = CreditHistoryEntry(
+            cert_number=cert_number,
+            event_name=event_name,
+            club_name="Guest Event",
+            cert_type="guest",
+            points_awarded=int(points),
+            awarded_at=datetime.utcnow(),
+        )
+
+        if credit_doc:
+            if any(h.cert_number == cert_number for h in credit_doc.credit_history or []):
+                return False
+
+            updates = {}
+            if user_student:
+                if not credit_doc.student_name and user_student.name:
+                    updates["student_name"] = user_student.name
+                if not credit_doc.department and user_student.department:
+                    updates["department"] = user_student.department
+                if not credit_doc.batch and user_student.batch:
+                    updates["batch"] = user_student.batch
+                if not credit_doc.section and user_student.section:
+                    updates["section"] = user_student.section
+                if not credit_doc.registration_number and user_student.registration_number:
+                    updates["registration_number"] = user_student.registration_number
+            if not credit_doc.tutor_email and mapped_doc_for_reg and mapped_doc_for_reg.tutor_email:
+                updates["tutor_email"] = mapped_doc_for_reg.tutor_email
+
+            if updates:
+                await credit_doc.set(updates)
+                credit_doc = await StudentCredit.get(credit_doc.id)
+
+            credit_doc.total_credits = int(credit_doc.total_credits or 0) + int(points)
+            credit_doc.credit_history.append(entry)
+            credit_doc.last_updated = datetime.utcnow()
+            await credit_doc.save()
+            return True
+
+        canonical_email = _normalize_email(user_student.email) if user_student and user_student.email else student_email
+        await StudentCredit(
+            student_email=canonical_email,
+            tutor_email=(mapped_doc_for_reg.tutor_email if mapped_doc_for_reg and mapped_doc_for_reg.tutor_email else None),
+            registration_number=(user_student.registration_number if user_student else None),
+            student_name=(user_student.name if user_student and user_student.name else student_name),
+            department=(user_student.department if user_student else None),
+            batch=(user_student.batch if user_student else None),
+            section=(user_student.section if user_student else None),
+            total_credits=int(points),
+            credit_history=[entry],
+            last_updated=datetime.utcnow(),
+        ).insert()
+        return True
+
+    allocate_points = bool(payload.allocate_points)
+    points_per_cert = int(payload.points_per_cert or 0)
+    if points_per_cert < 0:
+        points_per_cert = 0
+
+    email_col = session.guest_email_column
+
+    if allocate_points and not email_col:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Email column is required to allocate credit points.",
+        )
+    if allocate_points and points_per_cert <= 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Points per certificate must be greater than 0 when credit allocation is enabled.",
+        )
+
+    department_label = f"Guest Event - {session.event_name}" if session.event_name else "Guest Event"
 
     for idx, row in enumerate(rows):
         safe_name = f"cert_{idx+1:04d}_{uuid.uuid4().hex[:6]}.png"
@@ -469,6 +612,52 @@ async def generate_guest_certificates(
                 str(out_path),
             )
             generated.append(str(out_path))
+
+            cert_number = f"GUEST-{str(session.id)[-6:]}-{idx + 1:04d}"
+            participant_email = _normalize_email(row.get(email_col) if email_col else "")
+            student_name = _pick_row_value(row, ("Name", "name", "Full Name", "full_name", "Student Name")) or "Unknown"
+            class_name = _pick_row_value(row, ("Class", "Department", "Semester", "Year", "Section")) or "-"
+            contribution = _pick_row_value(row, ("Contribution", "Role", "Participation", "Certificate Type")) or "Participant"
+
+            png_url = storage_path_to_url(str(out_path))
+            existing = await DeptCertificate.find_one({"cert_number": cert_number})
+            if existing:
+                await existing.set({
+                    "department": department_label,
+                    "coordinator_user_id": str(current_user.id),
+                    "event_id": str(session.id),
+                    "name": student_name,
+                    "class_name": class_name,
+                    "contribution": contribution,
+                    "participant_email": participant_email or None,
+                    "png_url": png_url,
+                })
+            else:
+                await DeptCertificate(
+                    cert_number=cert_number,
+                    department=department_label,
+                    coordinator_user_id=str(current_user.id),
+                    event_id=str(session.id),
+                    name=student_name,
+                    class_name=class_name,
+                    contribution=contribution,
+                    participant_email=participant_email or None,
+                    png_url=png_url,
+                    created_at=datetime.utcnow(),
+                ).insert()
+
+            if allocate_points and points_per_cert > 0 and participant_email:
+                try:
+                    if await _award_guest_credits(
+                        cert_number=cert_number,
+                        student_email=participant_email,
+                        student_name=student_name,
+                        points=points_per_cert,
+                        event_name=session.event_name,
+                    ):
+                        credits_awarded += 1
+                except Exception as exc:
+                    logger.error("Failed to award guest credits for %s: %s", participant_email, exc)
         except Exception as exc:
             logger.error("Error generating cert for row %d: %s", idx + 1, exc)
             errors.append(f"Row {idx + 1}: {exc}")
@@ -476,11 +665,15 @@ async def generate_guest_certificates(
     await session.set({
         "guest_generated_certs": generated,
         "guest_emails_sent": False,
+        "guest_email_statuses": None,
+        "guest_allocate_points": allocate_points,
+        "guest_points_per_cert": points_per_cert,
     })
 
     return {
         "generated": len(generated),
         "errors": errors,
+        "credits_awarded": credits_awarded,
         "message": f"Generated {len(generated)} certificate(s).",
     }
 
@@ -568,6 +761,7 @@ async def download_guest_zip(
 
 @router.post("/send-emails")
 async def send_guest_emails(
+    payload: Optional[SendGuestEmailsRequest] = Body(default=None),
     current_user: User = Depends(require_guest),
 ):
     """Send each generated certificate to the email address in the email column."""
@@ -596,31 +790,85 @@ async def send_guest_emails(
                 f"Configured email column '{email_col}' was not found in uploaded Excel headers.",
             )
 
+    def _build_statuses() -> List[Dict[str, Any]]:
+        statuses: List[Dict[str, Any]] = []
+        for idx, row in enumerate(rows):
+            recipient_email = (row.get(email_col, "") if email_col else "").strip()
+            recipient_name = ""
+            for name_key in ("Name", "name", "Full Name", "full_name", "Student Name"):
+                if name_key in row and row[name_key]:
+                    recipient_name = row[name_key]
+                    break
+            if not recipient_name and recipient_email:
+                recipient_name = recipient_email.split("@")[0]
+            statuses.append(
+                {
+                    "row_index": idx,
+                    "recipient_email": recipient_email,
+                    "recipient_name": recipient_name,
+                    "status": "pending",
+                    "sent_at": None,
+                    "error": None,
+                }
+            )
+        return statuses
+
+    email_statuses = session.guest_email_statuses
+    if not isinstance(email_statuses, list) or len(email_statuses) != len(rows):
+        email_statuses = _build_statuses()
+    else:
+        for idx, row in enumerate(rows):
+            entry = email_statuses[idx] if isinstance(email_statuses[idx], dict) else {}
+            recipient_email = (row.get(email_col, "") if email_col else "").strip()
+            recipient_name = ""
+            for name_key in ("Name", "name", "Full Name", "full_name", "Student Name"):
+                if name_key in row and row[name_key]:
+                    recipient_name = row[name_key]
+                    break
+            if not recipient_name and recipient_email:
+                recipient_name = recipient_email.split("@")[0]
+            entry.setdefault("row_index", idx)
+            entry["recipient_email"] = recipient_email
+            entry["recipient_name"] = recipient_name
+            entry["status"] = (entry.get("status") or "pending").replace("sent", "emailed")
+            entry.setdefault("sent_at", None)
+            entry.setdefault("error", None)
+            email_statuses[idx] = entry
+
+    target_indexes = None
+    if payload and payload.row_indexes:
+        target_indexes = {idx for idx in payload.row_indexes if isinstance(idx, int)}
+
     sent = 0
     failed = 0
     errors: List[str] = []
 
-    for idx, (row, cert_path) in enumerate(zip(rows, certs)):
-        recipient_email = row.get(email_col, "").strip()
+    for idx, row in enumerate(rows):
+        if target_indexes is not None and idx not in target_indexes:
+            continue
+
+        entry = email_statuses[idx]
+        if entry.get("status") == "emailed":
+            continue
+
+        recipient_email = (entry.get("recipient_email") or "").strip()
         if not recipient_email:
-            errors.append(f"Row {idx + 1}: No email address found in column '{email_col}'")
+            entry["status"] = "failed"
+            entry["error"] = f"Row {idx + 1}: No email address found in column '{email_col}'"
             failed += 1
+            errors.append(entry["error"])
             continue
 
-        if not Path(cert_path).exists():
-            errors.append(f"Row {idx + 1}: Certificate file not found — {cert_path}")
+        cert_path = certs[idx] if idx < len(certs) else None
+        if not cert_path or not Path(cert_path).exists():
+            entry["status"] = "failed"
+            entry["error"] = f"Row {idx + 1}: Certificate file not found — {cert_path}"
             failed += 1
+            errors.append(entry["error"])
             continue
 
-        recipient_name = ""
-        for name_key in ("Name", "name", "Full Name", "full_name", "Student Name"):
-            if name_key in row and row[name_key]:
-                recipient_name = row[name_key]
-                break
-        if not recipient_name:
-            recipient_name = recipient_email.split("@")[0]
-
-        cert_number = f"GUEST-{str(session.id)[-6:]}-{idx+1:04d}"
+        recipient_name = entry.get("recipient_name") or recipient_email.split("@")[0]
+        cert_number = f"GUEST-{str(session.id)[-6:]}-{idx + 1:04d}"
         try:
             success = await send_certificate_email(
                 recipient_email=recipient_email,
@@ -631,22 +879,54 @@ async def send_guest_emails(
                 png_path=cert_path,
             )
             if success:
+                entry["status"] = "emailed"
+                entry["sent_at"] = datetime.utcnow()
+                entry["error"] = None
+                existing = await DeptCertificate.find_one({"cert_number": cert_number})
+                if existing:
+                    await existing.set({
+                        "emailed_at": entry["sent_at"],
+                        "email_error": None,
+                    })
                 sent += 1
             else:
+                entry["status"] = "failed"
+                entry["error"] = f"Row {idx + 1}: Email delivery failed (rate limit or SMTP error)"
+                existing = await DeptCertificate.find_one({"cert_number": cert_number})
+                if existing:
+                    await existing.set({"email_error": entry["error"]})
                 failed += 1
-                errors.append(f"Row {idx + 1}: Email delivery failed (rate limit or SMTP error)")
+                errors.append(entry["error"])
         except Exception as exc:
+            entry["status"] = "failed"
+            entry["error"] = f"Row {idx + 1}: {exc}"
+            existing = await DeptCertificate.find_one({"cert_number": cert_number})
+            if existing:
+                await existing.set({"email_error": entry["error"]})
             failed += 1
-            errors.append(f"Row {idx + 1}: {exc}")
+            errors.append(entry["error"])
 
-    if sent > 0:
-        await session.set({"guest_emails_sent": True})
+    sent_count = sum(1 for entry in email_statuses if entry.get("status") == "emailed")
+    failed_count = sum(1 for entry in email_statuses if entry.get("status") == "failed")
+    pending_count = sum(1 for entry in email_statuses if entry.get("status") not in ("emailed", "failed"))
+
+    await session.set(
+        {
+            "guest_email_statuses": email_statuses,
+            "guest_emails_sent": sent_count > 0,
+        }
+    )
 
     return {
         "sent": sent,
         "failed": failed,
         "errors": errors,
         "message": f"Sent {sent} email(s). {failed} failed.",
+        "email_statuses": email_statuses,
+        "email_sent_count": sent_count,
+        "email_failed_count": failed_count,
+        "email_pending_count": pending_count,
+        "email_total_count": len(email_statuses),
     }
 
 
@@ -673,6 +953,33 @@ async def get_guest_status(
         if tmpl.exists():
             template_url = f"/storage/guest_templates/{tmpl.name}"
 
+    email_statuses = session.guest_email_statuses or []
+    for entry in email_statuses:
+        if isinstance(entry, dict) and entry.get("status") == "sent":
+            entry["status"] = "emailed"
+    if not email_statuses and session.guest_excel_data and session.guest_email_column:
+        rows = session.guest_excel_data
+        email_col = session.guest_email_column
+        for idx, row in enumerate(rows):
+            recipient_email = (row.get(email_col, "") if email_col else "").strip()
+            recipient_name = ""
+            for name_key in ("Name", "name", "Full Name", "full_name", "Student Name"):
+                if name_key in row and row[name_key]:
+                    recipient_name = row[name_key]
+                    break
+            if not recipient_name and recipient_email:
+                recipient_name = recipient_email.split("@")[0]
+            email_statuses.append(
+                {
+                    "row_index": idx,
+                    "recipient_email": recipient_email,
+                    "recipient_name": recipient_name,
+                    "status": "pending",
+                    "sent_at": None,
+                    "error": None,
+                }
+            )
+
     return {
         "session_id": str(session.id),
         "event_name": session.event_name,
@@ -697,6 +1004,13 @@ async def get_guest_status(
         "step4_complete": bool(session.guest_generated_certs),
         "generated_count": len(session.guest_generated_certs) if session.guest_generated_certs else 0,
         "step5_emails_sent": session.guest_emails_sent,
+        "guest_allocate_points": bool(session.guest_allocate_points),
+        "guest_points_per_cert": int(session.guest_points_per_cert or 0),
+        "email_statuses": email_statuses,
+        "email_sent_count": sum(1 for e in email_statuses if e.get("status") == "emailed"),
+        "email_failed_count": sum(1 for e in email_statuses if e.get("status") == "failed"),
+        "email_pending_count": sum(1 for e in email_statuses if e.get("status") not in ("emailed", "failed")),
+        "email_total_count": len(email_statuses),
     }
 
 
