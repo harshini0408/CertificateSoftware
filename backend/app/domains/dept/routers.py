@@ -14,17 +14,19 @@ from pydantic import BaseModel
 
 from ...core.dependencies import require_role
 from ...models.user import User, UserRole
-from ...models.student_credit import StudentCredit
 from ...models.dept_asset import DeptAsset
 from ...models.dept_certificate import DeptCertificate
 from ...models.dept_certificate_preview import DeptCertificatePreview
+from ...models.credit_rule import CreditRule
 from ...models.dept_event import DeptEvent, DeptEventStatus
 from ...models.dept_template import DeptTemplate
+from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...services.signature_service import process_signature, save_logo
 from ...services.storage_service import save_cert_png
 from ...services.storage_service import storage_path_to_url
 from ...services.storage_service import storage_url_to_path
 from ...services.email_service import send_certificate_email
+from ...schemas.event import DeptCertificateSendRequest
 from ...config import get_settings
 
 router = APIRouter(tags=["Department"])
@@ -92,6 +94,154 @@ def _normalize_department(department: Optional[str]) -> str:
             "Department is not configured for this account. Ask Super Admin to set your department.",
         )
     return normalized
+
+
+def _normalize_credit_type(value: Optional[str]) -> str:
+    return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
+    normalized = _normalize_credit_type(cert_type_raw)
+    spaced = normalized.replace("_", " ")
+    display = spaced.title() if normalized else cert_type_raw
+
+    for candidate in (cert_type_raw, normalized, spaced, display):
+        candidate = (candidate or "").strip()
+        if not candidate:
+            continue
+        rule = await CreditRule.find_one({
+            "cert_type": {"$regex": f"^{re.escape(candidate)}$", "$options": "i"}
+        })
+        if rule:
+            return rule
+    return None
+
+
+async def _award_dept_event_credits(evt: DeptEvent, cert: DeptCertificate) -> None:
+    if not evt.allocate_points:
+        return
+
+    contribution = (cert.contribution or "").strip()
+    if not contribution:
+        return
+
+    rule = await _resolve_credit_rule(contribution)
+    if not rule or int(rule.points or 0) <= 0:
+        return
+
+    email = (cert.participant_email or "").strip().lower()
+    if not email:
+        return
+
+    credit_doc = await StudentCredit.find_one(StudentCredit.student_email == email)
+    user_student = await User.find_one({
+        "email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        "role": UserRole.STUDENT,
+    })
+
+    entry = CreditHistoryEntry(
+        cert_number=cert.cert_number,
+        event_name=evt.name,
+        club_name=evt.department,
+        cert_type=contribution,
+        points_awarded=int(rule.points or 0),
+        awarded_at=datetime.utcnow(),
+    )
+
+    if credit_doc:
+        if any(history_entry.cert_number == cert.cert_number for history_entry in credit_doc.credit_history or []):
+            return
+
+        updates = {}
+        if user_student:
+            if not credit_doc.student_name and user_student.name:
+                updates["student_name"] = user_student.name
+            if not credit_doc.department and user_student.department:
+                updates["department"] = user_student.department
+            if not credit_doc.batch and user_student.batch:
+                updates["batch"] = user_student.batch
+            if not credit_doc.section and user_student.section:
+                updates["section"] = user_student.section
+        if updates:
+            await credit_doc.set(updates)
+            credit_doc = await StudentCredit.get(credit_doc.id)
+
+        credit_doc.total_credits = int(credit_doc.total_credits or 0) + int(rule.points or 0)
+        credit_doc.credit_history.append(entry)
+        credit_doc.last_updated = datetime.utcnow()
+        await credit_doc.save()
+        return
+
+    await StudentCredit(
+        student_email=email,
+        student_name=user_student.name if user_student and user_student.name else cert.name,
+        department=user_student.department if user_student else None,
+        batch=user_student.batch if user_student else None,
+        section=user_student.section if user_student else None,
+        total_credits=int(rule.points or 0),
+        credit_history=[entry],
+        last_updated=datetime.utcnow(),
+    ).insert()
+
+
+async def _award_manual_dept_credits(evt: DeptEvent, cert: DeptCertificate, manual_points: int) -> None:
+    """Award manually specified credit points to a student for a certificate."""
+    if not manual_points or manual_points <= 0:
+        return
+
+    email = (cert.participant_email or "").strip().lower()
+    if not email:
+        return
+
+    credit_doc = await StudentCredit.find_one(StudentCredit.student_email == email)
+    user_student = await User.find_one({
+        "email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        "role": UserRole.STUDENT,
+    })
+
+    entry = CreditHistoryEntry(
+        cert_number=cert.cert_number,
+        event_name=evt.name,
+        club_name=evt.department,
+        cert_type=cert.contribution or "manual_allocation",
+        points_awarded=int(manual_points),
+        awarded_at=datetime.utcnow(),
+    )
+
+    if credit_doc:
+        if any(history_entry.cert_number == cert.cert_number for history_entry in credit_doc.credit_history or []):
+            return
+
+        updates = {}
+        if user_student:
+            if not credit_doc.student_name and user_student.name:
+                updates["student_name"] = user_student.name
+            if not credit_doc.department and user_student.department:
+                updates["department"] = user_student.department
+            if not credit_doc.batch and user_student.batch:
+                updates["batch"] = user_student.batch
+            if not credit_doc.section and user_student.section:
+                updates["section"] = user_student.section
+        if updates:
+            await credit_doc.set(updates)
+            credit_doc = await StudentCredit.get(credit_doc.id)
+
+        credit_doc.total_credits = int(credit_doc.total_credits or 0) + int(manual_points)
+        credit_doc.credit_history.append(entry)
+        credit_doc.last_updated = datetime.utcnow()
+        await credit_doc.save()
+        return
+
+    await StudentCredit(
+        student_email=email,
+        student_name=user_student.name if user_student and user_student.name else cert.name,
+        department=user_student.department if user_student else None,
+        batch=user_student.batch if user_student else None,
+        section=user_student.section if user_student else None,
+        total_credits=int(manual_points),
+        credit_history=[entry],
+        last_updated=datetime.utcnow(),
+    ).insert()
 
 
 def _pick_single_template() -> Path:
@@ -1085,6 +1235,7 @@ async def list_dept_event_certificates(
 @router.post("/dept/events/{event_id}/certificates/send")
 async def send_dept_event_certificates(
     event_id: str,
+    payload: DeptCertificateSendRequest,
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
@@ -1121,6 +1272,10 @@ async def send_dept_event_certificates(
             cert.emailed_at = datetime.utcnow()
             cert.email_error = None
             sent += 1
+            
+            # Award credits if manually allocating
+            if payload.allocateCredits and payload.manualPointsPerCert:
+                await _award_manual_dept_credits(evt, cert, payload.manualPointsPerCert)
         else:
             cert.email_error = "Email delivery failed"
             failed += 1
@@ -1138,6 +1293,7 @@ async def send_dept_event_certificates(
 async def send_single_dept_event_certificate(
     event_id: str,
     cert_id: str,
+    payload: DeptCertificateSendRequest,
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
@@ -1169,6 +1325,11 @@ async def send_single_dept_event_certificate(
         cert.emailed_at = datetime.utcnow()
         cert.email_error = None
         await cert.save()
+        
+        # Award credits if manually allocating
+        if payload.allocateCredits and payload.manualPointsPerCert:
+            await _award_manual_dept_credits(evt, cert, payload.manualPointsPerCert)
+        
         return {"message": "Certificate email sent successfully."}
 
     cert.email_error = "Email delivery failed"

@@ -66,6 +66,8 @@ export default function DeptCertificateIssue({ event }) {
   const addToast = useToastStore((s) => s.addToast)
   const [isDownloadingZip, setIsDownloadingZip] = useState(false)
   const [localPreviewPayload, setLocalPreviewPayload] = useState(null)
+  const [allocateCredits, setAllocateCredits] = useState(false)
+  const [manualPointsPerCert, setManualPointsPerCert] = useState(0)
 
   const { data: eventState } = useDeptEvent(event?.id)
   const { data: certs, isLoading: certsLoading } = useDeptEventCertificates(event?.id)
@@ -239,7 +241,7 @@ export default function DeptCertificateIssue({ event }) {
               onClick={(e) => {
                 e.stopPropagation()
                 if (!canSendSingle) return
-                sendSingleMutation.mutate(certId)
+                sendSingleMutation.mutate({ certId, payload: { allocateCredits, manualPointsPerCert: allocateCredits ? manualPointsPerCert : undefined } })
               }}
               disabled={!canSendSingle || sendSingleMutation.isPending}
               className="rounded p-1 text-amber-500 hover:bg-amber-50 transition-colors disabled:opacity-50"
@@ -348,11 +350,47 @@ export default function DeptCertificateIssue({ event }) {
           </div>
 
           <div className="flex flex-col items-end gap-3">
-            <button className="btn-secondary text-sm" disabled={sendMutation.isPending || pendingEmailCount === 0} onClick={() => sendMutation.mutate()}>
+            <div className="w-full border-t pt-4">
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="allocateCredits"
+                    checked={allocateCredits}
+                    onChange={(e) => {
+                      setAllocateCredits(e.target.checked)
+                      if (!e.target.checked) setManualPointsPerCert(0)
+                    }}
+                    className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
+                  />
+                  <label htmlFor="allocateCredits" className="text-sm font-medium text-foreground cursor-pointer">
+                    Allocate credit points to students
+                  </label>
+                </div>
+                {allocateCredits && (
+                  <div className="ml-7">
+                    <label htmlFor="pointsPerCert" className="block text-xs font-medium text-gray-700 mb-1">
+                      Points per certificate
+                    </label>
+                    <input
+                      id="pointsPerCert"
+                      type="number"
+                      min="0"
+                      value={manualPointsPerCert}
+                      onChange={(e) => setManualPointsPerCert(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-24 px-2 py-1.5 rounded border border-gray-300 text-sm focus:border-navy focus:ring-1 focus:ring-navy"
+                      placeholder="Enter points"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button className="btn-secondary text-sm w-full" disabled={sendMutation.isPending || pendingEmailCount === 0} onClick={() => sendMutation.mutate({ allocateCredits, manualPointsPerCert: allocateCredits ? manualPointsPerCert : undefined })}>
               {sendMutation.isPending ? (<><LoadingSpinner size="sm" label="" /> Sending...</>) : `Approve & Send ${pendingEmailCount} Pending Email${pendingEmailCount !== 1 ? 's' : ''}`}
             </button>
             <button
-              className="btn-secondary text-sm"
+              className="btn-secondary text-sm w-full"
               disabled={isDownloadingZip || (certs?.length ?? 0) === 0}
               onClick={handleDownloadZip}
             >

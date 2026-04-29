@@ -285,8 +285,8 @@ export function useSendDeptEventCertificates(eventId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: async () => {
-      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/send`)
+    mutationFn: async (payload) => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/send`, payload || {})
       return data
     },
     onSuccess: (data) => {
@@ -304,8 +304,8 @@ export function useSendSingleDeptEventCertificate(eventId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: async (certId) => {
-      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/${certId}/send`)
+    mutationFn: async ({ certId, payload }) => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/${certId}/send`, payload || {})
       return data
     },
     onSuccess: (data) => {

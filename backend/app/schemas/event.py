@@ -65,3 +65,8 @@ class DashboardResponse(BaseModel):
     total_certs_issued: int = 0
     pending_emails: int = 0
     recent_activity: List[dict] = Field(default_factory=list)
+
+
+class DeptCertificateSendRequest(BaseModel):
+    allocateCredits: bool = False
+    manualPointsPerCert: Optional[int] = None

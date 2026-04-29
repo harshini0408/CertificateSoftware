@@ -11,6 +11,7 @@ from ...core.dependencies import require_role
 from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
 from ...models.certificate import Certificate, CertStatus
+from ...models.dept_certificate import DeptCertificate
 from ...models.credit_rule import CreditRule
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.event import Event
@@ -176,15 +177,18 @@ async def get_credits_history(current_user: User = Depends(require_role(UserRole
 async def get_my_certificates(current_user: User = Depends(require_role(UserRole.STUDENT))):
     """Return all certificates belonging to the current student.
 
-    Matches by email in snapshot, since participants may not have a user_id link.
+    Includes both club and department certificates.
+    Matches by email since participants may not have a user_id link.
     """
     email = _norm_email(current_user.email)
+    results = []
+
+    # Get club certificates
     certs = await Certificate.find({
         "snapshot.email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
         "status": {"$in": [CertStatus.GENERATED, CertStatus.EMAILED]},
     }).to_list()
 
-    results = []
     for c in certs:
         snap = c.snapshot
         results.append({
@@ -199,6 +203,27 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
             "pdf_url": getattr(c, "pdf_url", None),
         })
 
+    # Get department certificates (only emailed ones)
+    dept_certs = await DeptCertificate.find({
+        "participant_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        "emailed_at": {"$ne": None},
+    }).to_list()
+
+    for dc in dept_certs:
+        results.append({
+            "_id": str(dc.id),
+            "cert_number": dc.cert_number,
+            "cert_type": dc.contribution or "participant",
+            "event_name": "",  # Department events don't have event_name in DeptCertificate
+            "club_name": dc.department,
+            "issued_at": dc.emailed_at,
+            "status": "emailed",
+            "png_url": dc.png_url,
+            "pdf_url": None,
+        })
+
+    # Sort by issued_at descending
+    results.sort(key=lambda x: x.get("issued_at") or datetime.min, reverse=True)
     return results
 
 
