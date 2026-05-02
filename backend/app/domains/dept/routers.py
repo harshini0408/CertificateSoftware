@@ -745,6 +745,8 @@ async def upload_dept_event_template(
     evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
     file_bytes = await template_file.read()
+    if len(file_bytes) > 1 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Template image must be smaller than 1 MB")
     try:
         img = Image.open(BytesIO(file_bytes))
         img.verify()

@@ -111,7 +111,7 @@ export default function Footer() {
 
                 <div className="container">
                 <div className="footer-bottom-only d-flex flex-column align-items-center text-center small">
-                    <span className="text-muted">© {year}. All rights reserved.</span>
+                    <span className="text-muted">© {year}. All rights reserved. </span>
 
                     <button
                         ref={textRef}
@@ -145,9 +145,9 @@ export default function Footer() {
                         }}
                     >
                         Created by Team SDC
-                        <span className="cta-arrow"> →</span>
+                        <span className="cta-arrow"> </span>
 
-                        <span className="cta-hint">{isTouch.current ? 'tap' : 'click'}</span>
+                        <span className="cta-hint">{isTouch.current ? ' ' : ' '}</span>
 
                         {isActive && (
                             <svg viewBox="0 0 200 40" width="220" height="52">

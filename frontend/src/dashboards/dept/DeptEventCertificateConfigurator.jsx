@@ -260,7 +260,7 @@ export default function DeptEventCertificateConfigurator({ event, onClose }) {
         <div className="space-y-4">
           <div>
             <p className="form-label">1) Upload Event Template</p>
-            <FileUpload id="dept-event-template" accept=".png,.jpg,.jpeg" label="Template image" hint="PNG/JPG" maxSizeMB={10} onFile={setTemplateFile} />
+            <FileUpload id="dept-event-template" accept=".png,.jpg,.jpeg" label="Template image" hint="PNG/JPG · Max 1 MB" maxSizeMB={1} onFile={setTemplateFile} />
             <button className="btn-secondary mt-2" onClick={handleUploadTemplate} disabled={uploadTemplateMutation.isPending || !templateFile}>
               {uploadTemplateMutation.isPending ? 'Uploading...' : 'Upload Template'}
             </button>

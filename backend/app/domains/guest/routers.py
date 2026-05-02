@@ -162,10 +162,10 @@ async def upload_guest_template(
         )
 
     content = await file.read()
-    if len(content) > 20 * 1024 * 1024:
+    if len(content) > 1 * 1024 * 1024:
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            "Template image must be smaller than 20 MB",
+            "Template image must be smaller than 1 MB",
         )
 
     ext = Path(file.filename or "template.png").suffix or ".png"
@@ -307,7 +307,7 @@ async def save_guest_config(
 class ColumnPositionEntry(BaseModel):
     x_percent: float
     y_percent: float
-    font_size_percent: float = 3.2
+    font_size: float = 24.0
 
 
 class GuestFieldPositionsRequest(BaseModel):
@@ -332,7 +332,7 @@ async def save_guest_field_positions(
         col: {
             "x_percent": pos.x_percent,
             "y_percent": pos.y_percent,
-            "font_size_percent": pos.font_size_percent,
+            "font_size": pos.font_size,
         }
         for col, pos in body.column_positions.items()
     }
@@ -713,9 +713,13 @@ def _render_guest_certificate(
         value = str((fields or {}).get(col_header, ""))
         if not value:
             continue
-        fsp = float(pos.get("font_size_percent") or DEFAULT_FONT_PERCENT)
-        fsp = max(1.0, min(fsp, 8.0))
-        font_size = max(10, int(img_w * fsp / 100))
+        raw_font_size = pos.get("font_size")
+        if raw_font_size is None:
+            fsp = float(pos.get("font_size_percent") or DEFAULT_FONT_PERCENT)
+            fsp = max(1.0, min(fsp, 8.0))
+            font_size = max(10, int(img_w * fsp / 100))
+        else:
+            font_size = max(8, int(float(raw_font_size)))
         font = _load_font(font_size)
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h

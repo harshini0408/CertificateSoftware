@@ -92,6 +92,27 @@ function formatDateTime(value) {
   return dt.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+function PositionTag({ label, x, y, color, fontSize, isActive, onSelect }) {
+  const displaySize = Math.max(10, Math.min(42, Number(fontSize || 24) * 0.45))
+  return (
+    <div
+      className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer"
+      style={{ left: `${x}%`, top: `${y}%`, zIndex: 10 }}
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelect?.()
+      }}
+    >
+      <div
+        className={`rounded-md px-2 py-1 shadow-md border border-white/30 text-white font-semibold whitespace-nowrap transition-transform ${isActive ? 'scale-110 ring-2 ring-white/80' : 'scale-100'}`}
+        style={{ background: color, fontSize: `${displaySize}px`, lineHeight: 1.1 }}
+      >
+        {label}
+      </div>
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 1 — Upload PNG template
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,8 +175,8 @@ function Step1({ initialTemplateUrl, initialBlobUrl, onComplete }) {
           id="guest-template-upload"
           accept="image/*"
           label={previewSrc ? 'Drag to replace template' : 'Drag your certificate image here'}
-          hint="PNG, JPG, JPEG · Max 20 MB"
-          maxSizeMB={20}
+          hint="PNG, JPG, JPEG · Max 1 MB"
+          maxSizeMB={1}
           onFile={handleFile}
         />
 
@@ -348,10 +369,23 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
   const canvasRef = useRef(null)
   const imgRef    = useRef(null)
 
+  const normalizeFontSize = (pos) => {
+    if (pos && pos.font_size != null) return Number(pos.font_size)
+    if (pos && pos.font_size_percent != null) {
+      return Math.max(8, Math.min(120, Math.round(Number(pos.font_size_percent || 3.2) * 24)))
+    }
+    return 24
+  }
+
   const [positions, setPositions] = useState(() => {
     const init = {}
     selectedColumns.forEach((col) => {
-      init[col] = initialPositions?.[col] ?? { x_percent: 50, y_percent: 50, font_size_percent: 3.2 }
+      const incoming = initialPositions?.[col] || {}
+      init[col] = {
+        x_percent: Number(incoming.x_percent ?? 50),
+        y_percent: Number(incoming.y_percent ?? 50),
+        font_size: normalizeFontSize(incoming),
+      }
     })
     return init
   })
@@ -382,7 +416,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
     const limits = {
       x_percent: [0, 100],
       y_percent: [0, 100],
-      font_size_percent: [1, 8],
+      font_size: [8, 120],
     }
     const [min, max] = limits[prop] || [0, 9999]
     const nextVal = Number(clamp(parsed, min, max).toFixed(2))
@@ -397,7 +431,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
         columnPositions[col] = {
           x_percent:         positions[col].x_percent,
           y_percent:         positions[col].y_percent,
-          font_size_percent: positions[col].font_size_percent,
+          font_size:         positions[col].font_size,
         }
       })
       const rect = canvasRef.current?.getBoundingClientRect()
@@ -426,14 +460,14 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
   return (
     <StepCard
       title="Position Certificate Fields"
-      subtitle="Click anywhere on the certificate canvas to place the active field's text. Fine-tune positions with the numeric controls."
+      subtitle="Click anywhere on the certificate canvas to place the active field's text. Fine-tune positions with the numeric controls. Font size is in pixels, like the department dashboard."
     >
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Canvas */}
         <div className="flex-1 min-w-0">
           <p className="text-xs text-gray-500 mb-2 font-medium">
             Active field: <span className="font-bold text-indigo-700">{activeCol || '—'}</span>
-            {activeCol && <span className="text-gray-400"> — click canvas to place</span>}
+            {activeCol && <span className="text-gray-400"> — click the template to move it</span>}
           </p>
           <div
             ref={canvasRef}
@@ -466,32 +500,22 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
               </div>
             )}
 
-            {/* Always show dots, even before image loads (using imgSrc presence) */}
+            {/* Show positioned tags over the template */}
             {imgSrc && selectedColumns.map((col) => {
               const pos = positions[col]
               if (!pos) return null
               const color = colColor(col)
               return (
-                <div
+                <PositionTag
                   key={col}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ left: `${pos.x_percent}%`, top: `${pos.y_percent}%` }}
-                >
-                  <div
-                    className={`relative flex items-center justify-center rounded-full border-2 border-white shadow-lg transition-transform ${activeCol === col ? 'scale-125' : 'scale-100'}`}
-                    style={{ width: 22, height: 22, background: color }}
-                  >
-                    <span className="text-white text-[9px] font-bold leading-none">
-                      {selectedColumns.indexOf(col) + 1}
-                    </span>
-                  </div>
-                  <div
-                    className="mt-0.5 px-1.5 py-0.5 rounded text-white text-[10px] font-semibold shadow whitespace-nowrap"
-                    style={{ background: color, opacity: 0.92 }}
-                  >
-                    {col}
-                  </div>
-                </div>
+                  label={col}
+                  x={pos.x_percent}
+                  y={pos.y_percent}
+                  color={color}
+                  fontSize={pos.font_size}
+                  isActive={activeCol === col}
+                  onSelect={() => setActiveCol(col)}
+                />
               )
             })}
           </div>
@@ -502,7 +526,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Field Controls</p>
           <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
             {selectedColumns.map((col) => {
-              const pos    = positions[col] || { x_percent: 50, y_percent: 50, font_size_percent: 3.2 }
+              const pos    = positions[col] || { x_percent: 50, y_percent: 50, font_size: 24 }
               const color  = colColor(col)
               const isActive = activeCol === col
               return (
@@ -520,7 +544,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
                     {[
                       { label: 'X %',  key: 'x_percent',         min: 0, max: 100, step: 0.5 },
                       { label: 'Y %',  key: 'y_percent',         min: 0, max: 100, step: 0.5 },
-                      { label: 'Size', key: 'font_size_percent', min: 1, max: 8,   step: 0.1 },
+                      { label: 'Font', key: 'font_size',         min: 8, max: 120, step: 1 },
                     ].map(({ label, key, min, max, step }) => (
                       <div key={key}>
                         <p className="text-[10px] text-gray-400 mb-0.5">{label}</p>
@@ -532,21 +556,22 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => updateProp(col, key, e.target.value)}
                         />
-                        {key === 'font_size_percent' && (
+                        {key === 'font_size' && (
                           <input
                             type="range"
-                            min={1}
-                            max={8}
-                            step={0.1}
-                            value={pos.font_size_percent ?? 3.2}
+                            min={8}
+                            max={120}
+                            step={1}
+                            value={pos.font_size ?? 24}
                             onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => updateProp(col, 'font_size_percent', e.target.value)}
+                            onChange={(e) => updateProp(col, 'font_size', e.target.value)}
                             className="mt-1 w-full accent-indigo-600"
                           />
                         )}
                       </div>
                     ))}
                   </div>
+                  <p className="mt-2 text-[10px] text-gray-400">This uses pixel font sizing to match the department dashboard preview.</p>
                 </div>
               )
             })}

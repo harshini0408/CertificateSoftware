@@ -249,7 +249,6 @@ _static_dir = Path(__file__).parent / "static"
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
-
 # ── Health / Root ────────────────────────────────────────────────────────
 
 @app.get("/health")
