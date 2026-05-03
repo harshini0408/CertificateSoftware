@@ -3,63 +3,211 @@
 <head>
 <meta charset="utf-8">
 <style>
-  @font-face { font-family: 'Playfair Display'; src: url('file:///app/static/fonts/PlayfairDisplay.ttf'); }
-  @font-face { font-family: 'Montserrat'; src: url('file:///app/static/fonts/Montserrat.ttf'); }
-  @font-face { font-family: 'Dancing Script'; src: url('file:///app/static/fonts/DancingScript.ttf'); }
-  @font-face { font-family: 'EB Garamond'; src: url('file:///app/static/fonts/EBGaramond.ttf'); }
+  @font-face { font-family: 'Montserrat'; src: url('/static/fonts/Montserrat.ttf'); }
+  @font-face { font-family: 'Playfair Display'; src: url('/static/fonts/PlayfairDisplay.ttf'); }
+  @font-face { font-family: 'Dancing Script'; src: url('/static/fonts/DancingScript.ttf'); }
+  @font-face { font-family: 'EB Garamond'; src: url('/static/fonts/EBGaramond.ttf'); }
+  @font-face { font-family: 'Raleway'; src: url('/static/fonts/Raleway.ttf'); }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { width: 2480px; height: 3508px; position: relative; font-family: 'Montserrat', sans-serif; background: #FFFDF7; }
-  .border-frame { position: absolute; top: 60px; left: 60px; right: 60px; bottom: 60px; border: 8px solid #1B4D3E; border-radius: 12px; }
-  .inner-border { position: absolute; top: 80px; left: 80px; right: 80px; bottom: 80px; border: 2px solid #C9A84C; }
-  .logo { position: absolute; top: 140px; left: 50%; transform: translateX(-50%); width: 200px; height: 200px; object-fit: contain; }
-  .header { position: absolute; top: 380px; width: 100%; text-align: center; font-family: 'Playfair Display', serif; color: #1B4D3E; }
-  .header h1 { font-size: 96px; letter-spacing: 8px; text-transform: uppercase; }
-  .header h2 { font-size: 48px; color: #C9A84C; margin-top: 20px; letter-spacing: 12px; text-transform: uppercase; }
-  .subtext { position: absolute; top: 640px; width: 100%; text-align: center; font-size: 36px; color: #555; }
-  .participant-name { position: absolute; top: 800px; width: 100%; text-align: center; font-family: 'Dancing Script', cursive; font-size: 120px; color: #1B4D3E; }
-  .name-line { position: absolute; top: 950px; left: 400px; right: 400px; height: 3px; background: #C9A84C; }
-  .details { position: absolute; top: 1020px; width: 100%; text-align: center; font-size: 36px; color: #333; line-height: 1.8; }
-  .cert-number { position: absolute; top: 1300px; width: 100%; text-align: center; font-size: 28px; color: #888; font-family: 'Montserrat', sans-serif; letter-spacing: 2px; }
-  .fields-container { position: absolute; top: 1400px; left: 200px; right: 200px; }
-  .signature-block { position: absolute; bottom: 400px; left: 200px; right: 200px; display: flex; justify-content: space-between; align-items: flex-end; }
-  .sig-item { text-align: center; width: 500px; }
-  .sig-item img { height: 150px; object-fit: contain; }
-  .sig-item .sig-line { width: 100%; height: 2px; background: #1B4D3E; margin-top: 10px; }
-  .sig-item .sig-label { font-size: 28px; color: #555; margin-top: 10px; }
-  .qr-code { position: absolute; bottom: 160px; right: 200px; width: 250px; height: 250px; }
-  .qr-code img { width: 100%; height: 100%; }
-  .footer { position: absolute; bottom: 100px; width: 100%; text-align: center; font-size: 24px; color: #999; }
+  body {
+    width: 2480px; height: 3508px; position: relative; overflow: hidden;
+    font-family: 'Montserrat', sans-serif;
+    background: #FFFDF7;
+  }
+
+  /* ── Decorative borders ──────────────────────────────────────────────── */
+  .border-outer {
+    position: absolute; top: 55px; left: 55px; right: 55px; bottom: 55px;
+    border: 10px solid #1B4D3E; border-radius: 14px;
+    pointer-events: none;
+  }
+  .border-inner {
+    position: absolute; top: 78px; left: 78px; right: 78px; bottom: 78px;
+    border: 2px solid #C9A84C;
+    pointer-events: none;
+  }
+  /* Corner ornaments */
+  .corner {
+    position: absolute; width: 80px; height: 80px;
+    border-color: #C9A84C; border-style: solid;
+  }
+  .corner-tl { top: 100px; left: 100px; border-width: 4px 0 0 4px; }
+  .corner-tr { top: 100px; right: 100px; border-width: 4px 4px 0 0; }
+  .corner-bl { bottom: 100px; left: 100px; border-width: 0 0 4px 4px; }
+  .corner-br { bottom: 100px; right: 100px; border-width: 0 4px 4px 0; }
+
+  /* ── Logo (top-left quadrant) ────────────────────────────────────────── */
+  .logo-wrap {
+    position: absolute; top: 160px; left: 190px;
+    width: 260px; height: 260px;
+  }
+  .logo-wrap img { width: 100%; height: 100%; object-fit: contain; }
+
+  /* ── PSG text next to logo ───────────────────────────────────────────── */
+  .institution {
+    position: absolute; top: 175px; left: 480px;
+    font-family: 'Montserrat', sans-serif; font-size: 46px; font-weight: 700;
+    color: #1B4D3E; letter-spacing: 4px; text-transform: uppercase;
+  }
+  .institution-sub {
+    position: absolute; top: 245px; left: 480px;
+    font-family: 'Montserrat', sans-serif; font-size: 28px; color: #555;
+    letter-spacing: 2px;
+  }
+
+  /* ── Divider line ────────────────────────────────────────────────────── */
+  .divider-top {
+    position: absolute; top: 470px; left: 150px; right: 150px;
+    height: 1px; background: #C9A84C;
+  }
+
+  /* ── Heading block ───────────────────────────────────────────────────── */
+  .cert-title {
+    position: absolute; top: 510px; width: 100%; text-align: center;
+    font-family: 'Playfair Display', serif; font-size: 110px;
+    font-weight: 700; color: #1B4D3E; letter-spacing: 10px;
+    text-transform: uppercase;
+  }
+  .cert-subtitle {
+    position: absolute; top: 650px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 56px;
+    color: #C9A84C; letter-spacing: 16px; text-transform: uppercase;
+  }
+  .cert-subtitle-line {
+    position: absolute; top: 740px; left: 800px; right: 800px;
+    height: 3px; background: #C9A84C;
+  }
+
+  /* ── Body text ───────────────────────────────────────────────────────── */
+  .preamble {
+    position: absolute; top: 800px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 36px; color: #666;
+    letter-spacing: 2px;
+  }
+
+  /* ── Dynamic field slots (injected by renderer as fields_block) ──────── */
+  /* name_slot  : top ~920px  (y=26.2%,  h=150px)  */
+  /* event_slot : top ~1110px (y=31.6%,  h=80px)   */
+  /* dept_slot  : top ~1200px (y=34.2%,  h=70px)   */
+  /* date_slot  : top ~1290px (y=36.8%,  h=60px)   */
+  .fields-block-wrap {
+    position: absolute; top: 0; left: 0; width: 2480px; height: 3508px;
+    pointer-events: none;
+  }
+
+  /* ── Gold rule beneath name slot ─────────────────────────────────────── */
+  .name-underline {
+    position: absolute; top: 1076px; left: 350px; right: 350px;
+    height: 3px; background: linear-gradient(90deg, transparent, #C9A84C, transparent);
+  }
+
+  /* ── Participation text block ────────────────────────────────────────── */
+  .participation-text {
+    position: absolute; top: 1390px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 34px; color: #444;
+    line-height: 1.7;
+  }
+
+  /* ── Divider mid ─────────────────────────────────────────────────────── */
+  .divider-mid {
+    position: absolute; top: 2200px; left: 150px; right: 150px;
+    height: 1px; background: #C9A84C;
+  }
+
+  /* ── Signature block ─────────────────────────────────────────────────── */
+  .signature-block {
+    position: absolute; bottom: 550px; left: 200px; right: 200px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+  }
+  .sig-col { text-align: center; width: 600px; }
+  .sig-col img { height: 160px; max-width: 520px; object-fit: contain; }
+  .sig-line { width: 100%; height: 2px; background: #1B4D3E; margin-top: 12px; }
+  .sig-label {
+    font-family: 'Montserrat', sans-serif; font-size: 30px; color: #555;
+    margin-top: 14px; letter-spacing: 1px;
+  }
+
+  /* ── QR code ─────────────────────────────────────────────────────────── */
+  .qr-wrap {
+    position: absolute; bottom: 220px; right: 220px;
+    width: 260px; height: 260px;
+  }
+  .qr-wrap img { width: 100%; height: 100%; }
+
+  /* ── Cert number & footer ────────────────────────────────────────────── */
+  .cert-number {
+    position: absolute; bottom: 155px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 26px;
+    color: #999; letter-spacing: 3px;
+  }
+  .footer-line {
+    position: absolute; bottom: 100px; width: 100%; text-align: center;
+    font-family: 'Montserrat', sans-serif; font-size: 22px; color: #bbb;
+  }
 </style>
 </head>
 <body>
-  <div class="border-frame"></div>
-  <div class="inner-border"></div>
-  {% if logo_base64 %}<img class="logo" src="{{ logo_base64 }}" alt="Logo">{% endif %}
-  <div class="header">
-    <h1>Certificate</h1>
-    <h2>of Participation</h2>
+  <!-- Decorative frame -->
+  <div class="border-outer"></div>
+  <div class="border-inner"></div>
+  <div class="corner corner-tl"></div>
+  <div class="corner corner-tr"></div>
+  <div class="corner corner-bl"></div>
+  <div class="corner corner-br"></div>
+
+  <!-- Logo -->
+  <div class="logo-wrap">
+    {% if logo_base64 %}<img src="{{ logo_base64 }}" alt="Club Logo">{% endif %}
   </div>
-  <div class="subtext">This is to certify that</div>
-  <div class="participant-name">{{ slot_values.get('name', participant_name) }}</div>
-  <div class="name-line"></div>
-  <div class="details">
-    has participated in <strong>{{ slot_values.get('event_name', '') }}</strong><br>
-    organized by <strong>{{ slot_values.get('club_name', '') }}</strong>
+  <div class="institution">PSG iTech</div>
+  <div class="institution-sub">Institution of Technology</div>
+
+  <!-- Top divider -->
+  <div class="divider-top"></div>
+
+  <!-- Title -->
+  <div class="cert-title">Certificate</div>
+  <div class="cert-subtitle">of Participation</div>
+  <div class="cert-subtitle-line"></div>
+
+  <!-- Preamble text -->
+  <div class="preamble">This is to certify that</div>
+
+  <!-- Dynamic field slots — renderer injects positioned divs here -->
+  <div class="fields-block-wrap">{{ fields_block }}</div>
+
+  <!-- Gold underline beneath the name area -->
+  <div class="name-underline"></div>
+
+  <!-- Participation body text -->
+  <div class="participation-text">
+    has successfully participated in the event organised by<br>
+    PSG iTech — College of Technology, Coimbatore.
   </div>
-  <div class="cert-number">Certificate No: {{ cert_number }}</div>
-  <div class="fields-container">{{ fields_block }}</div>
+
+  <!-- Mid divider -->
+  <div class="divider-mid"></div>
+
+  <!-- Signature block -->
   <div class="signature-block">
-    <div class="sig-item">
+    <div class="sig-col">
       {% if signature_base64 %}<img src="{{ signature_base64 }}" alt="Signature">{% endif %}
       <div class="sig-line"></div>
-      <div class="sig-label">Coordinator</div>
+      <div class="sig-label">Club Coordinator</div>
     </div>
-    <div class="sig-item">
+    <div class="sig-col">
       <div class="sig-line"></div>
       <div class="sig-label">Faculty Advisor</div>
     </div>
   </div>
-  <div class="qr-code">{% if qr_base64 %}<img src="{{ qr_base64 }}" alt="QR">{% endif %}</div>
-  <div class="footer">Verify at {{ cert_number }} | PSG iTech</div>
+
+  <!-- QR code -->
+  <div class="qr-wrap">
+    {% if qr_base64 %}<img src="{{ qr_base64 }}" alt="Verify QR">{% endif %}
+  </div>
+
+  <!-- Certificate number & footer -->
+  <div class="cert-number">Certificate No: {{ cert_number }}</div>
+  <div class="footer-line">Verify this certificate at PSG iTech Certificate Portal&nbsp;&nbsp;|&nbsp;&nbsp;{{ cert_number }}</div>
 </body>
 </html>

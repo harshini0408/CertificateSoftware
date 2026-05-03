@@ -70,6 +70,7 @@ class Template(Document):
     font_color: Optional[str] = None
 
     is_preset: bool = False
+    source_preset_id: Optional[PydanticObjectId] = None
     preview_url: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
