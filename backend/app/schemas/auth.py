@@ -34,6 +34,16 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+class DepartmentPasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+    otp_code: str = Field(..., min_length=4, max_length=4)
+
+
+class DepartmentPasswordVerifyRequest(BaseModel):
+    otp_code: str = Field(..., min_length=4, max_length=4)
+
+
 class TokenResponse(BaseModel):
     message: str = "ok"
 

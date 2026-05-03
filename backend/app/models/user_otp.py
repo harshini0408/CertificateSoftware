@@ -10,6 +10,7 @@ class OTPRequest(Document):
 
     email: Indexed(str)  # type: ignore[valid-type]
     otp_code: str
+    purpose: str = "password_reset"
     expires_at: datetime
     is_verified: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)

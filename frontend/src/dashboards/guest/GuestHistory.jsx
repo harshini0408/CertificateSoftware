@@ -1,5 +1,5 @@
-import React from 'react'
-import { useQuery } from '@tanstack/react-query'
+import React, { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useToastStore } from '../../store/uiStore'
 import axiosInstance from '../../utils/axiosInstance'
@@ -14,8 +14,196 @@ const DownloadIcon = ({ className }) => (
   </svg>
 )
 
+const EyeIcon = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"></path>
+    <circle cx="12" cy="12" r="3"></circle>
+  </svg>
+)
+
+function formatDateTime(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function SessionDetailModal({ sessionId, onClose }) {
+  const addToast = useToastStore((s) => s.addToast)
+  const queryClient = useQueryClient()
+
+  const sendEmailsMutation = useMutation({
+    mutationFn: async (rowIndexes) => {
+      const payload = rowIndexes?.length ? { row_indexes: rowIndexes } : undefined
+      const res = await axiosInstance.post(`/guest/sessions/${sessionId}/send-emails`, payload)
+      return res.data
+    },
+    onSuccess: async () => {
+      addToast({ type: 'success', message: 'Email delivery queued for this session.' })
+      await queryClient.invalidateQueries({ queryKey: ['guestSessionDetail', sessionId] })
+      await queryClient.invalidateQueries({ queryKey: ['guestHistory'] })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to send emails for this session.' })
+    },
+  })
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['guestSessionDetail', sessionId],
+    queryFn: async () => {
+      const res = await axiosInstance.get(`/guest/sessions/${sessionId}`)
+      return res.data
+    },
+    enabled: !!sessionId,
+  })
+
+  const sendableCertificates = (data?.certificates || []).filter((cert) => {
+    const status = (cert?.status || 'generated').toLowerCase()
+    return status !== 'emailed' && !cert?.sent_at
+  })
+  const hasUnsentEmails = sendableCertificates.length > 0
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-6xl rounded-2xl bg-white shadow-2xl overflow-hidden">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-4">
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">Session Details</h3>
+            <p className="text-sm text-gray-500">
+              {data?.event_name || 'Guest session'} · {data?.created_at ? formatDateTime(data.created_at) : '—'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => sendEmailsMutation.mutate()}
+              disabled={!hasUnsentEmails || sendEmailsMutation.isPending}
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sendEmailsMutation.isPending ? 'Sending...' : 'Send Unsent Emails'}
+            </button>
+            <button onClick={onClose} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50">
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[80vh] overflow-y-auto p-6">
+          {isLoading && <div className="py-16 text-center text-gray-400">Loading certificate details...</div>}
+          {isError && <div className="py-16 text-center text-red-500 font-semibold">Failed to load session details.</div>}
+
+          {!isLoading && !isError && data && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Certificates</p>
+                  <p className="mt-2 text-2xl font-black text-gray-900">{data.cert_count || 0}</p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Emails</p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900">{data.emails_sent ? 'Sent' : 'Not sent yet'}</p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Credit Points</p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900">
+                    {data.guest_allocate_points ? `${data.guest_points_per_cert} per certificate` : 'Not enabled'}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Email Column</p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900 truncate">{data.email_column || 'Not detected'}</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-3 flex items-center justify-between">
+                  <h4 className="text-lg font-bold text-gray-900">Generated Certificates</h4>
+                  <span className="text-sm text-gray-500">{data.cert_count || 0} item(s)</span>
+                </div>
+
+                {!data.certificates?.length ? (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-12 text-center text-gray-500">
+                    No certificate files found for this session.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {data.certificates.map((cert) => (
+                      <div key={cert.cert_number} className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                        <div className="border-b border-gray-100 bg-gray-50 px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-bold text-gray-900">{cert.recipient_name || 'Unnamed recipient'}</p>
+                              <p className="text-xs text-gray-500 break-all">{cert.recipient_email || 'No email found'}</p>
+                            </div>
+                            <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-700">
+                              {cert.cert_number}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="p-4 space-y-3">
+                          <div className="overflow-hidden rounded-xl border border-gray-100 bg-gray-50">
+                            <img
+                              src={axiosInstance.defaults.baseURL ? `${axiosInstance.defaults.baseURL}${cert.preview_url}` : cert.preview_url}
+                              alt={cert.cert_number}
+                              className="h-56 w-full object-contain bg-white"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs text-gray-500">
+                            <span>Status: <span className="font-semibold text-gray-800">{cert.status || 'generated'}</span></span>
+                            <span>{cert.sent_at ? `Sent ${formatDateTime(cert.sent_at)}` : 'Not emailed'}</span>
+                          </div>
+
+                          {cert.error && (
+                            <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{cert.error}</p>
+                          )}
+
+                          <div className={`grid gap-2 ${cert.status === 'emailed' ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                            <a
+                              href={axiosInstance.defaults.baseURL ? `${axiosInstance.defaults.baseURL}${cert.preview_url}` : cert.preview_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                            >
+                              <EyeIcon className="h-4 w-4" /> View
+                            </a>
+                            <a
+                              href={axiosInstance.defaults.baseURL ? `${axiosInstance.defaults.baseURL}${cert.preview_url}` : cert.preview_url}
+                              download={`${cert.cert_number}.png`}
+                              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                            >
+                              <DownloadIcon className="h-4 w-4" /> Download
+                            </a>
+                            {cert.status !== 'emailed' && !cert.sent_at ? (
+                              <button
+                                type="button"
+                                onClick={() => sendEmailsMutation.mutate([cert.index])}
+                                disabled={sendEmailsMutation.isPending}
+                                className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+                                title="Send email for this certificate"
+                              >
+                                Send Email
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function GuestHistory() {
   const addToast = useToastStore((s) => s.addToast)
+  const [selectedSessionId, setSelectedSessionId] = useState(null)
 
   const { data: sessions, isLoading, isError, refetch } = useQuery({
     queryKey: ['guestHistory'],
@@ -42,6 +230,8 @@ export default function GuestHistory() {
       refetch()
     }
   }
+
+  const selectedSession = sessions?.find((session) => session.session_id === selectedSessionId)
 
   if (isLoading) {
     return (
@@ -147,13 +337,22 @@ export default function GuestHistory() {
               </div>
 
               {session.has_downloadable_certs ? (
-                <button
-                  onClick={() => handleDownloadZip(session.session_id, session.event_name)}
-                  className="w-full flex items-center justify-center gap-2 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-100 transition"
-                  title="Download ZIP archive"
-                >
-                  <DownloadIcon className="w-4 h-4" /> Download ZIP
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setSelectedSessionId(session.session_id)}
+                    className="flex items-center justify-center gap-2 py-2 bg-indigo-50 border border-indigo-100 rounded-lg text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition"
+                    title="View certificate details"
+                  >
+                    <EyeIcon className="w-4 h-4" /> View Details
+                  </button>
+                  <button
+                    onClick={() => handleDownloadZip(session.session_id, session.event_name)}
+                    className="flex items-center justify-center gap-2 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-100 transition"
+                    title="Download ZIP archive"
+                  >
+                    <DownloadIcon className="w-4 h-4" /> Download ZIP
+                  </button>
+                </div>
               ) : (
                 <button
                   disabled
@@ -169,6 +368,9 @@ export default function GuestHistory() {
           </div>
         </main>
       </div>
+      {selectedSessionId && (
+        <SessionDetailModal sessionId={selectedSessionId} onClose={() => setSelectedSessionId(null)} />
+      )}
     </div>
   )
 }

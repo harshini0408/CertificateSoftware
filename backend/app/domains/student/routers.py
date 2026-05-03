@@ -210,10 +210,11 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
     }).to_list()
 
     for dc in dept_certs:
+        is_guest_cert = str(dc.cert_number or "").startswith("GUEST-") or str(dc.department or "").lower().startswith("guest event")
         results.append({
             "_id": str(dc.id),
             "cert_number": dc.cert_number,
-            "cert_type": dc.contribution or "participant",
+            "cert_type": "guest" if is_guest_cert else (dc.contribution or "participant"),
             "event_name": "",  # Department events don't have event_name in DeptCertificate
             "club_name": dc.department,
             "issued_at": dc.emailed_at or dc.created_at,

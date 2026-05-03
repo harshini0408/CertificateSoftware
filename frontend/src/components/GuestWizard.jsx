@@ -223,7 +223,7 @@ function Step2({ initialState, onComplete, onBack }) {
       setHeaders(data.headers)
       setRowCount(data.row_count)
       setSelectedCols(new Set())
-      setEmailCol('')
+      setEmailCol(data.email_column || '')
       addToast({ type: 'success', message: `Loaded ${data.row_count} rows, ${data.headers.length} columns.` })
     } catch (err) {
       addToast({ type: 'error', message: err?.response?.data?.detail || 'Parse failed.' })
@@ -325,7 +325,7 @@ function Step2({ initialState, onComplete, onBack }) {
             <div>
               <label className="block text-sm font-semibold text-gray-800 mb-1.5">
                 Email column
-                <span className="ml-1.5 text-xs text-gray-400 font-normal">(optional, required only for Send Emails step)</span>
+                <span className="ml-1.5 text-xs text-gray-400 font-normal">(auto-detected from Excel; you can change it if needed)</span>
               </label>
               <select
                 id="guest-email-col-select"
@@ -742,7 +742,7 @@ function Step4({ rowCount, emailColumn, allocatePoints, pointsPerCert, onAllocat
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm font-semibold text-foreground">Credit Allocation</p>
-              <p className="text-xs text-gray-500">Optionally assign credit points for each generated certificate.</p>
+              <p className="text-xs text-gray-500">Optionally assign credit points for each generated certificate. The student email is taken from the uploaded sheet.</p>
             </div>
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input
@@ -773,7 +773,7 @@ function Step4({ rowCount, emailColumn, allocatePoints, pointsPerCert, onAllocat
             <span className="text-xs text-gray-400">Applies to all rows with a valid student email.</span>
           </div>
           {!emailColumn && (
-            <p className="mt-2 text-xs text-amber-600">Select an Email column in Step 2 to enable credit allocation.</p>
+            <p className="mt-2 text-xs text-amber-600">No email column was detected in the uploaded Excel file.</p>
           )}
         </div>
 
@@ -910,6 +910,13 @@ function Step5({
   }))
 
   const emailStats = emailCounts || { sent: 0, failed: 0, pending: 0, total: 0 }
+  const hasEmailStatusRows = (emailStatuses || []).length > 0
+  const pendingCount = emailStats.pending || (!hasEmailStatusRows && generatedCount > 0 ? generatedCount : 0)
+  const effectiveEmailStats = {
+    ...emailStats,
+    pending: pendingCount,
+    total: emailStats.total || generatedCount,
+  }
 
   return (
     <StepCard
@@ -926,15 +933,15 @@ function Step5({
             <div className="text-xs font-semibold text-gray-500">Email Delivery</div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
               <div>
-                <div className="text-lg font-bold text-green-600">{emailStats.sent}</div>
+                <div className="text-lg font-bold text-green-600">{effectiveEmailStats.sent}</div>
                 <div className="text-[11px] text-gray-400">Sent</div>
               </div>
               <div>
-                <div className="text-lg font-bold text-amber-600">{emailStats.pending}</div>
+                <div className="text-lg font-bold text-amber-600">{effectiveEmailStats.pending}</div>
                 <div className="text-[11px] text-gray-400">Pending</div>
               </div>
               <div>
-                <div className="text-lg font-bold text-red-500">{emailStats.failed}</div>
+                <div className="text-lg font-bold text-red-500">{effectiveEmailStats.failed}</div>
                 <div className="text-[11px] text-gray-400">Failed</div>
               </div>
             </div>
@@ -952,7 +959,7 @@ function Step5({
               </div>
               <div>
                 <p className="text-sm font-bold text-gray-800">Send via Email</p>
-                <p className="text-xs text-gray-500">Email each certificate to its recipient</p>
+                <p className="text-xs text-gray-500">Email each certificate to the recipient address read from the Excel upload</p>
               </div>
             </div>
             {emailResult && (
@@ -969,16 +976,16 @@ function Step5({
               id="guest-send-emails-btn"
               className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
               onClick={() => sendEmails()}
-              disabled={sending || !emailColumn || emailStats.pending === 0}
+              disabled={sending || !emailColumn || pendingCount === 0}
             >
               {sending ? (
                 <><LoadingSpinner size="sm" label="" /> Sending…</>
               ) : (
-                `✉ Send Remaining (${emailStats.pending})`
+                `✉ Send to Uploaded Emails (${pendingCount})`
               )}
             </button>
             {!emailColumn && (
-              <p className="mt-2 text-xs text-amber-600">Choose an Email column in Step 2 to enable sending.</p>
+              <p className="mt-2 text-xs text-amber-600">No email column detected in the uploaded Excel file.</p>
             )}
           </div>
 
@@ -1241,8 +1248,9 @@ export default function GuestWizard({ eventName }) {
           onBack={() => setStep(4)}
           onComplete={({ generated }) => {
             setGeneratedCount(generated)
+            const pending = Math.max(0, Number(generated) || 0)
             setEmailStatuses([])
-            setEmailCounts({ sent: 0, failed: 0, pending: 0, total: 0 })
+            setEmailCounts({ sent: 0, failed: 0, pending, total: pending })
             setStep(6)
           }}
         />

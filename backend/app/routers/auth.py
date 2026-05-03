@@ -17,13 +17,15 @@ from ..schemas.auth import (
     LoginResponse,
     MeResponse,
     PasswordChangeRequest,
+    DepartmentPasswordChangeRequest,
+    DepartmentPasswordVerifyRequest,
     TokenResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     VerifyOTPRequest,
     ResetPasswordRequest,
 )
-from ..services.email_service import send_otp_email
+from ..services.email_service import send_otp_email, send_department_password_otp_email
 from ..services.auth_service import (
     authenticate_user,
     blacklist_token,
@@ -51,6 +53,17 @@ def _club_assets_configured(club: Club) -> bool:
     has_logo = bool(getattr(assets, "logo_path", None) or getattr(assets, "logo_url", None))
     has_signature = bool(getattr(assets, "signature_path", None) or getattr(assets, "signature_url", None))
     return has_logo and has_signature
+
+
+def _masked_email(email: str) -> str:
+    parts = email.split("@")
+    name = parts[0]
+    domain = parts[1]
+    if len(name) > 2:
+        masked_name = name[0] + "*" * (len(name) - 2) + name[-1]
+    else:
+        masked_name = name[0] + "*"
+    return f"{masked_name}@{domain}"
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -146,6 +159,86 @@ async def change_password(
     return TokenResponse(message="Password updated")
 
 
+@router.post("/department-password/send-otp", response_model=TokenResponse)
+async def send_department_password_otp(current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.DEPT_COORDINATOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Department access only")
+    if not current_user.email:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No registered email found")
+
+    email = current_user.email.strip().lower()
+    otp = f"{random.randint(1000, 9999)}"
+    expires_at = datetime.utcnow() + timedelta(minutes=10)
+
+    await OTPRequest.find({"email": email, "purpose": "department_password_change"}).delete()
+
+    await OTPRequest(
+        email=email,
+        otp_code=otp,
+        purpose="department_password_change",
+        expires_at=expires_at,
+    ).insert()
+
+    success = await send_department_password_otp_email(email, otp)
+    if not success:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Failed to send OTP email")
+
+    return TokenResponse(message=f"OTP sent to your registered email: {_masked_email(email)}")
+
+
+@router.post("/department-password/verify-otp", response_model=TokenResponse)
+async def verify_department_password_otp(
+    body: DepartmentPasswordVerifyRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != UserRole.DEPT_COORDINATOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Department access only")
+
+    email = (current_user.email or "").strip().lower()
+    now = datetime.utcnow()
+    otp_req = await OTPRequest.find_one({
+        "email": email,
+        "otp_code": body.otp_code.strip(),
+        "purpose": "department_password_change",
+        "expires_at": {"$gt": now},
+    })
+    if not otp_req:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired OTP")
+
+    otp_req.is_verified = True
+    await otp_req.save()
+    return TokenResponse(message="OTP verified successfully")
+
+
+@router.patch("/department-password", response_model=TokenResponse)
+async def change_department_password(
+    body: DepartmentPasswordChangeRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != UserRole.DEPT_COORDINATOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Department access only")
+
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
+
+    email = (current_user.email or "").strip().lower()
+    now = datetime.utcnow()
+    otp_req = await OTPRequest.find_one({
+        "email": email,
+        "otp_code": body.otp_code.strip(),
+        "purpose": "department_password_change",
+        "expires_at": {"$gt": now},
+        "is_verified": True,
+    })
+    if not otp_req:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP verification required or session expired")
+
+    current_user.password_hash = hash_password(body.new_password)
+    await current_user.save()
+    await otp_req.delete()
+    return TokenResponse(message="Password updated")
+
+
 @router.get("/me", response_model=MeResponse)
 async def me(current_user: User = Depends(get_current_user)):
     """Return the currently authenticated user's profile from the access-token cookie.
@@ -198,11 +291,12 @@ async def forgot_password(body: ForgotPasswordRequest):
     otp = f"{random.randint(1000, 9999)}"
     expires_at = datetime.utcnow() + timedelta(minutes=10)
 
-    await OTPRequest.find(OTPRequest.email == email).delete()
+    await OTPRequest.find({"email": email, "purpose": "password_reset"}).delete()
 
     await OTPRequest(
         email=email,
         otp_code=otp,
+        purpose="password_reset",
         expires_at=expires_at,
     ).insert()
 
@@ -210,17 +304,8 @@ async def forgot_password(body: ForgotPasswordRequest):
     if not success:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Failed to send OTP email")
 
-    parts = email.split("@")
-    name = parts[0]
-    domain = parts[1]
-    if len(name) > 2:
-        masked_name = name[0] + "*" * (len(name) - 2) + name[-1]
-    else:
-        masked_name = name[0] + "*"
-    masked_email = f"{masked_name}@{domain}"
-
     return ForgotPasswordResponse(
-        message=f"OTP sent to your registered email: {masked_email}",
+        message=f"OTP sent to your registered email: {_masked_email(email)}",
         email=email,
     )
 
@@ -228,11 +313,12 @@ async def forgot_password(body: ForgotPasswordRequest):
 @router.post("/verify-otp", response_model=TokenResponse)
 async def verify_otp(body: VerifyOTPRequest):
     now = datetime.utcnow()
-    otp_req = await OTPRequest.find_one(
-        OTPRequest.email == body.email.strip().lower(),
-        OTPRequest.otp_code == body.otp_code.strip(),
-        OTPRequest.expires_at > now,
-    )
+    otp_req = await OTPRequest.find_one({
+        "email": body.email.strip().lower(),
+        "otp_code": body.otp_code.strip(),
+        "expires_at": {"$gt": now},
+        "purpose": "password_reset",
+    })
     if not otp_req:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired OTP")
 
@@ -244,12 +330,13 @@ async def verify_otp(body: VerifyOTPRequest):
 @router.post("/reset-password", response_model=TokenResponse)
 async def reset_password(body: ResetPasswordRequest):
     now = datetime.utcnow()
-    otp_req = await OTPRequest.find_one(
-        OTPRequest.email == body.email.strip().lower(),
-        OTPRequest.otp_code == body.otp_code.strip(),
-        OTPRequest.expires_at > now,
-        OTPRequest.is_verified == True,
-    )
+    otp_req = await OTPRequest.find_one({
+        "email": body.email.strip().lower(),
+        "otp_code": body.otp_code.strip(),
+        "expires_at": {"$gt": now},
+        "is_verified": True,
+        "purpose": "password_reset",
+    })
     if not otp_req:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP verification required or session expired")
 

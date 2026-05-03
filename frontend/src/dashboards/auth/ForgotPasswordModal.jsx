@@ -97,10 +97,10 @@ export default function ForgotPasswordModal({ isOpen, onClose }) {
           {step === 'email' && (
             <form onSubmit={handleSendOTP} className="space-y-6">
               <p className="text-sm text-gray-500 leading-relaxed">
-                Enter your Faculty ID (username). We will send a 4-digit OTP to your registered email.
+                Enter your Faculty ID or email. We will send a 4-digit OTP to your registered email.
               </p>
               <div>
-                <label className="form-label">Faculty ID / Username</label>
+                <label className="form-label">Faculty ID / Username / Email</label>
                 <input
                   type="text"
                   required

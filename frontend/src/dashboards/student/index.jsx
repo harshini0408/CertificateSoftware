@@ -33,6 +33,7 @@ const Icons = {
 
 // ── Credit type badge colours ─────────────────────────────────────────────────
 const TYPE_COLORS = {
+  guest:       'bg-violet-100 text-violet-700',
   participant: 'bg-blue-100 text-blue-700',
   coordinator: 'bg-gray-100 text-gray-600',
   winner_1st:  'bg-amber-100 text-amber-700',

@@ -66,6 +66,7 @@ export default function Login() {
 
   const [showPassword, setShowPassword] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [loginMode, setLoginMode] = useState('username')
 
   const loginMutation = useLogin()
   const logoutMutation = useLogout()
@@ -154,6 +155,23 @@ export default function Login() {
             Sign in to your account to continue
           </p>
 
+          <div className="mb-5 flex rounded-xl border border-gray-200 bg-gray-50 p-1 text-sm font-medium">
+            <button
+              type="button"
+              onClick={() => setLoginMode('username')}
+              className={`flex-1 rounded-lg px-3 py-2 transition-colors ${loginMode === 'username' ? 'bg-white text-navy shadow-sm' : 'text-gray-500 hover:text-navy'}`}
+            >
+              Faculty ID
+            </button>
+            <button
+              type="button"
+              onClick={() => setLoginMode('email')}
+              className={`flex-1 rounded-lg px-3 py-2 transition-colors ${loginMode === 'email' ? 'bg-white text-navy shadow-sm' : 'text-gray-500 hover:text-navy'}`}
+            >
+              Email
+            </button>
+          </div>
+
           {/* Form */}
           <form
             onSubmit={handleSubmit(onSubmit)}
@@ -163,19 +181,22 @@ export default function Login() {
             {/* Username */}
             <div>
               <label htmlFor="username" className="form-label">
-                Username
+                {loginMode === 'email' ? 'Email' : 'Username'}
               </label>
               <input
                 id="username"
-                type="text"
-                autoComplete="username"
+                type={loginMode === 'email' ? 'email' : 'text'}
+                autoComplete={loginMode === 'email' ? 'email' : 'username'}
                 autoFocus
-                placeholder="Enter your faculty ID"
+                placeholder={loginMode === 'email' ? 'Enter your email address' : 'Enter your faculty ID'}
                 className={`form-input ${errors.username ? 'form-input-error' : ''}`}
                 disabled={busy}
                 {...register('username', {
-                  required: 'Faculty ID is required.',
-                  minLength: { value: 3, message: 'Username is too short.' },
+                  required: loginMode === 'email' ? 'Email is required.' : 'Faculty ID is required.',
+                  minLength: loginMode === 'email' ? undefined : { value: 3, message: 'Username is too short.' },
+                  pattern: loginMode === 'email'
+                    ? { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email address.' }
+                    : undefined,
                 })}
               />
               {errors.username && (

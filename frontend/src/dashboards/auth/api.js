@@ -204,3 +204,60 @@ export function useResetPassword() {
     },
   })
 }
+
+export function useRequestDeptPasswordOtp() {
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: () => axiosInstance.post('/auth/department-password/send-otp'),
+    onSuccess: (res) => {
+      addToast({ type: 'info', message: res.data.message })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to send verification OTP.',
+      })
+    },
+  })
+}
+
+export function useVerifyDeptPasswordOtp() {
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ otp_code }) =>
+      axiosInstance.post('/auth/department-password/verify-otp', { otp_code }),
+    onSuccess: (res) => {
+      addToast({ type: 'success', message: res.data.message })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Invalid or expired OTP.',
+      })
+    },
+  })
+}
+
+export function useChangeDeptPassword() {
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ current_password, new_password, otp_code }) =>
+      axiosInstance.patch('/auth/department-password', {
+        current_password,
+        new_password,
+        otp_code,
+      }),
+    onSuccess: () => {
+      addToast({ type: 'success', message: 'Password changed successfully.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to change password. Please try again.',
+      })
+    },
+  })
+}

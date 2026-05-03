@@ -11,7 +11,11 @@ import StatusBadge from '../../components/StatusBadge'
 import FileUpload from '../../components/FileUpload'
 import LoadingSpinner from '../../components/LoadingSpinner'
 
-import { useChangePassword } from '../auth/api'
+import {
+  useChangeDeptPassword,
+  useRequestDeptPasswordOtp,
+  useVerifyDeptPasswordOtp,
+} from '../auth/api'
 
 import {
   useDeptDashboard,
@@ -305,10 +309,14 @@ function EventDetailView({ eventId }) {
 function SettingsTab() {
   const { data: assets, isLoading: assetsLoading } = useDeptAssets()
   const updateAssets = useUpdateDeptAssets()
-  const changePassword = useChangePassword()
+  const requestDeptPasswordOtp = useRequestDeptPasswordOtp()
+  const verifyDeptPasswordOtp = useVerifyDeptPasswordOtp()
+  const changeDeptPassword = useChangeDeptPassword()
 
   const [logoFile, setLogoFile] = useState(null)
   const [signatureFile, setSignatureFile] = useState(null)
+  const [otpRequested, setOtpRequested] = useState(false)
+  const [otpVerified, setOtpVerified] = useState(false)
 
   const [logoPreview, setLogoPreview] = useState(null)
   const [signaturePreview, setSignaturePreview] = useState(null)
@@ -361,15 +369,43 @@ function SettingsTab() {
       current_password: '',
       new_password: '',
       confirm_password: '',
+      otp_code: '',
     },
   })
 
-  const onPasswordSubmit = (values) => {
-    changePassword.mutate(
-      { current_password: values.current_password, new_password: values.new_password },
-      { onSuccess: () => reset() },
-    )
-  }
+  const handleRequestOtp = handleSubmit(async () => {
+    await requestDeptPasswordOtp.mutateAsync()
+    setOtpRequested(true)
+    setOtpVerified(false)
+  })
+
+  const handleVerifyOtp = handleSubmit(async (values) => {
+    await verifyDeptPasswordOtp.mutateAsync({ otp_code: values.otp_code })
+    setOtpVerified(true)
+  })
+
+  const onPasswordSubmit = handleSubmit(async (values) => {
+    if (!otpVerified) return
+    await changeDeptPassword.mutateAsync({
+      current_password: values.current_password,
+      new_password: values.new_password,
+      otp_code: values.otp_code,
+    })
+    reset({
+      current_password: '',
+      new_password: '',
+      confirm_password: '',
+      otp_code: '',
+    })
+    setOtpRequested(false)
+    setOtpVerified(false)
+  })
+
+  const handleFormSubmit = otpVerified
+    ? onPasswordSubmit
+    : otpRequested
+      ? handleVerifyOtp
+      : handleRequestOtp
 
   if (assetsLoading) {
     return <LoadingSpinner fullPage label="Loading settings..." />
@@ -426,7 +462,7 @@ function SettingsTab() {
 
       <div className="card p-5">
         <h2 className="section-title mb-4">Change Password</h2>
-        <form onSubmit={handleSubmit(onPasswordSubmit)} className="space-y-4">
+        <form onSubmit={handleFormSubmit} className="space-y-4">
           <div>
             <label className="form-label">Current Password</label>
             <input
@@ -457,9 +493,64 @@ function SettingsTab() {
             />
             {errors.confirm_password && <p className="form-error">{errors.confirm_password.message}</p>}
           </div>
-          <button type="submit" className="btn-primary" disabled={changePassword.isPending}>
-            {changePassword.isPending ? 'Updating...' : 'Change Password'}
-          </button>
+
+          {otpRequested && (
+            <div>
+              <label className="form-label">OTP Code</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="Enter the 4-digit code"
+                className={`form-input text-center tracking-[0.45em] ${errors.otp_code ? 'form-input-error' : ''}`}
+                {...register('otp_code', {
+                  required: otpVerified ? false : 'OTP code is required',
+                  minLength: { value: 4, message: 'OTP must be 4 digits' },
+                  maxLength: { value: 4, message: 'OTP must be 4 digits' },
+                  pattern: { value: /^\d{4}$/, message: 'OTP must be 4 digits' },
+                })}
+                disabled={verifyDeptPasswordOtp.isPending || changeDeptPassword.isPending}
+              />
+              {errors.otp_code && <p className="form-error">{errors.otp_code.message}</p>}
+            </div>
+          )}
+
+          {!otpRequested ? (
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={requestDeptPasswordOtp.isPending}
+              >
+                {requestDeptPasswordOtp.isPending ? 'Sending OTP...' : 'Send OTP to Email'}
+              </button>
+            </div>
+          ) : !otpVerified ? (
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleRequestOtp}
+                disabled={requestDeptPasswordOtp.isPending}
+              >
+                {requestDeptPasswordOtp.isPending ? 'Resending...' : 'Resend OTP'}
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={verifyDeptPasswordOtp.isPending}
+              >
+                {verifyDeptPasswordOtp.isPending ? 'Verifying...' : 'Verify OTP'}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-end gap-3">
+              <p className="text-xs font-medium text-green-700">OTP verified. You can change the password now.</p>
+              <button type="submit" className="btn-primary" disabled={changeDeptPassword.isPending}>
+                {changeDeptPassword.isPending ? 'Updating...' : 'Change Password'}
+              </button>
+            </div>
+          )}
         </form>
       </div>
     </div>

@@ -280,3 +280,26 @@ async def send_otp_email(recipient_email: str, otp_code: str) -> bool:
     except Exception as exc:
         logger.error("send_otp_email failed: %s", exc)
         return False
+
+
+async def send_department_password_otp_email(recipient_email: str, otp_code: str) -> bool:
+    """Send department password-change OTP email."""
+    try:
+        msg = MIMEMultipart()
+        msg["To"] = recipient_email
+        msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
+        msg["Subject"] = "Department Password Change OTP"
+
+        body = (
+            f"Your OTP for department password change is: {otp_code}\n"
+            "This code will expire in 10 minutes.\n"
+            "If you did not request this, please ignore this email."
+        )
+        msg.attach(MIMEText(body, "plain"))
+
+        provider = get_email_provider()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, provider.send, msg)
+    except Exception as exc:
+        logger.error("send_department_password_otp_email failed: %s", exc)
+        return False
