@@ -154,13 +154,16 @@ async def list_tutor_students(current_user: User = Depends(require_role(UserRole
         seen.add(identity)
 
         linked = await _linked_credit_docs_for_tutor(d, tutor_email)
-        total, _, _, _ = await _rollup_credit_docs(linked)
+        total, _, semester_totals, current_semester = await _rollup_credit_docs(linked)
+        current_total = total
+        if current_semester:
+            current_total = int(semester_totals.get(current_semester, 0))
         rows.append(
             {
                 "student_name": d.student_name,
                 "registration_number": d.registration_number,
                 "student_email": d.student_email,
-                "total_credits": total,
+                "total_credits": current_total,
                 "department": d.department,
                 "batch": d.batch,
                 "section": d.section,
@@ -188,6 +191,9 @@ async def get_tutor_student_detail(
 
     linked_docs = await _linked_credit_docs_for_tutor(doc, tutor_email)
     total_credits, rolled_history, semester_totals, current_semester = await _rollup_credit_docs(linked_docs)
+    current_total = total_credits
+    if current_semester:
+        current_total = int(semester_totals.get(current_semester, 0))
 
     cert_points_map: Dict[str, int] = {
         entry.cert_number: int(entry.points_awarded or 0)
@@ -267,7 +273,7 @@ async def get_tutor_student_detail(
         "department": doc.department,
         "batch": doc.batch,
         "section": doc.section,
-        "total_credits": total_credits,
+        "total_credits": current_total,
         "current_semester": current_semester,
         "semester_totals": [
             {"semester": sem, "total_credits": total}

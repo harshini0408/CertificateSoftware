@@ -851,25 +851,25 @@ async def _send_guest_emails_for_session(
                 club_name="Guest Event",
                 png_path=cert_path,
             )
-                if success:
-                    entry["status"] = "emailed"
-                    entry["sent_at"] = datetime.utcnow()
-                    entry["error"] = None
-                    
-                    # Award credits after successful email
-                    if session.guest_allocate_points and session.guest_points_per_cert > 0:
-                        try:
-                            await _award_guest_credits(
-                                cert_number=cert_number,
-                                student_email=recipient_email,
-                                student_name=recipient_name,
-                                points=session.guest_points_per_cert,
-                                event_name=session.event_name,
-                            )
-                        except Exception as exc:
-                            logger.error("Failed to award credits for %s after email: %s", recipient_email, exc)
+            if success:
+                entry["status"] = "emailed"
+                entry["sent_at"] = datetime.utcnow()
+                entry["error"] = None
 
-                    existing = await DeptCertificate.find_one({"cert_number": cert_number})
+                # Award credits after successful email
+                if session.guest_allocate_points and session.guest_points_per_cert > 0:
+                    try:
+                        await _award_guest_credits(
+                            cert_number=cert_number,
+                            student_email=recipient_email,
+                            student_name=recipient_name,
+                            points=session.guest_points_per_cert,
+                            event_name=session.event_name,
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to award credits for %s after email: %s", recipient_email, exc)
+
+                existing = await DeptCertificate.find_one({"cert_number": cert_number})
                 if existing:
                     await existing.set({
                         "emailed_at": entry["sent_at"],

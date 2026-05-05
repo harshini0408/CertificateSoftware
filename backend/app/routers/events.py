@@ -93,13 +93,24 @@ def _event_response(e: Event, cert_count: int = 0) -> EventResponse:
 @router.get("", response_model=List[EventResponse])
 async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_club_access)):
     events = await Event.find(Event.club_id == club_id).to_list()
+    event_ids = [e.id for e in events]
+    certs = await Certificate.find({"event_id": {"$in": event_ids}}).to_list() if event_ids else []
+    certs_by_event: dict[str, list[Certificate]] = {}
+    for cert in certs:
+        certs_by_event.setdefault(str(cert.event_id), []).append(cert)
+
     responses = []
     for e in events:
+        event_certs = certs_by_event.get(str(e.id), [])
+        if not event_certs:
+            continue
+        if any(cert.status != CertStatus.EMAILED for cert in event_certs):
+            continue
         actual_count = await Participant.find(Participant.event_id == e.id).count()
         if actual_count != e.participant_count:
             await e.set({"participant_count": actual_count})
             e = await Event.get(e.id)
-        cert_count = await _count_event_certificates(e.id)
+        cert_count = len(event_certs)
         responses.append(_event_response(e, cert_count=cert_count))
     return responses
 

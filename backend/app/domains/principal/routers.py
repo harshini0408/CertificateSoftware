@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ...core.dependencies import require_role
 from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
-from ...models.certificate import Certificate
+from ...models.certificate import Certificate, CertStatus
 from ...models.club import Club
 from ...models.event import Event
 from ...models.dept_event import DeptEvent
@@ -284,6 +284,10 @@ async def get_events_overview(
 
         for event in club_events:
             event_certs = certs_by_event.get(str(event.id), [])
+            if not event_certs:
+                continue
+            if any(cert.status != CertStatus.EMAILED for cert in event_certs):
+                continue
 
             participant_map = {}
             for cert in event_certs:
@@ -335,6 +339,10 @@ async def get_events_overview(
 
         for event in dept_events:
             event_certs = certs_by_event.get(str(event.id), [])
+            if not event_certs:
+                continue
+            if any(not cert.emailed_at for cert in event_certs):
+                continue
 
             participant_map = {}
             for cert in event_certs:

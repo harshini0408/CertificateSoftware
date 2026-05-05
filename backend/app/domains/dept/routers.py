@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from PIL import Image, ImageDraw, ImageFont
@@ -64,6 +64,11 @@ class DeptEventCreateRequest(BaseModel):
 class DeptEventGenerateRequest(BaseModel):
     allocate_points: bool = False
     manual_points: int = 0
+
+
+class DeptEventAllocationRequest(BaseModel):
+    allocate_points: bool = False
+    points_per_cert: int = 0
 
 
 class DeptEventFieldMappingRequest(BaseModel):
@@ -657,15 +662,30 @@ async def get_dept_dashboard(
         {"event_id": {"$in": event_ids}},
     ).to_list() if event_ids else []
 
-    participants = {f"{(c.name or '').strip().lower()}|{(c.class_name or '').strip().lower()}" for c in certs if c.name}
+    certs_by_event: dict[str, list[DeptCertificate]] = {}
+    for cert in certs:
+        certs_by_event.setdefault(str(cert.event_id or ""), []).append(cert)
 
-    recent_events = [_event_response(evt) for evt in events[:5]]
+    completed_events = []
+    for evt in events:
+        event_certs = certs_by_event.get(str(evt.id), [])
+        if not event_certs:
+            continue
+        if any(not c.emailed_at for c in event_certs):
+            continue
+        completed_events.append(evt)
+
+    completed_event_ids = [str(evt.id) for evt in completed_events]
+    completed_certs = [c for c in certs if str(c.event_id or "") in set(completed_event_ids)]
+    participants = {f"{(c.name or '').strip().lower()}|{(c.class_name or '').strip().lower()}" for c in completed_certs if c.name}
+
+    recent_events = [_event_response(evt) for evt in completed_events[:5]]
 
     return {
         "department": department,
         "stats": {
-            "total_events": len(events),
-            "total_certificates_issued": len(certs),
+            "total_events": len(completed_events),
+            "total_certificates_issued": len(completed_certs),
             "total_participants": len(participants),
         },
         "recent_events": recent_events,
@@ -682,7 +702,26 @@ async def list_dept_events(
         DeptEvent.department == department,
         DeptEvent.created_by_user_id == user_id,
     ).sort(-DeptEvent.created_at).to_list()
-    return [_event_response(evt) for evt in events]
+    event_ids = [str(evt.id) for evt in events]
+    certs = await DeptCertificate.find(
+        DeptCertificate.department == department,
+        {"event_id": {"$in": event_ids}},
+    ).to_list() if event_ids else []
+
+    certs_by_event: dict[str, list[DeptCertificate]] = {}
+    for cert in certs:
+        certs_by_event.setdefault(str(cert.event_id or ""), []).append(cert)
+
+    completed_events = []
+    for evt in events:
+        event_certs = certs_by_event.get(str(evt.id), [])
+        if not event_certs:
+            continue
+        if any(not c.emailed_at for c in event_certs):
+            continue
+        completed_events.append(evt)
+
+    return [_event_response(evt) for evt in completed_events]
 
 
 @router.get("/dept/events/{event_id}")
@@ -1059,6 +1098,7 @@ async def generate_dept_event_certificate_preview(
 @router.post("/dept/events/{event_id}/certificates/preview/approve")
 async def approve_dept_event_certificate_preview(
     event_id: str,
+    payload: Optional[DeptEventAllocationRequest] = Body(default=None),
     current_user: User = Depends(require_role(UserRole.DEPT_COORDINATOR)),
 ):
     department = _normalize_department(current_user.department)
@@ -1082,6 +1122,18 @@ async def approve_dept_event_certificate_preview(
         "preview_approved_at": now,
         "preview_approved_by_user_id": str(current_user.id),
     })
+
+    if payload is not None:
+        allocate_points = bool(payload.allocate_points)
+        points_per_cert = int(payload.points_per_cert or 0)
+        if points_per_cert < 0:
+            points_per_cert = 0
+        if not allocate_points:
+            points_per_cert = 0
+        await evt.set({
+            "allocate_points": allocate_points,
+            "points_per_cert": points_per_cert,
+        })
 
     return {
         "message": "Preview approved. You can now generate certificates for this event.",
@@ -1279,6 +1331,8 @@ async def send_dept_event_certificates(
 
     sent = 0
     failed = 0
+    should_allocate = bool(evt.allocate_points)
+    points_per_cert = int(evt.points_per_cert or 0)
     for cert in sendable:
         local_path = storage_url_to_path(cert.png_url)
         if not local_path or not Path(local_path).exists():
@@ -1299,10 +1353,10 @@ async def send_dept_event_certificates(
             cert.emailed_at = datetime.utcnow()
             cert.email_error = None
             sent += 1
-            
-            # Award credits if manually allocating
-            if payload.allocateCredits and payload.manualPointsPerCert:
-                await _award_manual_dept_credits(evt, cert, payload.manualPointsPerCert)
+
+            # Award credits using the event allocation settings
+            if should_allocate and points_per_cert > 0:
+                await _award_manual_dept_credits(evt, cert, points_per_cert)
         else:
             cert.email_error = "Email delivery failed"
             failed += 1
@@ -1352,10 +1406,10 @@ async def send_single_dept_event_certificate(
         cert.emailed_at = datetime.utcnow()
         cert.email_error = None
         await cert.save()
-        
-        # Award credits if manually allocating
-        if payload.allocateCredits and payload.manualPointsPerCert:
-            await _award_manual_dept_credits(evt, cert, payload.manualPointsPerCert)
+
+        # Award credits using the event allocation settings
+        if evt.allocate_points and int(evt.points_per_cert or 0) > 0:
+            await _award_manual_dept_credits(evt, cert, int(evt.points_per_cert or 0))
         
         return {"message": "Certificate email sent successfully."}
 

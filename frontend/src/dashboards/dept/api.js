@@ -252,8 +252,8 @@ export function useApproveDeptEventCertificatePreview(eventId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: async () => {
-      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/preview/approve`)
+    mutationFn: async (payload) => {
+      const { data } = await axiosInstance.post(`/dept/events/${eventId}/certificates/preview/approve`, payload || {})
       return data
     },
     onSuccess: (data) => {

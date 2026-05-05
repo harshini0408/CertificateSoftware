@@ -69,13 +69,13 @@ export default function DeptCertificateIssue({ event }) {
   const { data: eventState } = useDeptEvent(event?.id)
   const { data: certs, isLoading: certsLoading } = useDeptEventCertificates(event?.id)
 
-  const [allocateCredits, setAllocateCredits] = useState(false)
-  const [manualPointsPerCert, setManualPointsPerCert] = useState(0)
+  const [allocatePoints, setAllocatePoints] = useState(false)
+  const [pointsPerCert, setPointsPerCert] = useState(0)
 
   useEffect(() => {
     if (eventState) {
-      setAllocateCredits(!!eventState.allocate_points)
-      setManualPointsPerCert(eventState.points_per_cert || 0)
+      setAllocatePoints(!!eventState.allocate_points)
+      setPointsPerCert(eventState.points_per_cert || 0)
     }
   }, [eventState])
   const { data: assets } = useDeptAssets()
@@ -158,8 +158,8 @@ export default function DeptCertificateIssue({ event }) {
       return
     }
     await generateMutation.mutateAsync({
-      allocate_points: allocateCredits,
-      manual_points: manualPointsPerCert,
+      allocate_points: !!allocatePoints,
+      manual_points: allocatePoints ? Number(pointsPerCert || 0) : 0,
     })
   }
 
@@ -251,7 +251,7 @@ export default function DeptCertificateIssue({ event }) {
               onClick={(e) => {
                 e.stopPropagation()
                 if (!canSendSingle) return
-                sendSingleMutation.mutate({ certId, payload: { allocateCredits, manualPointsPerCert: allocateCredits ? manualPointsPerCert : undefined } })
+                sendSingleMutation.mutate({ certId, payload: {} })
               }}
               disabled={!canSendSingle || sendSingleMutation.isPending}
               className="rounded p-1 text-amber-500 hover:bg-amber-50 transition-colors disabled:opacity-50"
@@ -333,44 +333,55 @@ export default function DeptCertificateIssue({ event }) {
               Participant Excel rows are persisted from the Overview step.
             </div>
 
-            <div className="rounded-lg border border-navy/10 bg-navy/[0.02] p-3 space-y-3">
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  id="allocateCredits"
-                  checked={allocateCredits}
-                  onChange={(e) => {
-                    setAllocateCredits(e.target.checked)
-                    if (!e.target.checked) setManualPointsPerCert(0)
-                  }}
-                  className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
-                />
-                <label htmlFor="allocateCredits" className="text-sm font-medium text-foreground cursor-pointer">
-                  Allocate credit points
+            <div className="card p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Credit Allocation</p>
+                  <p className="text-xs text-gray-500">Optionally assign credit points for each generated certificate. The student email is taken from the uploaded sheet.</p>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    checked={!!allocatePoints}
+                    onChange={(e) => {
+                      setAllocatePoints(e.target.checked)
+                      if (!e.target.checked) setPointsPerCert(0)
+                    }}
+                  />
+                  Allocate points
                 </label>
               </div>
-              {allocateCredits && (
-                <div className="ml-7 flex items-center gap-3">
-                  <span className="text-xs font-medium text-gray-700">Points:</span>
-                  <input
-                    id="pointsPerCert"
-                    type="number"
-                    min="0"
-                    value={manualPointsPerCert}
-                    onChange={(e) => {
-                      const val = e.target.value === '' ? 0 : parseInt(e.target.value, 10)
-                      setManualPointsPerCert(isNaN(val) ? 0 : Math.max(0, val))
-                    }}
-                    className="w-20 px-2 py-1 rounded border border-gray-300 text-sm focus:border-navy focus:ring-1 focus:ring-navy"
-                  />
-                </div>
-              )}
+
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label className="text-sm font-medium text-gray-700" htmlFor="dept-points-per-cert">
+                  Points per certificate
+                </label>
+                <input
+                  id="dept-points-per-cert"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={pointsPerCert}
+                  onChange={(e) => setPointsPerCert(e.target.value)}
+                  disabled={!allocatePoints}
+                  className="form-input w-full sm:w-40"
+                />
+                <span className="text-xs text-gray-400">Applies to all rows with a valid student email.</span>
+              </div>
             </div>
 
             <button className="btn-secondary w-full" onClick={handleGeneratePreview} disabled={previewMutation.isPending || !allReady}>
               {previewMutation.isPending ? 'Generating Preview...' : (hasPreview ? 'Regenerate Preview' : 'Generate Preview')}
             </button>
-            <button className="btn-secondary w-full" onClick={() => approvePreviewMutation.mutate()} disabled={approvePreviewMutation.isPending || !hasPreview || previewApproved}>
+            <button
+              className="btn-secondary w-full"
+              onClick={() => approvePreviewMutation.mutate({
+                allocate_points: !!allocatePoints,
+                points_per_cert: allocatePoints ? Number(pointsPerCert || 0) : 0,
+              })}
+              disabled={approvePreviewMutation.isPending || !hasPreview || previewApproved}
+            >
               {previewApproved ? 'Preview Approved' : (approvePreviewMutation.isPending ? 'Approving...' : 'Approve Preview')}
             </button>
             <button className="btn-primary w-full" onClick={handleGenerate} disabled={generateMutation.isPending || !allReady || !previewApproved}>
@@ -399,7 +410,7 @@ export default function DeptCertificateIssue({ event }) {
               {/* Credits logic moved up */}
             </div>
 
-            <button className="btn-secondary text-sm w-full" disabled={sendMutation.isPending || pendingEmailCount === 0} onClick={() => sendMutation.mutate({ allocateCredits, manualPointsPerCert: allocateCredits ? manualPointsPerCert : undefined })}>
+            <button className="btn-secondary text-sm w-full" disabled={sendMutation.isPending || pendingEmailCount === 0} onClick={() => sendMutation.mutate()}>
               {sendMutation.isPending ? (<><LoadingSpinner size="sm" label="" /> Sending...</>) : `Approve & Send ${pendingEmailCount} Pending Email${pendingEmailCount !== 1 ? 's' : ''}`}
             </button>
             <button

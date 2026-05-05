@@ -121,31 +121,34 @@ async def club_dashboard(
     # ── Stats ────────────────────────────────────────────────────────────────
     all_events = await Event.find(Event.club_id == club_id).to_list()
     event_ids = [ev.id for ev in all_events]
-    total_events = len(all_events)
+    certs = await Certificate.find({"event_id": {"$in": event_ids}}).to_list() if event_ids else []
+    certs_by_event: dict[str, list[Certificate]] = {}
+    for cert in certs:
+        certs_by_event.setdefault(str(cert.event_id), []).append(cert)
 
-    if event_ids:
-        total_certificates_issued = 0
-        for event_id in event_ids:
-            total_certificates_issued += await _count_event_certificates(event_id)
+    completed_events = []
+    for ev in all_events:
+        event_certs = certs_by_event.get(str(ev.id), [])
+        if not event_certs:
+            continue
+        if any(cert.status != CertStatus.EMAILED for cert in event_certs):
+            continue
+        completed_events.append(ev)
 
-        total_participants = await Participant.find(
-            {"event_id": {"$in": event_ids}},
-        ).count()
-    else:
-        total_certificates_issued = 0
-        total_participants = 0
+    completed_event_ids = [ev.id for ev in completed_events]
+    total_events = len(completed_events)
+    total_certificates_issued = sum(len(certs_by_event.get(str(ev.id), [])) for ev in completed_events)
+    total_participants = await Participant.find(
+        {"event_id": {"$in": completed_event_ids}},
+    ).count() if completed_event_ids else 0
 
     # ── Recent events ────────────────────────────────────────────────────────
-    recent_events_docs = await Event.find(
-        Event.club_id == club_id,
-    ).sort(-Event.created_at).limit(5).to_list()
+    recent_events_docs = sorted(completed_events, key=lambda e: e.created_at, reverse=True)[:5]
 
     recent_events = []
     for ev in recent_events_docs:
-        p_count = await Participant.find(
-            Participant.event_id == ev.id,
-        ).count()
-        c_count = await _count_event_certificates(ev.id)
+        p_count = await Participant.find(Participant.event_id == ev.id).count()
+        c_count = len(certs_by_event.get(str(ev.id), []))
         recent_events.append({
             "event_id": str(ev.id),
             "name": ev.name,
