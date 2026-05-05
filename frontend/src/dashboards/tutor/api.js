@@ -19,6 +19,7 @@ export function useTutorStudents() {
       const { data } = await axiosInstance.get('/tutor/students')
       return data
     },
+    refetchInterval: 60_000,
   })
 }
 

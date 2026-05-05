@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import Navbar from '../../components/Navbar'
@@ -23,11 +23,26 @@ function StudentDetailModal({ studentId, studentName, onClose }) {
   }))
   const semesterTotals = certResp?.semester_totals || []
   const currentSemester = certResp?.current_semester
-  const certsBySemester = semesterTotals.reduce((acc, item) => {
-    const label = item?.semester || 'Unknown'
-    acc[label] = certificates.filter((entry) => (entry.semester || 'Unknown') === label)
-    return acc
-  }, {})
+  const semesterOptions = [
+    ...(currentSemester ? [currentSemester] : []),
+    ...semesterTotals.map((item) => item?.semester || 'Unknown'),
+  ].filter(Boolean)
+  const uniqueSemesters = Array.from(new Set(semesterOptions))
+  const [selectedSemester, setSelectedSemester] = useState(
+    currentSemester || uniqueSemesters[0] || 'Unknown',
+  )
+
+  useEffect(() => {
+    const next = currentSemester || uniqueSemesters[0]
+    if (next) setSelectedSemester(next)
+  }, [currentSemester, semesterTotals])
+
+  const selectedRows = certificates.filter(
+    (entry) => (entry.semester || 'Unknown') === selectedSemester,
+  )
+  const selectedTotal = semesterTotals.find(
+    (item) => (item?.semester || 'Unknown') === selectedSemester,
+  )?.total_credits ?? 0
 
   if (!studentId) return null
 
@@ -112,33 +127,38 @@ function StudentDetailModal({ studentId, studentName, onClose }) {
               />
             </div>
             <div className="space-y-4">
-              {semesterTotals.length === 0 ? (
+              {uniqueSemesters.length === 0 ? (
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
                   No certificates found for this student.
                 </div>
               ) : (
-                semesterTotals.map((item) => {
-                  const semester = item?.semester || 'Unknown'
-                  const rows = certsBySemester[semester] || []
-                  return (
-                    <div key={semester} className="card p-4">
-                      <div className="mb-3 flex items-center justify-between">
-                        <h4 className="text-sm font-semibold text-foreground">
-                          {semester}{semester === currentSemester ? ' (Current)' : ''}
-                        </h4>
-                        <span className="text-xs text-gray-500">Total: {item?.total_credits ?? 0}</span>
-                      </div>
-                      <DataTable
-                        columns={eventDetailColumns}
-                        data={rows}
-                        isLoading={false}
-                        emptyMessage="No certificates found for this semester."
-                        searchable
-                        searchPlaceholder="Search events..."
-                      />
+                <div className="card p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-semibold text-gray-600">Semester</label>
+                      <select
+                        className="form-input h-9 py-1 text-sm"
+                        value={selectedSemester}
+                        onChange={(e) => setSelectedSemester(e.target.value)}
+                      >
+                        {uniqueSemesters.map((semester) => (
+                          <option key={semester} value={semester}>
+                            {semester}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                  )
-                })
+                    <span className="text-xs text-gray-500">Total: {selectedTotal}</span>
+                  </div>
+                  <DataTable
+                    columns={eventDetailColumns}
+                    data={selectedRows}
+                    isLoading={false}
+                    emptyMessage="No certificates found for this semester."
+                    searchable
+                    searchPlaceholder="Search events..."
+                  />
+                </div>
               )}
             </div>
           </>
