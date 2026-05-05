@@ -1355,7 +1355,7 @@ function CreditResetModal({ isOpen, onClose }) {
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Reset Credit Points">
-      <form className="space-y-4" onSubmit={handleSubmit}>
+      <form className="space-y-4" onSubmit={handleSubmit} autoComplete="off">
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           This action sets the next semester and resets current semester totals only. Certificates remain untouched.
         </div>
@@ -1363,10 +1363,11 @@ function CreditResetModal({ isOpen, onClose }) {
           <label className="form-label">Next semester</label>
           <input
             className="form-input"
+            name="next_semester_label"
             value={semester}
             onChange={(e) => setSemester(e.target.value)}
             placeholder="2025-2026 EVEN"
-            autoComplete="off"
+            autoComplete="new-password"
           />
           <p className="mt-1 text-xs text-gray-500">Enter the next semester label before confirming the reset.</p>
         </div>
