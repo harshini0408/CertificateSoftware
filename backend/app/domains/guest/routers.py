@@ -546,110 +546,6 @@ async def generate_guest_certificates(
     errors: List[str] = []
     credits_awarded = 0
 
-    def _normalize_email(value: Optional[str]) -> str:
-        return (value or "").strip().lower()
-
-    def _pick_row_value(row: dict, keys: tuple[str, ...]) -> str:
-        for key in keys:
-            value = row.get(key)
-            if value is None:
-                continue
-            text = str(value).strip()
-            if text:
-                return text
-        return ""
-
-    async def _award_guest_credits(
-        *,
-        cert_number: str,
-        student_email: str,
-        student_name: str,
-        points: int,
-        event_name: str,
-    ) -> bool:
-        if not student_email or points <= 0:
-            return False
-
-        credit_doc = await StudentCredit.find_one(
-            {
-                "student_email": {
-                    "$regex": f"^{re.escape(student_email)}$",
-                    "$options": "i",
-                }
-            }
-        )
-
-        user_student = await User.find_one(
-            {
-                "email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"},
-                "role": UserRole.STUDENT,
-            }
-        )
-
-        mapped_doc_for_reg = None
-        if user_student and user_student.registration_number:
-            mapped_doc_for_reg = await StudentCredit.find_one(
-                {
-                    "registration_number": user_student.registration_number,
-                    "tutor_email": {"$ne": None},
-                }
-            )
-
-        semester = await get_current_semester() or "Unknown"
-        entry = CreditHistoryEntry(
-            cert_number=cert_number,
-            event_name=event_name,
-            club_name="Guest Event",
-            cert_type="guest",
-            points_awarded=int(points),
-            semester=semester,
-            awarded_at=datetime.utcnow(),
-        )
-
-        if credit_doc:
-            if any(h.cert_number == cert_number for h in credit_doc.credit_history or []):
-                return False
-
-            updates = {}
-            if user_student:
-                if not credit_doc.student_name and user_student.name:
-                    updates["student_name"] = user_student.name
-                if not credit_doc.department and user_student.department:
-                    updates["department"] = user_student.department
-                if not credit_doc.batch and user_student.batch:
-                    updates["batch"] = user_student.batch
-                if not credit_doc.section and user_student.section:
-                    updates["section"] = user_student.section
-                if not credit_doc.registration_number and user_student.registration_number:
-                    updates["registration_number"] = user_student.registration_number
-            if not credit_doc.tutor_email and mapped_doc_for_reg and mapped_doc_for_reg.tutor_email:
-                updates["tutor_email"] = mapped_doc_for_reg.tutor_email
-
-            if updates:
-                await credit_doc.set(updates)
-                credit_doc = await StudentCredit.get(credit_doc.id)
-
-            credit_doc.total_credits = int(credit_doc.total_credits or 0) + int(points)
-            credit_doc.credit_history.append(entry)
-            credit_doc.last_updated = datetime.utcnow()
-            await credit_doc.save()
-            return True
-
-        canonical_email = _normalize_email(user_student.email) if user_student and user_student.email else student_email
-        await StudentCredit(
-            student_email=canonical_email,
-            tutor_email=(mapped_doc_for_reg.tutor_email if mapped_doc_for_reg and mapped_doc_for_reg.tutor_email else None),
-            registration_number=(user_student.registration_number if user_student else None),
-            student_name=(user_student.name if user_student and user_student.name else student_name),
-            department=(user_student.department if user_student else None),
-            batch=(user_student.batch if user_student else None),
-            section=(user_student.section if user_student else None),
-            total_credits=int(points),
-            credit_history=[entry],
-            last_updated=datetime.utcnow(),
-        ).insert()
-        return True
-
     allocate_points = bool(payload.allocate_points)
     points_per_cert = int(payload.points_per_cert or 0)
     if points_per_cert < 0:
@@ -686,7 +582,7 @@ async def generate_guest_certificates(
             generated.append(str(out_path))
 
             cert_number = f"GUEST-{str(session.id)[-6:]}-{idx + 1:04d}"
-            participant_email = _normalize_email(row.get(email_col) if email_col else "")
+            participant_email = _normalize_guest_email(row.get(email_col) if email_col else "")
             student_name = _pick_row_value(row, ("Name", "name", "Full Name", "full_name", "Student Name")) or "Unknown"
             class_name = _pick_row_value(row, ("Class", "Department", "Semester", "Year", "Section")) or "-"
             contribution = _pick_row_value(row, ("Contribution", "Role", "Participation", "Certificate Type")) or "Participant"
@@ -718,18 +614,7 @@ async def generate_guest_certificates(
                     created_at=datetime.utcnow(),
                 ).insert()
 
-            if allocate_points and points_per_cert > 0 and participant_email:
-                try:
-                    if await _award_guest_credits(
-                        cert_number=cert_number,
-                        student_email=participant_email,
-                        student_name=student_name,
-                        points=points_per_cert,
-                        event_name=session.event_name,
-                    ):
-                        credits_awarded += 1
-                except Exception as exc:
-                    logger.error("Failed to award guest credits for %s: %s", participant_email, exc)
+            # Credits removed from generation step - now awarded after email sending
         except Exception as exc:
             logger.error("Error generating cert for row %d: %s", idx + 1, exc)
             errors.append(f"Row {idx + 1}: {exc}")
@@ -966,11 +851,25 @@ async def _send_guest_emails_for_session(
                 club_name="Guest Event",
                 png_path=cert_path,
             )
-            if success:
-                entry["status"] = "emailed"
-                entry["sent_at"] = datetime.utcnow()
-                entry["error"] = None
-                existing = await DeptCertificate.find_one({"cert_number": cert_number})
+                if success:
+                    entry["status"] = "emailed"
+                    entry["sent_at"] = datetime.utcnow()
+                    entry["error"] = None
+                    
+                    # Award credits after successful email
+                    if session.guest_allocate_points and session.guest_points_per_cert > 0:
+                        try:
+                            await _award_guest_credits(
+                                cert_number=cert_number,
+                                student_email=recipient_email,
+                                student_name=recipient_name,
+                                points=session.guest_points_per_cert,
+                                event_name=session.event_name,
+                            )
+                        except Exception as exc:
+                            logger.error("Failed to award credits for %s after email: %s", recipient_email, exc)
+
+                    existing = await DeptCertificate.find_one({"cert_number": cert_number})
                 if existing:
                     await existing.set({
                         "emailed_at": entry["sent_at"],

@@ -150,7 +150,7 @@ async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT
         semester = entry.semester or "Unknown"
         semester_totals[semester] = semester_totals.get(semester, 0) + int(entry.points_awarded or 0)
 
-    total_credits = semester_totals.get(current_semester, 0) if current_semester else sum(entry.points_awarded for entry in all_history)
+    total_credits = sum(entry.points_awarded for entry in all_history)
 
     return {
         "total_credits": total_credits,

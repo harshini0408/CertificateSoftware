@@ -1205,12 +1205,7 @@ async def generate_dept_event_certificates(
         )
         await doc.insert()
 
-        if evt.allocate_points and evt.points_per_cert > 0:
-            try:
-                await _award_manual_dept_credits(evt, doc, evt.points_per_cert)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).error("Failed to award credits for %s: %s", participant_email, exc)
+        # Removed: award credits only after email sending
 
         existing_emails.add(participant_email)
 

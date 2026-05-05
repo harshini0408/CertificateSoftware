@@ -120,10 +120,7 @@ async def _rollup_credit_docs(docs: list[StudentCredit]) -> tuple[int, list[Cred
         semester = entry.semester or "Unknown"
         semester_totals[semester] = semester_totals.get(semester, 0) + int(entry.points_awarded or 0)
     current_semester = await get_current_semester()
-    if current_semester:
-        total = semester_totals.get(current_semester, 0)
-    else:
-        total = sum(int(e.points_awarded or 0) for e in history)
+    total = sum(int(e.points_awarded or 0) for e in history)
     return total, history, semester_totals, current_semester
 
 

@@ -81,14 +81,14 @@ export default function Login() {
   // Already logged in — redirect to own dashboard
   if (isAuthenticated && !switchMode) {
     const redirectMap = {
-      super_admin:      '/admin',
-      principal:        '/principal',
-      hod:              '/hod',
+      super_admin: '/admin',
+      principal: '/principal',
+      hod: '/hod',
       club_coordinator: `/club/${club_id}`,
       dept_coordinator: '/dept',
       tutor: '/tutor',
-      student:          '/student',
-      guest:            '/guest',
+      student: '/student',
+      guest: '/guest',
     }
     return <Navigate to={redirectMap[role] ?? '/login'} replace />
   }
@@ -161,7 +161,7 @@ export default function Login() {
               onClick={() => setLoginMode('username')}
               className={`flex-1 rounded-lg px-3 py-2 transition-colors ${loginMode === 'username' ? 'bg-white text-navy shadow-sm' : 'text-gray-500 hover:text-navy'}`}
             >
-              Faculty ID
+              Username
             </button>
             <button
               type="button"
@@ -188,7 +188,7 @@ export default function Login() {
                 type={loginMode === 'email' ? 'email' : 'text'}
                 autoComplete={loginMode === 'email' ? 'email' : 'username'}
                 autoFocus
-                placeholder={loginMode === 'email' ? 'Enter your email address' : 'Enter your faculty ID'}
+                placeholder={loginMode === 'email' ? 'Enter your email address' : 'Enter your username'}
                 className={`form-input ${errors.username ? 'form-input-error' : ''}`}
                 disabled={busy}
                 {...register('username', {

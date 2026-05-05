@@ -172,7 +172,7 @@ async def get_student_certificates(student_id: PydanticObjectId, _user: User = _
             credit_semester_by_cert[entry.cert_number] = entry.semester or "Unknown"
         semester = entry.semester or "Unknown"
         semester_totals[semester] = semester_totals.get(semester, 0) + int(entry.points_awarded or 0)
-    total_credits = semester_totals.get(current_semester, 0) if current_semester else sum(semester_totals.values())
+    total_credits = sum(semester_totals.values())
 
     certificates = []
     for cert in generated_certs:
