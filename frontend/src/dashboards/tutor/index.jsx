@@ -89,6 +89,14 @@ function renderCreditAgainstTarget(points) {
 
 function DetailModal({ email, onClose }) {
   const { data, isLoading } = useTutorStudentDetail(email, !!email)
+  const semesterTotals = data?.semester_totals || []
+  const currentSemester = data?.current_semester
+  const eventDetails = data?.event_details || []
+  const eventBySemester = semesterTotals.reduce((acc, item) => {
+    const label = item?.semester || 'Unknown'
+    acc[label] = eventDetails.filter((entry) => (entry.semester || 'Unknown') === label)
+    return acc
+  }, {})
 
   if (!email) return null
 
@@ -111,44 +119,99 @@ function DetailModal({ email, onClose }) {
               <div><span className="text-gray-500">Name:</span> <span className="font-semibold">{data?.student_name || '—'}</span></div>
               <div><span className="text-gray-500">Reg No:</span> <span className="font-semibold">{data?.registration_number || '—'}</span></div>
               <div><span className="text-gray-500">Email:</span> <span className="font-semibold">{data?.student_email || '—'}</span></div>
-              <div><span className="text-gray-500">Total Credits:</span> {renderCreditAgainstTarget(data?.total_credits)}</div>
+              <div><span className="text-gray-500">Current Semester Credits:</span> {renderCreditAgainstTarget(data?.total_credits)}</div>
             </div>
-
-            <DataTable
-              columns={[
-                { key: 'event_name', header: 'Event', sortable: true, searchKey: true },
-                { key: 'role', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
-                { key: 'certificate_number', header: 'Certificate Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
-                { key: 'event_date', header: 'Event Date', render: (v, row) => fmtDate(v || row?.awarded_at) },
-                { key: 'credit_points', header: 'Credit Points', align: 'right', render: (v) => <span className="font-bold text-green-700">+{v || 0}</span> },
-                {
-                  key: '_actions',
-                  header: 'Actions',
-                  align: 'center',
-                  render: (_, row) => {
-                    const raw = row?.certificate_image_url
-                    if (!raw) return <span className="text-xs text-gray-400">—</span>
-                    const href = String(raw).startsWith('http') ? raw : `${BACKEND_URL}${raw}`
+            <div className="card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-foreground">Semester Totals</h3>
+                  <span className="text-xs text-gray-500">
+                    {currentSemester ? `Current: ${currentSemester}` : 'Current: —'}
+                  </span>
+                </div>
+                <DataTable
+                  columns={[
+                    {
+                      key: 'semester',
+                      header: 'Semester',
+                      render: (v) => (
+                        <span className="text-sm font-medium text-gray-700">
+                          {v || 'Unknown'}{v === currentSemester ? ' (Current)' : ''}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: 'total_credits',
+                      header: 'Total Credits',
+                      align: 'right',
+                      render: (v) => <span className="font-semibold text-navy">{v ?? 0}</span>,
+                    },
+                  ]}
+                  data={semesterTotals}
+                  isLoading={false}
+                  emptyMessage="No semester totals yet."
+                  rowKey="semester"
+                />
+              </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-2">Certificates by Semester</h3>
+              {semesterTotals.length === 0 ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
+                  No semester data yet.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {semesterTotals.map((item) => {
+                    const semester = item?.semester || 'Unknown'
+                    const rows = eventBySemester[semester] || []
                     return (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        View
-                      </a>
+                      <div key={semester} className="card p-4">
+                        <div className="mb-3 flex items-center justify-between">
+                          <h4 className="text-sm font-semibold text-foreground">
+                            {semester}{semester === currentSemester ? ' (Current)' : ''}
+                          </h4>
+                          <span className="text-xs text-gray-500">Total: {item?.total_credits ?? 0}</span>
+                        </div>
+                        <DataTable
+                          columns={[
+                            { key: 'event_name', header: 'Event', sortable: true, searchKey: true },
+                            { key: 'role', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
+                            { key: 'certificate_number', header: 'Certificate Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
+                            { key: 'event_date', header: 'Event Date', render: (v, row) => fmtDate(v || row?.awarded_at) },
+                            { key: 'credit_points', header: 'Credit Points', align: 'right', render: (v) => <span className="font-bold text-green-700">+{v || 0}</span> },
+                            {
+                              key: '_actions',
+                              header: 'Actions',
+                              align: 'center',
+                              render: (_, row) => {
+                                const raw = row?.certificate_image_url
+                                if (!raw) return <span className="text-xs text-gray-400">—</span>
+                                const href = String(raw).startsWith('http') ? raw : `${BACKEND_URL}${raw}`
+                                return (
+                                  <a
+                                    href={href}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    View
+                                  </a>
+                                )
+                              },
+                            },
+                          ]}
+                          data={rows}
+                          isLoading={false}
+                          emptyMessage="No event records found."
+                          searchable
+                          searchPlaceholder="Search events..."
+                        />
+                      </div>
                     )
-                  },
-                },
-              ]}
-              data={data?.event_details || []}
-              isLoading={false}
-              emptyMessage="No event records found."
-              searchable
-              searchPlaceholder="Search events..."
-            />
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

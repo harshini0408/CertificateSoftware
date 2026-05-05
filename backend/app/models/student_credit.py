@@ -12,6 +12,7 @@ class CreditHistoryEntry(BaseModel):
     club_name: str
     cert_type: str
     points_awarded: int
+    semester: Optional[str] = None
     awarded_at: datetime = Field(default_factory=datetime.utcnow)
 
 

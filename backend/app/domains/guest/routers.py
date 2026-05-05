@@ -41,6 +41,7 @@ from ...models.guest_session import GuestSession
 from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.user import User, UserRole
 from ...services.storage_service import storage_path_to_url
+from ...services.semester_service import get_current_semester
 from ...services.email_service import send_certificate_email
 
 logger = logging.getLogger(__name__)
@@ -594,12 +595,14 @@ async def generate_guest_certificates(
                 }
             )
 
+        semester = await get_current_semester() or "Unknown"
         entry = CreditHistoryEntry(
             cert_number=cert_number,
             event_name=event_name,
             club_name="Guest Event",
             cert_type="guest",
             points_awarded=int(points),
+            semester=semester,
             awarded_at=datetime.utcnow(),
         )
 

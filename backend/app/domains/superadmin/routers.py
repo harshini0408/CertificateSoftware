@@ -28,6 +28,7 @@ from ...models.scan_log import ScanLog
 from ...models.credit_rule import CreditRule
 from ...models.student_credit import StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
+from ...services.semester_service import get_current_semester, set_current_semester
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
 from ...schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
 from ...schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
@@ -1595,42 +1596,40 @@ async def reset_credit_points(body: CreditResetRequest, admin: User = _admin):
     if not verify_password(body.admin_password, admin.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid super admin password")
 
+    previous_semester = await get_current_semester()
+
     student_credit_docs = await StudentCredit.find_all().to_list()
     student_docs_updated = 0
-    credit_entries_updated = 0
+    history_semester_backfilled = 0
     for doc in student_credit_docs:
-        updated_history = []
         history_changed = False
-        for entry in doc.credit_history or []:
-            if int(entry.points_awarded or 0) != 0:
-                history_changed = True
-                credit_entries_updated += 1
-                updated_history.append(entry.model_copy(update={"points_awarded": 0}))
-            else:
-                updated_history.append(entry)
+        updated_history = []
+        if previous_semester:
+            for entry in doc.credit_history or []:
+                if not entry.semester:
+                    history_changed = True
+                    history_semester_backfilled += 1
+                    updated_history.append(entry.model_copy(update={"semester": previous_semester}))
+                else:
+                    updated_history.append(entry)
+            if history_changed:
+                await doc.set({"credit_history": updated_history})
 
-        if int(doc.total_credits or 0) != 0 or history_changed:
-            await doc.set({
-                "total_credits": 0,
-                "credit_history": updated_history,
-                "last_updated": datetime.utcnow(),
-            })
-            student_docs_updated += 1
-
-    manual_submissions = await ManualCreditSubmission.find_all().to_list()
-    manual_submissions_updated = 0
-    for submission in manual_submissions:
-        if int(submission.points_awarded or 0) == 0:
+        if int(doc.total_credits or 0) == 0:
             continue
-        await submission.set({"points_awarded": 0})
-        manual_submissions_updated += 1
+        await doc.set({
+            "total_credits": 0,
+            "last_updated": datetime.utcnow(),
+        })
+        student_docs_updated += 1
+
+    await set_current_semester(semester, updated_by=admin.email)
 
     return {
-        "message": f"Credit points reset to 0 for semester {semester}.",
+        "message": f"Current semester set to {semester}. Current semester totals reset to 0.",
         "semester": semester,
         "student_documents_updated": student_docs_updated,
-        "credit_entries_updated": credit_entries_updated,
-        "manual_submissions_updated": manual_submissions_updated,
+        "history_semester_backfilled": history_semester_backfilled,
         "requested_by": admin.email,
     }
 

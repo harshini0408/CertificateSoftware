@@ -10,6 +10,7 @@ from ...models.certificate import Certificate
 from ...models.dept_certificate import DeptCertificate
 from ...models.manual_credit_submission import ManualCreditSubmission
 from ...models.student_credit import StudentCredit
+from ...services.semester_service import get_current_semester
 from ...models.user import User, UserRole
 
 router = APIRouter(prefix="/hod", tags=["HOD"])
@@ -198,20 +199,37 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
         }
     ).sort("-submitted_at").to_list()
 
-    credit_doc = await StudentCredit.find_one(
+    current_semester = await get_current_semester()
+    credit_docs = await StudentCredit.find(
         {
             "$or": [
                 {"student_email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"}},
                 {"registration_number": student.registration_number} if student.registration_number else {"_id": None},
             ]
         }
-    )
+    ).to_list()
+
+    credit_history = []
+    for doc in credit_docs:
+        credit_history.extend(doc.credit_history or [])
+
+    dedup = {}
+    for entry in credit_history:
+        key = entry.cert_number or f"manual::{entry.awarded_at.isoformat()}::{entry.cert_type}"
+        if key not in dedup:
+            dedup[key] = entry
+    credit_history = list(dedup.values())
 
     credit_points_by_cert: dict[str, int] = {}
-    if credit_doc:
-        for entry in credit_doc.credit_history or []:
-            if entry.cert_number:
-                credit_points_by_cert[entry.cert_number] = int(entry.points_awarded or 0)
+    credit_semester_by_cert: dict[str, str] = {}
+    semester_totals: dict[str, int] = {}
+    for entry in credit_history:
+        if entry.cert_number:
+            credit_points_by_cert[entry.cert_number] = int(entry.points_awarded or 0)
+            credit_semester_by_cert[entry.cert_number] = entry.semester or "Unknown"
+        semester = entry.semester or "Unknown"
+        semester_totals[semester] = semester_totals.get(semester, 0) + int(entry.points_awarded or 0)
+    total_credits = semester_totals.get(current_semester, 0) if current_semester else sum(semester_totals.values())
 
     certificates = []
     for cert in generated_certs:
@@ -226,6 +244,7 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
                 "issued_at": cert.issued_at,
                 "credit_points": int(credit_points_by_cert.get(cert.cert_number, 0)),
                 "certificate_image_url": cert.png_url,
+                "semester": credit_semester_by_cert.get(cert.cert_number, "Unknown"),
             }
         )
 
@@ -241,6 +260,7 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
                 "issued_at": submission.submitted_at,
                 "credit_points": int(submission.points_awarded or 0),
                 "certificate_image_url": submission.certificate_image_url,
+                "semester": submission.semester or "Unknown",
             }
         )
 
@@ -270,6 +290,7 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
             "issued_at": dc.emailed_at or dc.created_at,
             "credit_points": int(credit_points_by_cert.get(dc.cert_number, 0)),
             "certificate_image_url": dc.png_url,
+            "semester": credit_semester_by_cert.get(dc.cert_number, "Unknown"),
         })
 
     certificates.sort(
@@ -278,7 +299,12 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
     )
 
     return {
-        "student": _student_summary(student, int(credit_doc.total_credits if credit_doc else 0)),
+        "student": _student_summary(student, int(total_credits)),
+        "current_semester": current_semester,
+        "semester_totals": [
+            {"semester": sem, "total_credits": total}
+            for sem, total in sorted(semester_totals.items())
+        ],
         "count": len(certificates),
         "certificates": certificates,
     }

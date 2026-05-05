@@ -22,6 +22,7 @@ class ManualCreditSubmission(Document):
     cert_type: str
     event_date: date
     certificate_image_url: str
+    semester: Optional[str] = None
 
     status: ManualSubmissionStatus = ManualSubmissionStatus.PENDING
     points_awarded: int = 0

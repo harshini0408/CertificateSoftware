@@ -81,7 +81,9 @@ function NavItem({ to, icon, label, end = false, sidebarOpen }) {
       title={label}
       className={() =>
         `flex items-center rounded-lg py-2.5 text-sm font-medium transition-colors duration-150 ${
-          sidebarOpen ? 'justify-start gap-3 px-3' : 'justify-center px-0'
+          sidebarOpen
+            ? 'justify-start gap-3 px-3'
+            : 'justify-center px-0 lg:justify-start lg:gap-3 lg:px-3'
         } ${
           isActive
             ? 'bg-navy text-white shadow-sm'
@@ -90,7 +92,7 @@ function NavItem({ to, icon, label, end = false, sidebarOpen }) {
       }
     >
       {icon}
-      {sidebarOpen && <span className="truncate">{label}</span>}
+      <span className={`truncate ${sidebarOpen ? 'block' : 'hidden lg:block'}`}>{label}</span>
     </NavLink>
   )
 }
@@ -183,12 +185,11 @@ export default function Sidebar() {
           transition-all duration-300 ease-in-out
           lg:sticky lg:shadow-none min-h-0
           ${sidebarOpen ? 'w-60 translate-x-0 border-r' : 'w-0 -translate-x-full border-none px-0'}
-          lg:translate-x-0 lg:border-r
-          ${sidebarOpen ? 'lg:w-60' : 'lg:w-14'}
+          lg:translate-x-0 lg:border-r lg:w-60
         `}
       >
         {/* Nav links */}
-        <nav className={`flex-1 overflow-y-auto py-4 space-y-1 scrollbar-hide ${sidebarOpen ? 'px-3' : 'px-2'}`}>
+        <nav className={`flex-1 overflow-y-auto py-4 space-y-1 scrollbar-hide ${sidebarOpen ? 'px-3' : 'px-2 lg:px-3'}`}>
           {navItems.map((item) => (
             <NavItem
               key={item.to}
@@ -202,15 +203,13 @@ export default function Sidebar() {
         </nav>
 
         {/* Footer brand */}
-        {sidebarOpen && (
-          <div className="border-t border-gray-100 px-4 py-3">
-            <p className="text-xs text-gray-400 leading-tight">
-              PSG iTech
-              <br />
-              <span className="font-medium text-navy/60">Certificate Platform</span>
-            </p>
-          </div>
-        )}
+        <div className={`border-t border-gray-100 px-4 py-3 ${sidebarOpen ? 'block' : 'hidden lg:block'}`}>
+          <p className="text-xs text-gray-400 leading-tight">
+            PSG iTech
+            <br />
+            <span className="font-medium text-navy/60">Certificate Platform</span>
+          </p>
+        </div>
       </aside>
     </>
   )

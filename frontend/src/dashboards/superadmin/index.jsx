@@ -1262,7 +1262,7 @@ function OverviewTab() {
       </div>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        This will set student and faculty credit points to zero for the new semester. Certificates will remain in place.
+        This will start the next semester and reset only current semester totals. Certificates will remain visible.
       </div>
       
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1357,18 +1357,18 @@ function CreditResetModal({ isOpen, onClose }) {
     <Modal isOpen={isOpen} onClose={onClose} title="Reset Credit Points">
       <form className="space-y-4" onSubmit={handleSubmit}>
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          This action will zero all stored credit points for students and faculty views. Generated certificates will stay intact.
+          This action sets the next semester and resets current semester totals only. Certificates remain untouched.
         </div>
         <div>
-          <label className="form-label">Current semester</label>
+          <label className="form-label">Next semester</label>
           <input
             className="form-input"
             value={semester}
             onChange={(e) => setSemester(e.target.value)}
-            placeholder="2025-26 even"
+            placeholder="2025-2026 EVEN"
             autoComplete="off"
           />
-          <p className="mt-1 text-xs text-gray-500">Enter the semester label before confirming the reset.</p>
+          <p className="mt-1 text-xs text-gray-500">Enter the next semester label before confirming the reset.</p>
         </div>
         <div>
           <label className="form-label">Super Admin Password</label>

@@ -26,6 +26,7 @@ from ...services.storage_service import save_cert_png
 from ...services.storage_service import storage_path_to_url
 from ...services.storage_service import storage_url_to_path
 from ...services.email_service import send_certificate_email
+from ...services.semester_service import get_current_semester
 from ...schemas.event import DeptCertificateSendRequest
 from ...config import get_settings
 
@@ -147,12 +148,14 @@ async def _award_dept_event_credits(evt: DeptEvent, cert: DeptCertificate) -> No
         "role": UserRole.STUDENT,
     })
 
+    semester = await get_current_semester() or "Unknown"
     entry = CreditHistoryEntry(
         cert_number=cert.cert_number,
         event_name=evt.name,
         club_name=evt.department,
         cert_type=contribution,
         points_awarded=int(rule.points or 0),
+        semester=semester,
         awarded_at=datetime.utcnow(),
     )
 
@@ -207,12 +210,14 @@ async def _award_manual_dept_credits(evt: DeptEvent, cert: DeptCertificate, manu
         "role": UserRole.STUDENT,
     })
 
+    semester = await get_current_semester() or "Unknown"
     entry = CreditHistoryEntry(
         cert_number=cert.cert_number,
         event_name=evt.name,
         club_name=evt.department,
         cert_type=cert.contribution or "manual_allocation",
         points_awarded=int(manual_points),
+        semester=semester,
         awarded_at=datetime.utcnow(),
     )
 

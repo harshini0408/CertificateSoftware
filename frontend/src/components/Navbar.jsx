@@ -5,6 +5,11 @@ import { useMutation } from '@tanstack/react-query'
 import { useAuthStore } from '../store/authStore'
 import { useUiStore } from '../store/uiStore'
 import { useToastStore } from '../store/uiStore'
+import {
+  useChangeDeptPassword,
+  useRequestDeptPasswordOtp,
+  useVerifyDeptPasswordOtp,
+} from '../dashboards/auth/api'
 import axiosInstance from '../utils/axiosInstance'
 import queryClient from '../utils/queryClient'
 import logoImg from '../Images/logo.png'
@@ -20,12 +25,18 @@ const roleMeta = {
 }
 
 // ── Change-password popover ───────────────────────────────────────────────────
-function ChangePasswordForm({ onClose }) {
+function ChangePasswordForm({ onClose, useOtp }) {
   const addToast = useToastStore((s) => s.addToast)
+  const requestDeptPasswordOtp = useRequestDeptPasswordOtp()
+  const verifyDeptPasswordOtp = useVerifyDeptPasswordOtp()
+  const changeDeptPassword = useChangeDeptPassword()
+  const [otpRequested, setOtpRequested] = useState(false)
+  const [otpVerified, setOtpVerified] = useState(false)
   const {
     register,
     handleSubmit,
     watch,
+    reset,
     formState: { errors, isSubmitting },
   } = useForm()
 
@@ -45,9 +56,43 @@ function ChangePasswordForm({ onClose }) {
     },
   })
 
+  const handleRequestOtp = handleSubmit(async () => {
+    await requestDeptPasswordOtp.mutateAsync()
+    setOtpRequested(true)
+    setOtpVerified(false)
+  })
+
+  const handleVerifyOtp = handleSubmit(async (values) => {
+    await verifyDeptPasswordOtp.mutateAsync({ otp_code: values.otp_code })
+    setOtpVerified(true)
+  })
+
+  const handleOtpPasswordSubmit = handleSubmit(async (values) => {
+    if (!otpVerified) return
+    await changeDeptPassword.mutateAsync({
+      current_password: values.current_password,
+      new_password: values.new_password,
+      otp_code: values.otp_code,
+    })
+    reset({
+      current_password: '',
+      new_password: '',
+      confirm: '',
+      otp_code: '',
+    })
+    setOtpRequested(false)
+    setOtpVerified(false)
+    onClose()
+  })
+
+  const handleDirectSubmit = handleSubmit((d) => mutation.mutate(d))
+  const handleFormSubmit = useOtp
+    ? (otpVerified ? handleOtpPasswordSubmit : otpRequested ? handleVerifyOtp : handleRequestOtp)
+    : handleDirectSubmit
+
   return (
     <form
-      onSubmit={handleSubmit((d) => mutation.mutate(d))}
+      onSubmit={handleFormSubmit}
       className="flex flex-col gap-4"
     >
       <div>
@@ -95,14 +140,78 @@ function ChangePasswordForm({ onClose }) {
         )}
       </div>
 
-      <div className="flex justify-end gap-2 pt-1">
-        <button type="button" className="btn-secondary" onClick={onClose}>
-          Cancel
-        </button>
-        <button type="submit" className="btn-primary" disabled={isSubmitting}>
-          {isSubmitting ? 'Saving…' : 'Save'}
-        </button>
-      </div>
+      {useOtp && otpRequested && (
+        <div>
+          <label className="form-label">OTP Code</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={4}
+            placeholder="Enter the 4-digit code"
+            className={`form-input text-center tracking-[0.45em] ${errors.otp_code ? 'form-input-error' : ''}`}
+            {...register('otp_code', {
+              required: otpVerified ? false : 'OTP code is required',
+              minLength: { value: 4, message: 'OTP must be 4 digits' },
+              maxLength: { value: 4, message: 'OTP must be 4 digits' },
+              pattern: { value: /^\d{4}$/, message: 'OTP must be 4 digits' },
+            })}
+            disabled={verifyDeptPasswordOtp.isPending || changeDeptPassword.isPending}
+          />
+          {errors.otp_code && <p className="form-error">{errors.otp_code.message}</p>}
+        </div>
+      )}
+
+      {!useOtp && (
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={isSubmitting}>
+            {isSubmitting ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      )}
+
+      {useOtp && !otpRequested && (
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={requestDeptPasswordOtp.isPending}
+          >
+            {requestDeptPasswordOtp.isPending ? 'Sending OTP...' : 'Send OTP to Email'}
+          </button>
+        </div>
+      )}
+
+      {useOtp && otpRequested && !otpVerified && (
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleRequestOtp}
+            disabled={requestDeptPasswordOtp.isPending}
+          >
+            {requestDeptPasswordOtp.isPending ? 'Resending...' : 'Resend OTP'}
+          </button>
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={verifyDeptPasswordOtp.isPending}
+          >
+            {verifyDeptPasswordOtp.isPending ? 'Verifying...' : 'Verify OTP'}
+          </button>
+        </div>
+      )}
+
+      {useOtp && otpVerified && (
+        <div className="flex items-center justify-end gap-2">
+          <p className="text-xs font-medium text-green-700">OTP verified.</p>
+          <button type="submit" className="btn-primary" disabled={changeDeptPassword.isPending}>
+            {changeDeptPassword.isPending ? 'Updating...' : 'Change Password'}
+          </button>
+        </div>
+      )}
     </form>
   )
 }
@@ -230,7 +339,10 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
                       Change Password
                     </button>
                   ) : (
-                    <ChangePasswordForm onClose={() => setShowChangePw(false)} />
+                    <ChangePasswordForm
+                      onClose={() => setShowChangePw(false)}
+                      useOtp={role === 'dept_coordinator'}
+                    />
                   )}
                 </div>
 

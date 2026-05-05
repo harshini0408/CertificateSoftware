@@ -21,6 +21,13 @@ function StudentDetailModal({ studentId, studentName, onClose }) {
     ...cert,
     issuer: cert.issuer || cert.club_name,
   }))
+  const semesterTotals = certResp?.semester_totals || []
+  const currentSemester = certResp?.current_semester
+  const certsBySemester = semesterTotals.reduce((acc, item) => {
+    const label = item?.semester || 'Unknown'
+    acc[label] = certificates.filter((entry) => (entry.semester || 'Unknown') === label)
+    return acc
+  }, {})
 
   if (!studentId) return null
 
@@ -73,14 +80,67 @@ function StudentDetailModal({ studentId, studentName, onClose }) {
             <div className="rounded-lg border border-gray-200 p-3 text-sm mb-4">
               <span className="text-gray-500">Student Name:</span> <span className="font-semibold">{studentName || '—'}</span>
             </div>
-            <DataTable
-              columns={eventDetailColumns}
-              data={certificates}
-              isLoading={false}
-              emptyMessage="No certificates found for this student."
-              searchable
-              searchPlaceholder="Search events..."
-            />
+            <div className="card p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-foreground">Semester Totals</h3>
+                <span className="text-xs text-gray-500">
+                  {currentSemester ? `Current: ${currentSemester}` : 'Current: —'}
+                </span>
+              </div>
+              <DataTable
+                columns={[
+                  {
+                    key: 'semester',
+                    header: 'Semester',
+                    render: (v) => (
+                      <span className="text-sm font-medium text-gray-700">
+                        {v || 'Unknown'}{v === currentSemester ? ' (Current)' : ''}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'total_credits',
+                    header: 'Total Credits',
+                    align: 'right',
+                    render: (v) => <span className="font-semibold text-navy">{v ?? 0}</span>,
+                  },
+                ]}
+                data={semesterTotals}
+                isLoading={false}
+                emptyMessage="No semester totals yet."
+                rowKey="semester"
+              />
+            </div>
+            <div className="space-y-4">
+              {semesterTotals.length === 0 ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
+                  No certificates found for this student.
+                </div>
+              ) : (
+                semesterTotals.map((item) => {
+                  const semester = item?.semester || 'Unknown'
+                  const rows = certsBySemester[semester] || []
+                  return (
+                    <div key={semester} className="card p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <h4 className="text-sm font-semibold text-foreground">
+                          {semester}{semester === currentSemester ? ' (Current)' : ''}
+                        </h4>
+                        <span className="text-xs text-gray-500">Total: {item?.total_credits ?? 0}</span>
+                      </div>
+                      <DataTable
+                        columns={eventDetailColumns}
+                        data={rows}
+                        isLoading={false}
+                        emptyMessage="No certificates found for this semester."
+                        searchable
+                        searchPlaceholder="Search events..."
+                      />
+                    </div>
+                  )
+                })
+              )}
+            </div>
           </>
         )}
       </div>

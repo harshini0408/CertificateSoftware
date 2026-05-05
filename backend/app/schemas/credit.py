@@ -30,6 +30,7 @@ class CreditHistoryEntrySchema(BaseModel):
     club_name: str
     cert_type: str
     points_awarded: int
+    semester: Optional[str] = None
     awarded_at: datetime
 
 

@@ -204,8 +204,14 @@ function EventsTab({ clubId }) {
                 {errors.name && <p className="form-error">{errors.name.message}</p>}
               </div>
               <div>
-                <label className="form-label" htmlFor="date">Event Date</label>
-                <input id="date" type="date" className="form-input" {...register('event_date')} />
+                <label className="form-label" htmlFor="date">Event Date *</label>
+                <input
+                  id="date"
+                  type="date"
+                  className={`form-input ${errors.event_date ? 'form-input-error' : ''}`}
+                  {...register('event_date', { required: 'Event date is required' })}
+                />
+                {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
               </div>
               <div>
                 <label className="form-label" htmlFor="academic_year">Academic Year *</label>
@@ -218,8 +224,7 @@ function EventsTab({ clubId }) {
                   <option value="" disabled>Select academic year</option>
                   <option value="2025-2026(EVEN)">2025-2026(EVEN)</option>
                   <option value="2026-2027(ODD)">2026-2027(ODD)</option>
-                  <option value="2026-27 ODD">2026-27 ODD</option>
-                  <option value="2026-27 EVEN">2026-27 EVEN</option>
+                  <option value="2026-2027(EVEN)">2026-2027(EVEN)</option>
                 </select>
                 {errors.academic_year && <p className="form-error">{errors.academic_year.message}</p>}
               </div>

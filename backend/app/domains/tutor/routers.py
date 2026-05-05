@@ -19,6 +19,7 @@ from ...models.manual_credit_submission import ManualCreditSubmission, ManualSub
 from ...models.dept_certificate import DeptCertificate
 from ...models.user import User, UserRole
 from ...services.storage_service import storage_url_to_path
+from ...services.semester_service import get_current_semester
 
 router = APIRouter(tags=["Tutor"])
 
@@ -106,7 +107,7 @@ async def _linked_credit_docs_for_tutor(base: StudentCredit, tutor_email: str) -
     return linked
 
 
-def _rollup_credit_docs(docs: list[StudentCredit]) -> tuple[int, list[CreditHistoryEntry]]:
+async def _rollup_credit_docs(docs: list[StudentCredit]) -> tuple[int, list[CreditHistoryEntry], dict[str, int], str | None]:
     dedup: Dict[str, CreditHistoryEntry] = {}
     for doc in docs:
         for entry in (doc.credit_history or []):
@@ -114,8 +115,16 @@ def _rollup_credit_docs(docs: list[StudentCredit]) -> tuple[int, list[CreditHist
             if key not in dedup:
                 dedup[key] = entry
     history = sorted(dedup.values(), key=lambda e: e.awarded_at, reverse=True)
-    total = sum(int(e.points_awarded or 0) for e in history)
-    return total, history
+    semester_totals: Dict[str, int] = {}
+    for entry in history:
+        semester = entry.semester or "Unknown"
+        semester_totals[semester] = semester_totals.get(semester, 0) + int(entry.points_awarded or 0)
+    current_semester = await get_current_semester()
+    if current_semester:
+        total = semester_totals.get(current_semester, 0)
+    else:
+        total = sum(int(e.points_awarded or 0) for e in history)
+    return total, history, semester_totals, current_semester
 
 
 @router.get("/tutor/me")
@@ -148,7 +157,7 @@ async def list_tutor_students(current_user: User = Depends(require_role(UserRole
         seen.add(identity)
 
         linked = await _linked_credit_docs_for_tutor(d, tutor_email)
-        total, _ = _rollup_credit_docs(linked)
+        total, _, _, _ = await _rollup_credit_docs(linked)
         rows.append(
             {
                 "student_name": d.student_name,
@@ -181,7 +190,7 @@ async def get_tutor_student_detail(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found for this tutor")
 
     linked_docs = await _linked_credit_docs_for_tutor(doc, tutor_email)
-    total_credits, rolled_history = _rollup_credit_docs(linked_docs)
+    total_credits, rolled_history, semester_totals, current_semester = await _rollup_credit_docs(linked_docs)
 
     cert_points_map: Dict[str, int] = {
         entry.cert_number: int(entry.points_awarded or 0)
@@ -232,6 +241,7 @@ async def get_tutor_student_detail(
                     "certificate_number": dc.cert_number,
                     "event_date": dc.created_at,
                     "credit_points": int(cert_points_map.get(dc.cert_number, 0)),
+                    "semester": entry.semester or "Unknown",
                     "awarded_at": dc.created_at,
                     "certificate_image_url": dc.png_url,
                 }
@@ -245,6 +255,7 @@ async def get_tutor_student_detail(
                 "certificate_number": entry.cert_number,
                 "event_date": event_date,
                 "credit_points": entry.points_awarded,
+                "semester": entry.semester or "Unknown",
                 "awarded_at": entry.awarded_at,
                 "certificate_image_url": cert.png_url if cert else None,
             }
@@ -260,6 +271,11 @@ async def get_tutor_student_detail(
         "batch": doc.batch,
         "section": doc.section,
         "total_credits": total_credits,
+        "current_semester": current_semester,
+        "semester_totals": [
+            {"semester": sem, "total_credits": total}
+            for sem, total in sorted(semester_totals.items())
+        ],
         "event_details": event_details,
     }
 
@@ -576,12 +592,14 @@ async def verify_credit_point_submission(
         ).insert()
 
     cert_number = f"STU-MANUAL-{str(submission.id)[-8:].upper()}"
+    semester = submission.semester or (await get_current_semester() or "Unknown")
     entry = CreditHistoryEntry(
         cert_number=cert_number,
         event_name="Student Manual Submission",
         club_name="Student Upload",
         cert_type=submission.cert_type,
         points_awarded=int(rule.points or 0),
+        semester=semester,
         awarded_at=datetime.utcnow(),
     )
     student_doc.credit_history.append(entry)
@@ -656,12 +674,14 @@ async def add_manual_tutor_certificate(
     if not cert_number:
         cert_number = f"MANUAL-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
+    semester = await get_current_semester() or "Unknown"
     entry = CreditHistoryEntry(
         cert_number=cert_number,
         event_name="Manual Entry",
         club_name=(current_user.department or "Tutor Dashboard"),
         cert_type=cert_type,
         points_awarded=rule.points,
+        semester=semester,
         awarded_at=datetime.utcnow(),
     )
 

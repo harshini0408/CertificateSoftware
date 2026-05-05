@@ -5,6 +5,7 @@ from ..models.certificate import Certificate, CertStatus
 from ..models.credit_rule import CreditRule
 from ..models.student_credit import CreditHistoryEntry, StudentCredit
 from ..models.user import User, UserRole
+from ..services.semester_service import get_current_semester
 
 
 def _norm_email(value: str | None) -> str:
@@ -88,12 +89,14 @@ async def award_credits(certificate: Certificate) -> None:
             "tutor_email": {"$ne": None},
         })
 
+    semester = await get_current_semester() or "Unknown"
     entry = CreditHistoryEntry(
         cert_number=certificate.cert_number,
         event_name=certificate.snapshot.event_name,
         club_name=certificate.snapshot.club_name,
         cert_type=certificate.snapshot.cert_type,
         points_awarded=rule.points,
+        semester=semester,
         awarded_at=datetime.utcnow(),
     )
 

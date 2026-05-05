@@ -137,9 +137,16 @@ export default function StudentDashboard() {
   const generatedCertificatesCount = (certs || []).filter((c) => ['generated', 'emailed'].includes((c?.status || '').toLowerCase())).length
   const visibleCertificates = (certs || []).filter((c) => c?.status === 'emailed')
   const uploadedVerifiedCount = (manualSubmissions || []).filter((s) => s?.status === 'verified').length
-
   const totalCerts   = generatedCertificatesCount + uploadedVerifiedCount
   const totalCredits = credits?.total_credits ?? 0
+  const currentSemester = credits?.current_semester
+  const semesterTotals = credits?.semester_totals || []
+  const creditHistory = credits?.credit_history || []
+  const historyBySemester = semesterTotals.reduce((acc, item) => {
+    const label = item?.semester || 'Unknown'
+    acc[label] = creditHistory.filter((entry) => (entry.semester || 'Unknown') === label)
+    return acc
+  }, {})
 
   const handleDownload = async (certNumber, certId) => {
     setDownloadingId(certId)
@@ -342,7 +349,7 @@ export default function StudentDashboard() {
                 isLoading={certsLoading || submissionsLoading}
               />
               <StatCard
-                label="Total Credits"
+                label="Current Semester Credits"
                 value={totalCredits}
                 icon={Icons.star}
                 accent="gold"
@@ -356,6 +363,38 @@ export default function StudentDashboard() {
               creditRules={creditRules}
               rulesLoading={rulesLoading}
             />
+
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="section-title">Semester Totals</h2>
+                <span className="text-xs text-gray-500">
+                  {currentSemester ? `Current: ${currentSemester}` : 'Current: —'}
+                </span>
+              </div>
+              <DataTable
+                columns={[
+                  {
+                    key: 'semester',
+                    header: 'Semester',
+                    render: (v) => (
+                      <span className="text-sm font-medium text-gray-700">
+                        {v || 'Unknown'}{v === currentSemester ? ' (Current)' : ''}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'total_credits',
+                    header: 'Total Credits',
+                    align: 'right',
+                    render: (v) => <span className="font-semibold text-navy">{v ?? 0}</span>,
+                  },
+                ]}
+                data={semesterTotals}
+                isLoading={creditsLoading}
+                emptyMessage="No semester totals yet."
+                rowKey="semester"
+              />
+            </div>
 
             <div className="card p-5">
               <h2 className="section-title mb-3">Submit Certificate For Credit Verification</h2>
@@ -419,6 +458,7 @@ export default function StudentDashboard() {
               <DataTable
                 columns={[
                   { key: 'cert_type', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
+                  { key: 'semester', header: 'Semester', render: (v) => <span className="text-xs text-gray-500">{v || 'Unknown'}</span> },
                   { key: 'event_date', header: 'Event Date', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
                   { key: 'certificate_image_url', header: 'Certificate', render: (v) => (
                     v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View Image</a> : '—'
@@ -441,6 +481,7 @@ export default function StudentDashboard() {
                 columns={[
                  { key: 'cert_number', header: 'Cert No.', searchKey: true,
                    render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v}</span> },
+                 { key: 'semester', header: 'Semester', render: (v) => <span className="text-xs text-gray-500">{v || 'Unknown'}</span> },
                  { key: 'event_name', header: 'Event' },
                  { key: 'club_name', header: 'Club',
                    render: (v) => <span className="text-xs text-gray-500">{v}</span> },
@@ -451,12 +492,52 @@ export default function StudentDashboard() {
                  { key: 'awarded_at', header: 'Date',
                    render: (v) => v ? new Date(v).toLocaleDateString('en-IN') : '—' }
                ]}
-                data={credits?.credit_history ?? []}
+                data={creditHistory}
                 isLoading={creditsLoading}
                 emptyMessage="No credit history found."
                 searchable
                 searchPlaceholder="Search history..."
               />
+            </div>
+
+            <div>
+              <h2 className="section-title mb-3">Certificates by Semester</h2>
+              {semesterTotals.length === 0 ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                  No semester data yet.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {semesterTotals.map((item) => {
+                    const semester = item?.semester || 'Unknown'
+                    const rows = historyBySemester[semester] || []
+                    return (
+                      <div key={semester} className="card p-4">
+                        <div className="mb-3 flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-foreground">
+                            {semester}{semester === currentSemester ? ' (Current)' : ''}
+                          </h3>
+                          <span className="text-xs text-gray-500">Total: {item?.total_credits ?? 0}</span>
+                        </div>
+                        <DataTable
+                          columns={[
+                            { key: 'cert_number', header: 'Cert No.', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
+                            { key: 'event_name', header: 'Event' },
+                            { key: 'club_name', header: 'Club', render: (v) => <span className="text-xs text-gray-500">{v || '—'}</span> },
+                            { key: 'cert_type', header: 'Type', render: (v) => <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${TYPE_COLORS[v] ?? 'bg-gray-100 text-gray-600'}`}>{(v || 'participant').replace(/_/g, ' ')}</span> },
+                            { key: 'points_awarded', header: 'Credits', align: 'right', render: (v) => <span className="font-semibold text-green-700">+{v ?? 0}</span> },
+                            { key: 'awarded_at', header: 'Date', render: (v) => v ? new Date(v).toLocaleDateString('en-IN') : '—' },
+                          ]}
+                          data={rows}
+                          isLoading={creditsLoading}
+                          emptyMessage="No certificates for this semester."
+                          rowKey="cert_number"
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             <div>

@@ -95,6 +95,10 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
     events = await Event.find(Event.club_id == club_id).to_list()
     responses = []
     for e in events:
+        actual_count = await Participant.find(Participant.event_id == e.id).count()
+        if actual_count != e.participant_count:
+            await e.set({"participant_count": actual_count})
+            e = await Event.get(e.id)
         cert_count = await _count_event_certificates(e.id)
         responses.append(_event_response(e, cert_count=cert_count))
     return responses

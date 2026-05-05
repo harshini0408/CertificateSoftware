@@ -17,6 +17,7 @@ from ...models.manual_credit_submission import ManualCreditSubmission, ManualSub
 from ...models.event import Event
 from ...models.club import Club
 from ...services.storage_service import storage_url_to_path
+from ...services.semester_service import get_current_semester
 
 router = APIRouter(tags=["Student"])
 
@@ -97,6 +98,7 @@ async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT
 
 @router.get("/students/me/credits")
 async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    current_semester = await get_current_semester()
     email = _norm_email(current_user.email)
     reg_no = (current_user.registration_number or "").strip()
     query = {
@@ -109,7 +111,13 @@ async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT
 
     credit_docs = await StudentCredit.find(query).to_list()
     if not credit_docs:
-        return {"total_credits": 0, "breakdown": [], "credit_history": []}
+        return {
+            "total_credits": 0,
+            "breakdown": [],
+            "credit_history": [],
+            "current_semester": current_semester,
+            "semester_totals": [],
+        }
 
     all_history = []
     for doc in credit_docs:
@@ -124,21 +132,35 @@ async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT
     all_history = list(dedup.values())
     all_history = await _filter_emailed_credit_entries(all_history)
 
-    # Build breakdown by cert_type
+    # Build breakdown by cert_type for the current semester if set
     breakdown = {}
-    for entry in all_history:
+    semester_history = all_history
+    if current_semester:
+        semester_history = [e for e in all_history if (e.semester or "Unknown") == current_semester]
+
+    for entry in semester_history:
         ct = entry.cert_type
         if ct not in breakdown:
             breakdown[ct] = {"cert_type": ct, "count": 0, "credits": 0}
         breakdown[ct]["count"] += 1
         breakdown[ct]["credits"] += entry.points_awarded
 
-    total_credits = sum(entry.points_awarded for entry in all_history)
+    semester_totals = {}
+    for entry in all_history:
+        semester = entry.semester or "Unknown"
+        semester_totals[semester] = semester_totals.get(semester, 0) + int(entry.points_awarded or 0)
+
+    total_credits = semester_totals.get(current_semester, 0) if current_semester else sum(entry.points_awarded for entry in all_history)
 
     return {
         "total_credits": total_credits,
         "breakdown": list(breakdown.values()),
         "credit_history": [e.model_dump() for e in sorted(all_history, key=lambda e: e.awarded_at, reverse=True)],
+        "current_semester": current_semester,
+        "semester_totals": [
+            {"semester": sem, "total_credits": total}
+            for sem, total in sorted(semester_totals.items())
+        ],
     }
 
 
@@ -254,6 +276,7 @@ async def get_my_manual_credit_submissions(current_user: User = Depends(require_
             "review_comment": s.review_comment,
             "reviewed_at": s.reviewed_at,
             "submitted_at": s.submitted_at,
+            "semester": s.semester,
         }
         for s in submissions
     ]
@@ -312,6 +335,7 @@ async def create_manual_credit_submission(
     target.write_bytes(data)
 
     image_url = f"/storage/manual_credit_uploads/{saved_name}"
+    current_semester = await get_current_semester() or "Unknown"
     submission = await ManualCreditSubmission(
         student_email=email,
         student_name=(current_user.name or "").strip(),
@@ -320,6 +344,7 @@ async def create_manual_credit_submission(
         cert_type=rule.cert_type,
         event_date=parsed_event_date,
         certificate_image_url=image_url,
+        semester=current_semester,
         status=ManualSubmissionStatus.PENDING,
         points_awarded=0,
         submitted_at=datetime.utcnow(),
@@ -337,31 +362,62 @@ async def create_manual_credit_submission(
 @router.get("/students/{student_id}/credits")
 async def get_student_credits(student_id: str):
     """Fetch credits for a specific student by email (preferred) or registration number."""
+    current_semester = await get_current_semester()
     student_id_norm = _norm_email(student_id)
-    credit_doc = await StudentCredit.find_one({
-        "student_email": {"$regex": f"^{re.escape(student_id_norm)}$", "$options": "i"}
-    })
-    if not credit_doc:
-        credit_doc = await StudentCredit.find_one(
-            StudentCredit.registration_number == student_id
-        )
-    if not credit_doc:
-        return {"total_credits": 0, "breakdown": [], "credit_history": []}
+    credit_docs = await StudentCredit.find({
+        "$or": [
+            {"student_email": {"$regex": f"^{re.escape(student_id_norm)}$", "$options": "i"}},
+            {"registration_number": student_id},
+        ]
+    }).to_list()
+    if not credit_docs:
+        return {
+            "total_credits": 0,
+            "breakdown": [],
+            "credit_history": [],
+            "current_semester": current_semester,
+            "semester_totals": [],
+        }
 
-    filtered_history = await _filter_emailed_credit_entries(credit_doc.credit_history)
+    all_history = []
+    for doc in credit_docs:
+        all_history.extend(doc.credit_history or [])
+
+    dedup = {}
+    for entry in all_history:
+        key = entry.cert_number or f"manual::{entry.awarded_at.isoformat()}::{entry.cert_type}"
+        if key not in dedup:
+            dedup[key] = entry
+    filtered_history = await _filter_emailed_credit_entries(list(dedup.values()))
 
     breakdown = {}
-    for entry in filtered_history:
+    semester_history = filtered_history
+    if current_semester:
+        semester_history = [e for e in filtered_history if (e.semester or "Unknown") == current_semester]
+
+    for entry in semester_history:
         ct = entry.cert_type
         if ct not in breakdown:
             breakdown[ct] = {"cert_type": ct, "count": 0, "credits": 0}
         breakdown[ct]["count"] += 1
         breakdown[ct]["credits"] += entry.points_awarded
 
+    semester_totals = {}
+    for entry in filtered_history:
+        semester = entry.semester or "Unknown"
+        semester_totals[semester] = semester_totals.get(semester, 0) + int(entry.points_awarded or 0)
+
+    total_credits = semester_totals.get(current_semester, 0) if current_semester else sum(e.points_awarded for e in filtered_history)
+
     return {
-        "total_credits": sum(e.points_awarded for e in filtered_history),
+        "total_credits": total_credits,
         "breakdown": list(breakdown.values()),
         "credit_history": [e.model_dump() for e in filtered_history],
+        "current_semester": current_semester,
+        "semester_totals": [
+            {"semester": sem, "total_credits": total}
+            for sem, total in sorted(semester_totals.items())
+        ],
     }
 
 

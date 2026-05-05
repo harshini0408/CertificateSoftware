@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
-import StatusBadge from '../../components/StatusBadge'
 import FileUpload from '../../components/FileUpload'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import DataTable from '../../components/DataTable'
@@ -100,7 +99,6 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                               ? formatDateOnly(event.event_date)
                               : '—'],
             ['Academic Year', event?.academic_year || '—'],
-            ['Status',      <StatusBadge key="s" status={event?.status ?? 'draft'} />],
           ].map(([label, value]) => (
             <div key={label} className="flex flex-col gap-0.5">
               <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -602,14 +600,13 @@ export default function EventDetail() {
                 <h1 className="text-2xl font-bold text-foreground">
                   {event?.name ?? 'Event Detail'}
                 </h1>
-                <div className="mt-1 flex items-center gap-2">
-                  <StatusBadge status={event?.status ?? 'draft'} />
-                  {event?.event_date && (
+                {event?.event_date && (
+                  <div className="mt-1 flex items-center gap-2">
                     <span className="text-xs text-gray-500">
                       {formatDateOnly(event.event_date)}
                     </span>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
 

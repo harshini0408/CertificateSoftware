@@ -135,7 +135,7 @@ function EventsTab() {
   const onSubmit = async (values) => {
     const payload = {
       name: values.name,
-      event_date: values.event_date || null,
+      event_date: values.event_date,
     }
     const created = await createEvent.mutateAsync(payload)
     const eventId = created?.id || created?._id
@@ -216,8 +216,14 @@ function EventsTab() {
               </div>
 
               <div>
-                <label className="form-label" htmlFor="event_date">Event Date</label>
-                <input id="event_date" type="date" className="form-input" {...register('event_date')} />
+                <label className="form-label" htmlFor="event_date">Event Date *</label>
+                <input
+                  id="event_date"
+                  type="date"
+                  className={`form-input ${errors.event_date ? 'form-input-error' : ''}`}
+                  {...register('event_date', { required: 'Event date is required' })}
+                />
+                {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
               </div>
 
               <div className="pt-2 flex justify-end gap-3">
