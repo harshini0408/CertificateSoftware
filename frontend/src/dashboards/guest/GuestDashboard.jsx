@@ -18,17 +18,18 @@ export default function GuestDashboard() {
   const [submittedName, setSubmittedName] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const forceFresh = searchParams.get('new') === '1' || searchParams.get('home') === '1'
-  const [isRestoring, setIsRestoring] = useState(!forceFresh)
+  const resumeRequested = searchParams.get('resume') === '1'
+  const [isRestoring, setIsRestoring] = useState(resumeRequested && !forceFresh)
 
   useEffect(() => {
-    if (forceFresh) {
+    if (forceFresh || !resumeRequested) {
       setSubmittedName('')
       setIsRestoring(false)
     }
-  }, [forceFresh])
+  }, [forceFresh, resumeRequested])
 
   useEffect(() => {
-    if (forceFresh) return
+    if (forceFresh || !resumeRequested) return
     let mounted = true
 
     const restoreSession = async () => {
@@ -48,7 +49,7 @@ export default function GuestDashboard() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [forceFresh, resumeRequested])
 
   // Start fresh wrapper
   const handleStartSession = async (e) => {
