@@ -100,17 +100,21 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
         certs_by_event.setdefault(str(cert.event_id), []).append(cert)
 
     responses = []
+    issued_candidates = set(_issued_status_candidates())
     for e in events:
         event_certs = certs_by_event.get(str(e.id), [])
-        if not event_certs:
-            continue
-        if any(cert.status != CertStatus.EMAILED for cert in event_certs):
-            continue
         actual_count = await Participant.find(Participant.event_id == e.id).count()
         if actual_count != e.participant_count:
             await e.set({"participant_count": actual_count})
             e = await Event.get(e.id)
-        cert_count = len(event_certs)
+        cert_count = sum(
+            1
+            for cert in event_certs
+            if (
+                (getattr(cert.status, "value", None) or str(cert.status))
+                in issued_candidates
+            )
+        )
         responses.append(_event_response(e, cert_count=cert_count))
     return responses
 

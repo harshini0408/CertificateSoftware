@@ -647,9 +647,6 @@ def _render_guest_certificate(
     _FONTS_DIR = Path(__file__).resolve().parents[2] / "static" / "fonts"
     _FONT_CANDIDATES = [
         _FONTS_DIR / "Montserrat-Bold.ttf",
-        _FONTS_DIR / "PlayfairDisplay.ttf",
-        _FONTS_DIR / "EBGaramond.ttf",
-        _FONTS_DIR / "Roboto.ttf",
     ]
     DEFAULT_FONT_PERCENT = 2.7
 
@@ -686,7 +683,7 @@ def _render_guest_certificate(
             font=font,
             fill=(30, 30, 30, 255),
             anchor="mm",
-            stroke_width=1,
+            stroke_width=2,
             stroke_fill=(30, 30, 30, 255),
         )
 

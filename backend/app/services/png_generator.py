@@ -53,14 +53,14 @@ def _format_print_value(value: object) -> str:
 _STATIC_DIR    = Path(__file__).parent.parent / "static"
 _CERT_TMPL_DIR = _STATIC_DIR / "certificate_templates"
 _FONTS_DIR     = _STATIC_DIR / "fonts"
-_DEFAULT_FONT  = _FONTS_DIR / "PlayfairDisplay.ttf"
+_DEFAULT_FONT  = _FONTS_DIR / "Montserrat-Bold.ttf"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PILLOW OVERLAY PIPELINE — PNG image templates
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _load_font(size: int):
-    """Load PlayfairDisplay if available, else fall back to the default PIL font."""
+    """Load Montserrat-Bold if available, else fall back to the default PIL font."""
     try:
         from PIL import ImageFont
         if _DEFAULT_FONT.exists():
@@ -290,23 +290,39 @@ def _render_certificate_pillow(
         # Falls back to DEFAULT_FONT_PERCENT if not stored (backward-compatible).
         fsp = float(pos.get("font_size_percent") or DEFAULT_FONT_PERCENT)
         fsp = max(1.0, min(fsp, 8.0))
-        field_font_size = max(20, int(img_w * fsp / 100))
+        field_font_size = max(20, int(img_w * fsp / 100) - 3)
         if normalized_key in cert_number_keys:
             field_font_size = max(12, field_font_size - 8)
         field_font = _load_font(field_font_size)
 
         x = (pos["x_percent"] / 100) * img_w
         y = (pos["y_percent"] / 100) * img_h
-        draw.text((x, y), value, font=field_font, fill=(30, 30, 30, 255), anchor="mm")
+        draw.text(
+            (x, y),
+            value,
+            font=field_font,
+            fill=(30, 30, 30, 255),
+            anchor="mm",
+            stroke_width=1,
+            stroke_fill=(30, 30, 30, 255),
+        )
         if cert_number and normalized_key in cert_number_keys:
             cert_drawn_from_mapping = True
 
     # Certificate number fallback for templates not yet configured with Cert position.
     if cert_number and not cert_drawn_from_mapping:
-        cert_font = _load_font(max(12, int(img_w * 0.025) - 8))
+        cert_font = _load_font(max(12, int(img_w * 0.025) - 11))
         cert_x = int(img_w * 0.83)
         cert_y = int(img_h * 0.048)
-        draw.text((cert_x, cert_y), cert_number, font=cert_font, fill=(44, 61, 127, 255), anchor="lm")
+        draw.text(
+            (cert_x, cert_y),
+            cert_number,
+            font=cert_font,
+            fill=(44, 61, 127, 255),
+            anchor="lm",
+            stroke_width=1,
+            stroke_fill=(44, 61, 127, 255),
+        )
 
     # ── Assets (placed positions if present) ─────────────────────────────
     def _place_asset(path: str, key: str, fallback_wh: tuple[int, int], fallback_xy: tuple[float, float]):
@@ -335,7 +351,7 @@ def _render_certificate_pillow(
     if logo_path:
         _place_asset(logo_path, "logo", (180, 180), (0.05, 0.04))
     if sig_path:
-        _place_asset(sig_path, "signature", (220, 80), (0.08, 0.82))
+        _place_asset(sig_path, "signature", (180, 60), (0.08, 0.82))
 
     # ── Save ──────────────────────────────────────────────────────────────
     out_path = Path(output_path)

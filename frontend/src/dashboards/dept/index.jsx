@@ -245,7 +245,26 @@ function EventDetailView({ eventId }) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { data: event, isLoading } = useDeptEvent(eventId)
-  const [activeTab, setActiveTabState] = useState(() => searchParams.get('eventTab') || 'overview')
+  const [activeTab, setActiveTabState] = useState('overview')
+
+  const deriveDefaultTab = (evt) => {
+    if (!evt) return 'overview'
+    if (evt.preview_certificate_id || evt.preview_approved || (evt.cert_count ?? 0) > 0) {
+      return 'certificates'
+    }
+    return 'overview'
+  }
+
+  useEffect(() => {
+    const requested = searchParams.get('eventTab')
+    if (requested) {
+      if (requested !== activeTab) setActiveTabState(requested)
+      return
+    }
+    if (!event) return
+    const derived = deriveDefaultTab(event)
+    if (derived !== activeTab) setActiveTabState(derived)
+  }, [searchParams, event, activeTab])
 
   const setActiveTab = (tab) => {
     setActiveTabState(tab)

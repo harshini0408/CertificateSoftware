@@ -524,7 +524,13 @@ export default function EventDetail() {
 
   const navigate = useNavigate()
   const { data: event, isLoading } = useEvent(club_id, event_id)
-  const activeTab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'overview'
+  const deriveDefaultTab = (evt) => {
+    if ((evt?.cert_count ?? 0) > 0) return 'certificates'
+    if ((evt?.participant_count ?? 0) > 0) return 'participants'
+    return 'overview'
+  }
+  const requestedTab = searchParams.get('tab')
+  const activeTab = TABS.includes(requestedTab) ? requestedTab : deriveDefaultTab(event)
 
   const setActiveTab = (tab) => {
     setSearchParams(tab === 'overview' ? {} : { tab }, { replace: true })

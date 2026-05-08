@@ -439,10 +439,10 @@ def _render_dept_certificate(
     contrib_font = _load_font(max(1, int(ts)))
     cert_font = _load_font(max(1, int(zs)))
 
-    draw.text((int(w * nx), int(h * ny)), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm", stroke_width=1, stroke_fill=(28, 35, 70, 255))
-    draw.text((int(w * cx), int(h * cy)), f"Class: {class_name}", fill=(45, 45, 45, 255), font=class_font, anchor="mm", stroke_width=1, stroke_fill=(45, 45, 45, 255))
-    draw.text((int(w * tx), int(h * ty)), f"Contribution: {contribution}", fill=(45, 45, 45, 255), font=contrib_font, anchor="mm", stroke_width=1, stroke_fill=(45, 45, 45, 255))
-    draw.text((int(w * zx), int(h * zy)), cert_number, fill=(44, 61, 127, 255), font=cert_font, anchor="lm", stroke_width=1, stroke_fill=(44, 61, 127, 255))
+    draw.text((int(w * nx), int(h * ny)), name, fill=(28, 35, 70, 255), font=name_font, anchor="mm", stroke_width=2, stroke_fill=(28, 35, 70, 255))
+    draw.text((int(w * cx), int(h * cy)), f"Class: {class_name}", fill=(45, 45, 45, 255), font=class_font, anchor="mm", stroke_width=2, stroke_fill=(45, 45, 45, 255))
+    draw.text((int(w * tx), int(h * ty)), f"Contribution: {contribution}", fill=(45, 45, 45, 255), font=contrib_font, anchor="mm", stroke_width=2, stroke_fill=(45, 45, 45, 255))
+    draw.text((int(w * zx), int(h * zy)), cert_number, fill=(44, 61, 127, 255), font=cert_font, anchor="lm", stroke_width=2, stroke_fill=(44, 61, 127, 255))
 
     def _paste_scaled(path: Optional[str], field_id: str, def_x: float, def_y: float, max_w_ratio: float, max_h_ratio: float):
         if not path:
@@ -510,7 +510,7 @@ def _render_dept_certificate_dynamic(
             value = _clean_text_value(row.get(field))
 
         if value:
-            draw.text((int(w * x / 100), int(h * y / 100)), value, fill=(28, 35, 70, 255), font=font, anchor="mm", stroke_width=1, stroke_fill=(28, 35, 70, 255))
+            draw.text((int(w * x / 100), int(h * y / 100)), value, fill=(28, 35, 70, 255), font=font, anchor="mm", stroke_width=2, stroke_fill=(28, 35, 70, 255))
 
     cert_pos = field_positions.get("_cert_number")
     if cert_pos:
@@ -521,7 +521,7 @@ def _render_dept_certificate_dynamic(
             fill=(44, 61, 127, 255),
             font=cert_font,
             anchor="lm",
-            stroke_width=1,
+            stroke_width=2,
             stroke_fill=(44, 61, 127, 255),
         )
 
@@ -702,26 +702,7 @@ async def list_dept_events(
         DeptEvent.department == department,
         DeptEvent.created_by_user_id == user_id,
     ).sort(-DeptEvent.created_at).to_list()
-    event_ids = [str(evt.id) for evt in events]
-    certs = await DeptCertificate.find(
-        DeptCertificate.department == department,
-        {"event_id": {"$in": event_ids}},
-    ).to_list() if event_ids else []
-
-    certs_by_event: dict[str, list[DeptCertificate]] = {}
-    for cert in certs:
-        certs_by_event.setdefault(str(cert.event_id or ""), []).append(cert)
-
-    completed_events = []
-    for evt in events:
-        event_certs = certs_by_event.get(str(evt.id), [])
-        if not event_certs:
-            continue
-        if any(not c.emailed_at for c in event_certs):
-            continue
-        completed_events.append(evt)
-
-    return [_event_response(evt) for evt in completed_events]
+    return [_event_response(evt) for evt in events]
 
 
 @router.get("/dept/events/{event_id}")
