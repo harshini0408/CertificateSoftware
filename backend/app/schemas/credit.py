@@ -30,13 +30,14 @@ class CreditHistoryEntrySchema(BaseModel):
     club_name: str
     cert_type: str
     points_awarded: int
+    semester: Optional[str] = None
     awarded_at: datetime
 
 
 class StudentCreditResponse(BaseModel):
     id: str
     student_email: str
-    registration_number: str
+    registration_number: Optional[str] = None
     student_name: str
     department: Optional[str] = None
     batch: Optional[str] = None

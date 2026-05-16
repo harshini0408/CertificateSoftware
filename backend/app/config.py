@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """Application configuration loaded from environment variables / .env file."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(Path(__file__).resolve().parents[1] / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # ── MongoDB ──────────────────────────────────────────────────────────
     mongodb_url: str = "mongodb://localhost:27017"
-    db_name: str = "psgicerts"
+    db_name: str = "certsoftware"
 
     # ── JWT ──────────────────────────────────────────────────────────────
     access_token_expire_minutes: int = 30
@@ -53,14 +53,27 @@ class Settings(BaseSettings):
     # ── Derived helpers ──────────────────────────────────────────────────
 
     @property
+    def project_root(self) -> Path:
+        """Workspace root (parent of backend/)."""
+        return Path(__file__).resolve().parents[2]
+
+    @property
+    def storage_root(self) -> Path:
+        """Absolute storage root, stable across different launch directories."""
+        p = Path(self.storage_path)
+        if p.is_absolute():
+            return p.resolve()
+        return (self.project_root / p).resolve()
+
+    @property
     def certs_dir(self) -> Path:
         """Absolute path to certificate PNG storage."""
-        return Path(self.storage_path).resolve() / "certs"
+        return self.storage_root / "certs"
 
     @property
     def assets_dir(self) -> Path:
         """Absolute path to club asset storage (logos, signatures)."""
-        return Path(self.storage_path).resolve() / "assets"
+        return self.storage_root / "assets"
 
     @property
     def is_production(self) -> bool:
@@ -70,6 +83,10 @@ class Settings(BaseSettings):
         """Create storage directories if they don't exist."""
         self.certs_dir.mkdir(parents=True, exist_ok=True)
         self.assets_dir.mkdir(parents=True, exist_ok=True)
+        (self.storage_root / "dept_templates").mkdir(parents=True, exist_ok=True)
+        (self.storage_root / "tmp").mkdir(parents=True, exist_ok=True)
+        (self.storage_root / "guest_templates").mkdir(parents=True, exist_ok=True)
+        (self.certs_dir / "guest").mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache()

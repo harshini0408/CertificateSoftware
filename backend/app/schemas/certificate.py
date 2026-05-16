@@ -16,6 +16,7 @@ class CertificateResponse(BaseModel):
     cert_type: Optional[str] = None
     snapshot: Dict[str, Any] = Field(default_factory=dict)
     status: str
+    failure_reason: Optional[str] = None
     pdf_url: Optional[str] = None
     generated_at: Optional[datetime] = None
     issued_at: Optional[datetime] = None

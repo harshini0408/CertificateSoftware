@@ -13,7 +13,6 @@ class ClubCreate(BaseModel):
         pattern=r"^[A-Z0-9]+$",
         description="Uppercase letters and digits only. Used in certificate numbers.",
     )
-    contact_email: EmailStr
 
 
 class ClubUpdate(BaseModel):

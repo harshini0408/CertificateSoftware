@@ -58,7 +58,7 @@ app/
 ├── models/              # 12 Beanie Document models
 ├── schemas/             # Pydantic request/response schemas
 ├── routers/             # 11 FastAPI routers (auth, admin, clubs, etc.)
-├── services/            # Business logic (cert gen, email, QR, etc.)
+├── services/            # Business logic (cert gen, email, template rendering, etc.)
 ├── core/                # Security (JWT/bcrypt) + dependencies
 └── static/
     ├── templates/       # 6 Jinja2 HTML certificate templates
@@ -76,7 +76,7 @@ app/
 
 ## Certificate Flow
 1. Club coordinator creates event + maps templates
-2. Upload participants via Excel or QR registration
+2. Upload participants via Excel or manual registration
 3. Trigger bulk generation → BackgroundTasks render HTML → PNG
 4. Certificates emailed with Gmail API (500/day cap)
 5. Overflow queued → scheduler resumes at 00:05 daily

@@ -72,9 +72,6 @@ mongodb_data/
 # Application Files
 storage/certs/
 storage/assets/
-*.png
-*.jpg
-*.jpeg
 *.pdf
 *.xlsx
 *.xls

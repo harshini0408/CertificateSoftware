@@ -23,9 +23,10 @@ class FieldSlot(BaseModel):
     y: float
     width: float
     height: float
-    font_size: int = 24
+    font_size: int = 40
     font_weight: str = "normal"
     text_align: str = "center"
+    color: Optional[str] = None           # e.g. "#1B4D3E"; None = inherit from template
 
 
 class StaticElement(BaseModel):
@@ -70,6 +71,10 @@ class Template(Document):
     font_color: Optional[str] = None
 
     is_preset: bool = False
+    is_editable: bool = False                             # True only for club-owned forks
+    source_preset_id: Optional[PydanticObjectId] = None   # tracks which preset this copy came from
+    forked_from: Optional[PydanticObjectId] = None        # points to the source preset _id
+    last_edited_at: Optional[datetime] = None             # auto-updated on every PATCH
     preview_url: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

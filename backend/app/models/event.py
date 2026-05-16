@@ -1,12 +1,9 @@
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any, Literal
 
 from beanie import Document, PydanticObjectId
 from pydantic import BaseModel, Field, field_validator
-
-
-# ── Enums ────────────────────────────────────────────────────────────────
 
 class EventStatus(str, Enum):
     DRAFT = "draft"
@@ -15,25 +12,7 @@ class EventStatus(str, Enum):
     COMPLETED = "completed"
 
 
-# ── Embedded sub-models ──────────────────────────────────────────────────
-
-class QRConfig(BaseModel):
-    """QR-based registration configuration embedded in an Event."""
-    custom_fields: List[str] = Field(default_factory=list)   # max 5 labels
-    expires_at: Optional[datetime] = None
-    token: Optional[str] = None
-    is_active: bool = False
-
-    @field_validator("custom_fields")
-    @classmethod
-    def validate_custom_fields(cls, v):
-        if len(v) > 5:
-            raise ValueError("QR custom fields limited to 5")
-        return v
-
-
 class EventAssets(BaseModel):
-    """Uploaded logo + signature paths/hashes embedded in an Event."""
     logo_path: Optional[str] = None
     logo_hash: Optional[str] = None
     logo_url: Optional[str] = None
@@ -42,27 +21,37 @@ class EventAssets(BaseModel):
     signature_url: Optional[str] = None
 
 
-# ── Document ─────────────────────────────────────────────────────────────
-
 class Event(Document):
-    """Event document — belongs to a club."""
-
     club_id: PydanticObjectId
     name: str
     description: Optional[str] = None
     event_date: Optional[datetime] = None
+    academic_year: Optional[
+        Literal[
+            "2025-2026(EVEN)",
+            "2026-2027(ODD)",
+            "2026-27 ODD",
+            "2026-27 EVEN",
+        ]
+    ] = None
     status: EventStatus = EventStatus.DRAFT
 
-    # Maps cert_type label → template ObjectId
-    template_map: Dict[str, Optional[PydanticObjectId]] = Field(default_factory=dict)
+    template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
 
-    qr_config: QRConfig = Field(default_factory=QRConfig)
+    @field_validator("template_map", mode="before")
+    @classmethod
+    def coerce_template_map(cls, v: Any) -> Dict[str, Optional[str]]:
+        if not isinstance(v, dict):
+            return {}
+        return {key: (str(val) if val is not None else None) for key, val in v.items()}
+
+    template_filename: Optional[str] = None
     assets: EventAssets = Field(default_factory=EventAssets)
-
     mapping_confirmed: bool = False
     participant_count: int = 0
-
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Guest flow fields have been moved to GuestSession model.
 
     class Settings:
         name = "events"

@@ -6,8 +6,59 @@ from ..config import get_settings
 settings = get_settings()
 
 
+def storage_path_to_url(path_or_url: str) -> str:
+    """Convert a local storage path to a public /storage URL.
+
+    If value is already a /storage URL, it is returned as-is.
+    """
+    if not path_or_url:
+        return path_or_url
+    if path_or_url.startswith("/storage/"):
+        return path_or_url
+
+    # Normalize Windows paths and recover URL from legacy absolute paths.
+    normalized = path_or_url.replace("\\", "/")
+    lowered = normalized.lower()
+
+    if "/storage/" in lowered:
+        rel = normalized[lowered.index("/storage/") + len("/storage/"):].lstrip("/")
+        return f"/storage/{rel}"
+    if lowered.startswith("storage/"):
+        rel = normalized[len("storage/"):].lstrip("/")
+        return f"/storage/{rel}"
+    if "/assets/" in lowered:
+        rel = normalized[lowered.index("/assets/") + 1:].lstrip("/")
+        return f"/storage/{rel}"
+    if lowered.startswith("assets/"):
+        return f"/storage/{normalized}"
+    if "/certs/" in lowered:
+        rel = normalized[lowered.index("/certs/") + 1:].lstrip("/")
+        return f"/storage/{rel}"
+    if lowered.startswith("certs/"):
+        return f"/storage/{normalized}"
+
+    try:
+        rel = Path(path_or_url).resolve().relative_to(settings.storage_root)
+        return f"/storage/{rel.as_posix()}"
+    except Exception:
+        return path_or_url
+
+
+def storage_url_to_path(url_or_path: str) -> str:
+    """Convert a public /storage URL to a local path.
+
+    If value is already a local path, it is returned as-is.
+    """
+    if not url_or_path:
+        return url_or_path
+    if url_or_path.startswith("/storage/"):
+        rel = url_or_path[len("/storage/"):]
+        return str(settings.storage_root / Path(rel))
+    return url_or_path
+
+
 def save_cert_png(png_bytes: bytes, club_slug: str, year: int, cert_number: str) -> str:
-    """Persist a certificate PNG to disk and return the file path.
+    """Persist a certificate PNG to disk and return its public URL.
 
     Path: {STORAGE}/certs/{club_slug}/{year}/{cert_number}.png
     """
@@ -16,7 +67,7 @@ def save_cert_png(png_bytes: bytes, club_slug: str, year: int, cert_number: str)
 
     file_path = out_dir / f"{cert_number}.png"
     file_path.write_bytes(png_bytes)
-    return str(file_path)
+    return storage_path_to_url(str(file_path))
 
 
 def get_cert_png_path(club_slug: str, year: int, cert_number: str) -> str:

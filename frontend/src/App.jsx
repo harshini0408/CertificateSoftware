@@ -2,23 +2,33 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 
 import ProtectedRoute from './components/ProtectedRoute'
 import ToastProvider from './components/ToastProvider'
+import AuthSessionSync from './components/AuthSessionSync'
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
-import Login from './pages/Login'
-import AdminDashboard from './pages/AdminDashboard'
-import ClubDashboard from './pages/ClubDashboard'
-import EventDetail from './pages/EventDetail'
-import DeptCoordinatorDashboard from './pages/DeptCoordinatorDashboard'
-import StudentDashboard from './pages/StudentDashboard'
-import VerifyPage from './pages/VerifyPage'
-import VenueRegister from './pages/VenueRegister'
-import TemplateBuilder from './pages/TemplateBuilder'
+import Login from './dashboards/auth/Login'
+import AdminDashboard from './dashboards/superadmin'
+import ClubDashboard from './dashboards/club'
+import EventDetail from './dashboards/club/EventDetail'
+import DeptCoordinatorDashboard from './dashboards/dept'
+import TutorDashboard from './dashboards/tutor'
+import StudentDashboard from './dashboards/student'
+import PrincipalDashboard from './dashboards/principal'
+import HodDashboard from './dashboards/hod'
+import VerifyPage from './pages/Verify'
+import TemplateSelector from './dashboards/club/TemplateSelector'
+import GuestDashboard from './dashboards/guest/GuestDashboard'
+import GuestHistory from './dashboards/guest/GuestHistory'
+import Footer from './components/Footer'
+import Authors from './Authors'
 
 // ── Role constants ─────────────────────────────────────────────────────────────
 const ROLES = {
   SUPER_ADMIN: 'super_admin',
+  PRINCIPAL: 'principal',
+  HOD: 'hod',
   CLUB_COORD: 'club_coordinator',
   DEPT_COORD: 'dept_coordinator',
+  TUTOR: 'tutor',
   STUDENT: 'student',
   GUEST: 'guest',
 }
@@ -28,12 +38,13 @@ export default function App() {
     <>
       {/* Global toast portal */}
       <ToastProvider />
+      <AuthSessionSync />
 
       <Routes>
         {/* ── Public routes ──────────────────────────────────────────────── */}
         <Route path="/login" element={<Login />} />
         <Route path="/verify/:cert_number" element={<VerifyPage />} />
-        <Route path="/register/:token" element={<VenueRegister />} />
+        <Route path="/authors" element={<Authors />} />
 
         {/* ── Super admin ────────────────────────────────────────────────── */}
         <Route
@@ -41,6 +52,26 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.SUPER_ADMIN]}>
               <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Principal ─────────────────────────────────────────────────── */}
+        <Route
+          path="/principal"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.PRINCIPAL, ROLES.SUPER_ADMIN]}>
+              <PrincipalDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── HOD ───────────────────────────────────────────────────────── */}
+        <Route
+          path="/hod"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.HOD, ROLES.SUPER_ADMIN]}>
+              <HodDashboard />
             </ProtectedRoute>
           }
         />
@@ -58,17 +89,35 @@ export default function App() {
           path="/club/:club_id/events/:event_id"
           element={
             <ProtectedRoute
-              allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN, ROLES.GUEST]}
+              allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN]}
             >
               <EventDetail />
             </ProtectedRoute>
           }
         />
         <Route
-          path="/club/:club_id/templates/new"
+          path="/club/:club_id/events/:event_id/templates/select"
           element={
             <ProtectedRoute allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN]}>
-              <TemplateBuilder />
+              <TemplateSelector />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Guest dashboard ────────────────────────────────────────────── */}
+        <Route
+          path="/guest"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.GUEST]}>
+              <GuestDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/guest/history"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.GUEST]}>
+              <GuestHistory />
             </ProtectedRoute>
           }
         />
@@ -79,6 +128,24 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.DEPT_COORD, ROLES.SUPER_ADMIN]}>
               <DeptCoordinatorDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dept/events/:event_id"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.DEPT_COORD, ROLES.SUPER_ADMIN]}>
+              <DeptCoordinatorDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Student ────────────────────────────────────────────────────── */}
+        <Route
+          path="/tutor"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.TUTOR]}>
+              <TutorDashboard />
             </ProtectedRoute>
           }
         />
@@ -97,6 +164,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      <Footer />
     </>
   )
 }

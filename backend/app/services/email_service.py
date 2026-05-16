@@ -6,6 +6,7 @@ Supports multiple providers via configuration:
   - console    : Prints emails to stdout (development)
 """
 
+import asyncio
 import base64
 import logging
 import smtplib
@@ -40,6 +41,26 @@ def _reset_counter_if_new_day() -> None:
 def get_daily_sent_count() -> int:
     _reset_counter_if_new_day()
     return _daily_count
+
+
+async def get_daily_sent_count_db() -> int:
+    """Count emails actually sent today by querying EmailLog.
+
+    This is the authoritative count — it survives server restarts.
+    Use max(in-memory, db) so the cap is never exceeded even after a crash.
+    """
+    from datetime import datetime
+    from ..models.email_log import EmailLog, EmailStatus
+
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    try:
+        db_count = await EmailLog.find(
+            EmailLog.status == EmailStatus.SENT,
+            EmailLog.sent_at >= today_start,
+        ).count()
+        return db_count
+    except Exception:
+        return 0
 
 
 def _increment_counter() -> None:
@@ -153,20 +174,17 @@ def _build_certificate_email(
     msg = MIMEMultipart()
     msg["To"] = recipient_email
     msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
-    msg["Subject"] = f"Your Certificate — {event_name} | {club_name}"
+    msg["Subject"] = f"Your Certificate for {event_name}"
 
     body = (
-        f"Dear {recipient_name},\n\n"
-        f"Congratulations! Please find your certificate for "
-        f'"{event_name}" (organized by {club_name}) attached.\n\n'
-        f"Certificate Number: {cert_number}\n"
-        f"You can verify this certificate at: "
-        f"{settings.base_url}/verify/{cert_number}\n\n"
-        f"Regards,\n{club_name}\nPSG iTech Certificate Platform"
+        "Please find the attached certificate.\n"
+        "Thank you.\n"
+        "With regards,\n"
+        "PSG iTech"
     )
     msg.attach(MIMEText(body, "plain"))
 
-    # Attach PNG
+    # Attach PNG certificate image
     png = Path(png_path)
     if png.exists():
         with open(png, "rb") as f:
@@ -177,7 +195,15 @@ def _build_certificate_email(
                 "Content-Disposition",
                 f'attachment; filename="{cert_number}.png"',
             )
+            # Also embed inline so email clients can preview it
+            part.add_header("Content-ID", f"<certificate_{cert_number}>")
             msg.attach(part)
+        logger.info("Attached certificate PNG: %s", png_path)
+    else:
+        logger.error(
+            "Certificate PNG not found for attachment — cert: %s, path: %s",
+            cert_number, png_path,
+        )
 
     return msg
 
@@ -195,11 +221,21 @@ async def send_certificate_email(
     """Send a certificate email with the PNG attached.
 
     Returns True on success, False on failure.
-    Daily cap is enforced — returns False if limit reached.
+    Daily cap is enforced using the MAX of the in-memory counter and the
+    DB-backed count so the limit holds even after server restarts.
     """
+    global _daily_count
     _reset_counter_if_new_day()
 
-    if _daily_count >= settings.email_daily_limit:
+    # Use the higher of in-memory vs DB count to survive restarts
+    in_mem = _daily_count
+    db_count = await get_daily_sent_count_db()
+    effective_count = max(in_mem, db_count)
+    # Sync in-memory if DB is ahead (post-restart)
+    if db_count > _daily_count:
+        _daily_count = db_count
+
+    if effective_count >= settings.email_daily_limit:
         logger.warning("Daily email limit (%d) reached", settings.email_daily_limit)
         return False
 
@@ -209,7 +245,9 @@ async def send_certificate_email(
             event_name, club_name, png_path,
         )
         provider = get_email_provider()
-        success = provider.send(msg)
+        # Run blocking SMTP in a thread so it doesn't block the event loop
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(None, provider.send, msg)
 
         if success:
             _increment_counter()
@@ -218,4 +256,50 @@ async def send_certificate_email(
 
     except Exception as exc:
         logger.error("send_certificate_email failed: %s", exc)
+        return False
+
+
+async def send_otp_email(recipient_email: str, otp_code: str) -> bool:
+    """Send password-reset OTP email."""
+    try:
+        msg = MIMEMultipart()
+        msg["To"] = recipient_email
+        msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
+        msg["Subject"] = "Password Reset OTP"
+
+        body = (
+            f"Your OTP for password reset is: {otp_code}\n"
+            "This code will expire in 10 minutes.\n"
+            "If you did not request this, please ignore this email."
+        )
+        msg.attach(MIMEText(body, "plain"))
+
+        provider = get_email_provider()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, provider.send, msg)
+    except Exception as exc:
+        logger.error("send_otp_email failed: %s", exc)
+        return False
+
+
+async def send_department_password_otp_email(recipient_email: str, otp_code: str) -> bool:
+    """Send department password-change OTP email."""
+    try:
+        msg = MIMEMultipart()
+        msg["To"] = recipient_email
+        msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
+        msg["Subject"] = "Department Password Change OTP"
+
+        body = (
+            f"Your OTP for department password change is: {otp_code}\n"
+            "This code will expire in 10 minutes.\n"
+            "If you did not request this, please ignore this email."
+        )
+        msg.attach(MIMEText(body, "plain"))
+
+        provider = get_email_provider()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, provider.send, msg)
+    except Exception as exc:
+        logger.error("send_department_password_otp_email failed: %s", exc)
         return False

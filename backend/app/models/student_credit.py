@@ -12,12 +12,14 @@ class CreditHistoryEntry(BaseModel):
     club_name: str
     cert_type: str
     points_awarded: int
+    semester: Optional[str] = None
     awarded_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class StudentCredit(Document):
     student_email: str
-    registration_number: str
+    tutor_email: Optional[str] = None
+    registration_number: Optional[str] = None
     student_name: str = ""
     department: Optional[str] = None
     batch: Optional[str] = None
@@ -30,10 +32,7 @@ class StudentCredit(Document):
     class Settings:
         name = "student_credits"
         indexes = [
-            IndexModel([("student_email", ASCENDING)]),
+            IndexModel([("student_email", ASCENDING)], unique=True),
+            IndexModel([("tutor_email", ASCENDING)]),
             IndexModel([("registration_number", ASCENDING)]),
-            IndexModel(
-                [("student_email", ASCENDING), ("registration_number", ASCENDING)],
-                unique=True,
-            ),
         ]

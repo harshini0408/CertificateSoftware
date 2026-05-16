@@ -1,4 +1,4 @@
-import { NavLink, useParams } from 'react-router-dom'
+import { NavLink, useLocation, useParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useUiStore } from '../store/uiStore'
 
@@ -30,6 +30,11 @@ const icons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
     </svg>
   ),
+  departments: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 21h16M6 21V7a1 1 0 011-1h10a1 1 0 011 1v14M9 10h.01M9 13h.01M9 16h.01M12 10h.01M12 13h.01M12 16h.01M15 10h.01M15 13h.01M15 16h.01" />
+    </svg>
+  ),
   users: (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -59,13 +64,27 @@ const icons = {
 }
 
 // ── Nav item component ────────────────────────────────────────────────────────
-function NavItem({ to, icon, label, end = false }) {
+function NavItem({ to, icon, label, end = false, sidebarOpen }) {
+  const location = useLocation()
+  const [toPath, toQuery = ''] = to.split('?')
+  const isPathMatch = end ? location.pathname === toPath : location.pathname.startsWith(toPath)
+  const currentQuery = location.search.startsWith('?') ? location.search.slice(1) : ''
+  const hasQuery = toQuery.length > 0
+  const isActive = hasQuery
+    ? (isPathMatch && currentQuery === toQuery)
+    : (isPathMatch && currentQuery.length === 0)
+
   return (
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) =>
-        `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-150 ${
+      title={label}
+      className={() =>
+        `flex items-center rounded-lg py-2.5 text-sm font-medium transition-colors duration-150 ${
+          sidebarOpen
+            ? 'justify-start gap-3 px-3'
+            : 'justify-center px-0 lg:justify-start lg:gap-3 lg:px-3'
+        } ${
           isActive
             ? 'bg-navy text-white shadow-sm'
             : 'text-gray-600 hover:bg-navy/8 hover:text-navy'
@@ -73,7 +92,7 @@ function NavItem({ to, icon, label, end = false }) {
       }
     >
       {icon}
-      <span className="truncate">{label}</span>
+      <span className={`truncate ${sidebarOpen ? 'block' : 'hidden lg:block'}`}>{label}</span>
     </NavLink>
   )
 }
@@ -89,23 +108,41 @@ function useNavItems() {
       return [
         { to: '/admin',                          icon: icons.dashboard,   label: 'Overview',      end: true },
         { to: '/admin?tab=clubs',                icon: icons.clubs,       label: 'Clubs' },
+        { to: '/admin?tab=departments',          icon: icons.departments, label: 'Departments' },
         { to: '/admin?tab=users',                icon: icons.users,       label: 'Users' },
+        { to: '/admin?tab=certificate-mapping',  icon: icons.template,    label: 'Certificate Mapping' },
+        { to: '/admin?tab=student-certificates', icon: icons.student,     label: 'Student Certificates' },
         { to: '/admin?tab=certificates',         icon: icons.certificate, label: 'Certificates' },
         { to: '/admin?tab=credit-rules',         icon: icons.creditCard,  label: 'Credit Rules' },
-        { to: '/admin?tab=scan-logs',            icon: icons.scan,        label: 'Scan Logs' },
+      ]
+
+    case 'principal':
+      return [
+        { to: '/principal', icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: '/principal?view=student-search', icon: icons.student, label: 'Student Search' },
+      ]
+
+    case 'hod':
+      return [
+        { to: '/hod', icon: icons.dashboard, label: 'Dashboard', end: true },
       ]
 
     case 'club_coordinator':
       return [
         { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard, label: 'Dashboard', end: true },
-        { to: `/club/${effectiveClubId}?tab=events`,           icon: icons.calendar,  label: 'Events' },
-        { to: `/club/${effectiveClubId}?tab=templates`,        icon: icons.template,  label: 'Templates' },
         { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
+      ]
+
+    case 'guest':
+      return [
+        { to: '/guest?home=1',  icon: icons.dashboard,   label: 'Home',    end: true },
+        { to: '/guest/history', icon: icons.certificate, label: 'History', end: false },
       ]
 
     case 'dept_coordinator':
       return [
-        { to: '/dept', icon: icons.student, label: 'Students', end: true },
+        { to: '/dept',                   icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: '/dept?tab=settings',      icon: icons.settings,  label: 'Settings' },
       ]
 
     case 'student':
@@ -113,9 +150,16 @@ function useNavItems() {
         { to: '/student', icon: icons.certificate, label: 'My Certificates', end: true },
       ]
 
+    case 'tutor':
+      return [
+        { to: '/tutor', icon: icons.student, label: 'Dashboard', end: true },
+        { to: '/tutor?tab=verification', icon: icons.creditCard, label: 'Credit Point Verification' },
+      ]
+
     default:
       return []
   }
+
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -141,10 +185,11 @@ export default function Sidebar() {
           transition-all duration-300 ease-in-out
           lg:sticky lg:shadow-none min-h-0
           ${sidebarOpen ? 'w-60 translate-x-0 border-r' : 'w-0 -translate-x-full border-none px-0'}
+          lg:translate-x-0 lg:border-r lg:w-60
         `}
       >
         {/* Nav links */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 scrollbar-hide">
+        <nav className={`flex-1 overflow-y-auto py-4 space-y-1 scrollbar-hide ${sidebarOpen ? 'px-3' : 'px-2 lg:px-3'}`}>
           {navItems.map((item) => (
             <NavItem
               key={item.to}
@@ -152,16 +197,17 @@ export default function Sidebar() {
               icon={item.icon}
               label={item.label}
               end={item.end}
+              sidebarOpen={sidebarOpen}
             />
           ))}
         </nav>
 
         {/* Footer brand */}
-        <div className="border-t border-gray-100 px-4 py-3">
+        <div className={`border-t border-gray-100 px-4 py-3 ${sidebarOpen ? 'block' : 'hidden lg:block'}`}>
           <p className="text-xs text-gray-400 leading-tight">
-            PSG College of Technology
+            PSG iTech
             <br />
-            <span className="font-medium text-navy/60">iTech Certificate Platform</span>
+            <span className="font-medium text-navy/60">Certificate Platform</span>
           </p>
         </div>
       </aside>

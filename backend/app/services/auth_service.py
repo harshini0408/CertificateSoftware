@@ -1,4 +1,5 @@
 from typing import Optional
+import re
 
 from beanie import PydanticObjectId
 
@@ -16,8 +17,19 @@ from ..models.user import User, UserRole
 
 
 async def authenticate_user(username: str, password: str) -> Optional[User]:
-    """Look up user by username and verify password. Returns User or None."""
-    user = await User.find_one(User.username == username)
+    """Look up user by username/email and verify password. Returns User or None."""
+    identifier = (username or "").strip()
+    if not identifier or not password:
+        return None
+    escaped = re.escape(identifier)
+
+    # Allow login via username or email (case-insensitive) for better UX.
+    user = await User.find_one({
+        "$or": [
+            {"username": {"$regex": f"^{escaped}$", "$options": "i"}},
+            {"email": {"$regex": f"^{escaped}$", "$options": "i"}},
+        ]
+    })
     if not user or not user.is_active:
         return None
     if not verify_password(password, user.password_hash):
@@ -42,14 +54,20 @@ def build_redirect(user: User) -> str:
     """Return the frontend redirect path based on user role."""
     if user.role == UserRole.SUPER_ADMIN:
         return "/admin"
+    if user.role == UserRole.PRINCIPAL:
+        return "/principal"
+    if user.role == UserRole.HOD:
+        return "/hod"
     if user.role == UserRole.CLUB_COORDINATOR:
         return f"/club/{user.club_id}"
     if user.role == UserRole.DEPT_COORDINATOR:
         return "/dept"
+    if user.role == UserRole.TUTOR:
+        return "/tutor"
     if user.role == UserRole.STUDENT:
         return "/student"
     if user.role == UserRole.GUEST:
-        return f"/club/{user.club_id}/events/{user.event_id}"
+        return "/guest"
     return "/"
 
 
