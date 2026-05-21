@@ -9,8 +9,8 @@ function normalizeBasePath(basePath) {
 const configuredBasePath = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH?.trim())
 
 export const APP_BASE_PATH = configuredBasePath || (
-  typeof window !== 'undefined' && window.location.pathname.startsWith('/CertificateFrontend')
-    ? '/CertificateFrontend'
+  typeof window !== 'undefined' && window.location.pathname.toLowerCase().startsWith('/certificatefrontend')
+    ? '/certificatefrontend'
     : ''
 )
 

@@ -1,9 +1,9 @@
 import axios from 'axios'
 import { withBasePath } from './basePath'
 
-export const BACKEND_URL = import.meta.env.PROD
-  ? ''
-  : (import.meta.env.VITE_API_URL || 'http://localhost:4286')
+export const BACKEND_URL = import.meta.env.VITE_API_URL || (
+  import.meta.env.PROD ? 'http://alpha.psgitech.ac.in/CertificateBackend/' : 'http://localhost:4286'
+)
 
 const axiosInstance = axios.create({
   baseURL: BACKEND_URL,

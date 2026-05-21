@@ -189,7 +189,9 @@ def _origin_from_url(value: str) -> str:
 
 _ALLOWED_ORIGINS = list({
     _origin_from_url(settings.frontend_url),
-    "http://alpha.psgitech.ac.in",
+    "http://alpha.psgitech.ac.in/CertificateFrontend/login",
+    "http://alpha.psgitech.ac.in/certificateFrontend/login",
+    "https://alpha.psgitech.ac.in/login",
     "https://alpha.psgitech.ac.in",
     "http://localhost:4288",
     "http://127.0.0.1:4288",

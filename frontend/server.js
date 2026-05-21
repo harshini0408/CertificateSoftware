@@ -115,12 +115,19 @@ async function proxyRequest(request, response) {
 
   const upstream = await fetch(targetUrl, options)
 
-  response.writeHead(
-    upstream.status,
-    Object.fromEntries(
-      [...upstream.headers.entries()].filter(([key]) => !HOP_BY_HOP_HEADERS.has(key.toLowerCase())),
-    ),
-  )
+  // Preserve multiple Set-Cookie headers and filter hop-by-hop headers
+  const outHeaders = {}
+  for (const [key, value] of upstream.headers.entries()) {
+    if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue
+    if (key.toLowerCase() === 'set-cookie') {
+      if (!outHeaders['set-cookie']) outHeaders['set-cookie'] = []
+      outHeaders['set-cookie'].push(value)
+    } else {
+      outHeaders[key] = value
+    }
+  }
+
+  response.writeHead(upstream.status, outHeaders)
 
   if (!upstream.body) {
     response.end()
