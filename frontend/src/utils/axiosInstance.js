@@ -1,6 +1,9 @@
 import axios from 'axios'
+import { withBasePath } from './basePath'
 
-export const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+export const BACKEND_URL = import.meta.env.PROD
+  ? ''
+  : (import.meta.env.VITE_API_URL || 'http://localhost:4286')
 
 const axiosInstance = axios.create({
   baseURL: BACKEND_URL,
@@ -85,8 +88,9 @@ axiosInstance.interceptors.response.use(
         const { default: queryClient } = await import('./queryClient')
         useAuthStore.getState().clearAuth()
         queryClient.clear()
-        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-          window.history.replaceState(null, '', '/login')
+        const loginPath = withBasePath('/login')
+        if (typeof window !== 'undefined' && window.location.pathname !== loginPath) {
+          window.history.replaceState(null, '', loginPath)
           window.dispatchEvent(new PopStateEvent('popstate'))
         }
 

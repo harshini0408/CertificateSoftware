@@ -14,14 +14,14 @@ const TemplateMapper = ({ templateName, onSave }) => {
   const imageRef = useRef(null);
 
   useEffect(() => {
-    setImageUrl(`http://localhost:8000/static/certificate_templates/${templateName}`);
+    setImageUrl(`/static/certificate_templates/${templateName}`);
     loadExistingConfig();
   }, [templateName]);
 
   const loadExistingConfig = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`http://localhost:8000/api/certificate-config/config/${templateName}`);
+      const res = await axios.get(`/api/certificate-config/config/${templateName}`);
       const fieldArray = Object.entries(res.data).map(([name, pos]) => ({
         id: Math.random().toString(36).substr(2, 9),
         field_name: name,
@@ -100,7 +100,7 @@ const TemplateMapper = ({ templateName, onSave }) => {
           y: f.y
         }))
       };
-      await axios.post('http://localhost:8000/api/certificate-config/save', payload);
+      await axios.post('/api/certificate-config/save', payload);
       alert('Configuration saved successfully!');
       if (onSave) onSave();
     } catch (err) {

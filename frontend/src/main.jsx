@@ -12,11 +12,12 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 
 import App from './App'
 import queryClient from './utils/queryClient'
+import { APP_BASE_PATH } from './utils/basePath'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter basename={APP_BASE_PATH} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <App />
       </BrowserRouter>
       {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}

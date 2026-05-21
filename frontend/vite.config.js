@@ -11,13 +11,13 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 4288,
     proxy: {
       // /storage/* → backend static file server so dev doesn't need CORS for images.
-      // NOTE: All API calls use axiosInstance with baseURL = http://localhost:8000
+      // NOTE: All API calls use axiosInstance with baseURL = http://localhost:4286
       // directly (no /api prefix), so no API proxy is needed here.
       '/storage': {
-        target: process.env.VITE_API_URL || 'http://localhost:8000',
+        target: process.env.VITE_API_URL || 'http://localhost:4286',
         changeOrigin: true,
       },
     },

@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     app_env: Literal["development", "production"] = "development"
     secret_key: str = "replace-with-random-64-char-hex-string"
     algorithm: str = "HS256"
-    frontend_url: str = "http://localhost:5173"
-    base_url: str = "https://certs.psgit.edu"
+    frontend_url: str = "https://alpha.psgitech.ac.in/CertificateFrontend"
+    base_url: str = "https://alpha.psgitech.ac.in/CertificateBackend"
 
     # ── MongoDB ──────────────────────────────────────────────────────────
     mongodb_url: str = "mongodb://localhost:27017"

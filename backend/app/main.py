@@ -6,6 +6,7 @@ if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -179,13 +180,19 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ─────────────────────────────────────────────────────────────────
+def _origin_from_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return value
+
+
 _ALLOWED_ORIGINS = list({
-    settings.frontend_url,       # from .env / config
-    "http://localhost:5173",      # Vite default
-    "http://localhost:5174",      # Alternative Vite port
-    "http://localhost:3000",      # CRA fallback
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
+    _origin_from_url(settings.frontend_url),
+    "http://alpha.psgitech.ac.in",
+    "https://alpha.psgitech.ac.in",
+    "http://localhost:4288",
+    "http://127.0.0.1:4288",
 })
 app.add_middleware(
     CORSMiddleware,
