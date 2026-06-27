@@ -121,6 +121,7 @@ class ConsoleProvider(EmailProvider):
 # ── Provider factory ─────────────────────────────────────────────────────
 
 _provider_instance: Optional[EmailProvider] = None
+_secondary_provider_instance: Optional[EmailProvider] = None
 
 
 def get_email_provider() -> EmailProvider:
@@ -160,6 +161,32 @@ def get_email_provider() -> EmailProvider:
     return _provider_instance
 
 
+def _secondary_provider_configured() -> bool:
+    return bool(
+        settings.secondary_smtp_host
+        and settings.secondary_smtp_user
+        and settings.secondary_smtp_password
+    )
+
+
+def get_secondary_email_provider() -> Optional[EmailProvider]:
+    """Return the secondary SMTP provider singleton if configured."""
+    global _secondary_provider_instance
+    if not _secondary_provider_configured():
+        return None
+    if _secondary_provider_instance is not None:
+        return _secondary_provider_instance
+
+    _secondary_provider_instance = SMTPProvider(
+        host=settings.secondary_smtp_host,
+        port=settings.secondary_smtp_port,
+        user=settings.secondary_smtp_user,
+        password=settings.secondary_smtp_password,
+    )
+    logger.info("Secondary email provider initialized: smtp")
+    return _secondary_provider_instance
+
+
 # ── Build email message ──────────────────────────────────────────────────
 
 def _build_certificate_email(
@@ -169,11 +196,15 @@ def _build_certificate_email(
     event_name: str,
     club_name: str,
     png_path: str,
+    sender_email: Optional[str] = None,
+    sender_name: Optional[str] = None,
 ) -> MIMEMultipart:
     """Construct a MIME message with certificate PNG attachment."""
     msg = MIMEMultipart()
     msg["To"] = recipient_email
-    msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
+    sender_email = sender_email or settings.email_sender
+    sender_name = sender_name or settings.email_sender_name
+    msg["From"] = f"{sender_name} <{sender_email}>"
     msg["Subject"] = f"Your Certificate for {event_name}"
 
     body = (
@@ -235,16 +266,31 @@ async def send_certificate_email(
     if db_count > _daily_count:
         _daily_count = db_count
 
-    if effective_count >= settings.email_daily_limit:
-        logger.warning("Daily email limit (%d) reached", settings.email_daily_limit)
+    use_secondary = effective_count >= settings.email_daily_limit
+    secondary_provider = get_secondary_email_provider() if use_secondary else None
+    if use_secondary and secondary_provider is None:
+        logger.warning(
+            "Daily email limit (%d) reached and no secondary provider configured",
+            settings.email_daily_limit,
+        )
         return False
 
     try:
         msg = _build_certificate_email(
             recipient_email, recipient_name, cert_number,
             event_name, club_name, png_path,
+            sender_email=(
+                settings.secondary_email_sender
+                if use_secondary and settings.secondary_email_sender
+                else settings.email_sender
+            ),
+            sender_name=(
+                settings.secondary_email_sender_name
+                if use_secondary and settings.secondary_email_sender_name
+                else settings.email_sender_name
+            ),
         )
-        provider = get_email_provider()
+        provider = secondary_provider if use_secondary else get_email_provider()
         # Run blocking SMTP in a thread so it doesn't block the event loop
         loop = asyncio.get_event_loop()
         success = await loop.run_in_executor(None, provider.send, msg)
@@ -257,6 +303,13 @@ async def send_certificate_email(
     except Exception as exc:
         logger.error("send_certificate_email failed: %s", exc)
         return False
+
+
+def should_stop_sending_for_today(effective_count: int) -> bool:
+    """Return True when sending should pause due to limits and no fallback."""
+    if effective_count < settings.email_daily_limit:
+        return False
+    return not _secondary_provider_configured()
 
 
 async def send_otp_email(recipient_email: str, otp_code: str) -> bool:

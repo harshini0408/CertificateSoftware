@@ -76,7 +76,13 @@ async def main() -> None:
             }
             existing = await RoleTemplatePreset.find_one(RoleTemplatePreset.role_name == role_name)
             if existing:
-                await existing.set(payload)
+                # Preserve manual column/asset positions; only refresh label/template.
+                await existing.set({
+                    "display_label": display_label,
+                    "template_filename": template_filename,
+                    "display_width": payload["display_width"],
+                    "is_active": True,
+                })
                 updated += 1
             else:
                 await RoleTemplatePreset(role_name=role_name, **payload).insert()

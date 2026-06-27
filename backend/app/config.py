@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     email_sender: str = "certs@psgit.edu"
     email_sender_name: str = "PSG iTech Certificates"
     email_daily_limit: int = 500
+    secondary_smtp_host: str = ""
+    secondary_smtp_port: int = 587
+    secondary_smtp_user: str = ""
+    secondary_smtp_password: str = ""
+    secondary_email_sender: str = ""
+    secondary_email_sender_name: str = ""
 
     # ── Super Admin Seed ─────────────────────────────────────────────────
     superadmin_username: str = "superadmin"

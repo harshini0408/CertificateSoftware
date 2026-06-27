@@ -533,7 +533,7 @@ export default function EventDetail() {
   const activeTab = TABS.includes(requestedTab) ? requestedTab : deriveDefaultTab(event)
 
   const setActiveTab = (tab) => {
-    setSearchParams(tab === 'overview' ? {} : { tab }, { replace: true })
+    setSearchParams({ tab }, { replace: true })
   }
 
   if (isLoading) {

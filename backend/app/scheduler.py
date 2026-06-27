@@ -19,7 +19,11 @@ from apscheduler.triggers.interval import IntervalTrigger
 from .models.email_log import EmailLog, EmailStatus
 from .models.certificate import Certificate, CertStatus
 from .models.guest_session import GuestSession
-from .services.email_service import send_certificate_email, get_daily_sent_count
+from .services.email_service import (
+    send_certificate_email,
+    get_daily_sent_count,
+    should_stop_sending_for_today,
+)
 from .services.storage_service import storage_url_to_path
 from .services.credit_service import award_credits
 from .config import get_settings
@@ -56,8 +60,11 @@ async def _resume_queued_emails() -> None:
         # Re-check the effective daily count on each iteration
         db_count = await get_daily_sent_count_db()
         effective = max(get_daily_sent_count(), db_count)
-        if effective >= settings.email_daily_limit:
-            logger.info("[SCHEDULER] Daily limit reached (%d) — stopping flush", effective)
+        if should_stop_sending_for_today(effective):
+            logger.info(
+                "[SCHEDULER] Daily limit reached (%d) — stopping flush",
+                effective,
+            )
             break
 
         try:
