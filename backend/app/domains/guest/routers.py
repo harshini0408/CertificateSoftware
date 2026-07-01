@@ -148,6 +148,67 @@ def _detect_email_column(rows: list[dict[str, Any]] | None, headers: list[str] |
     return None
 
 
+def _normalize_guest_email(value: Any) -> str:
+    s = str(value or "").strip()
+    if not s or s.lower() in ("none", "null", "-", "n/a", "na"):
+        return ""
+    return s.lower()
+
+
+def _pick_row_value(row: dict[str, Any], keys: tuple[str, ...]) -> str:
+    if not row:
+        return ""
+    for k in keys:
+        if k in row and row[k] is not None and str(row[k]).strip():
+            return str(row[k]).strip()
+    row_lower = {str(k).strip().lower(): str(v).strip() for k, v in row.items() if v is not None}
+    for k in keys:
+        val = row_lower.get(k.lower())
+        if val:
+            return val
+    return ""
+
+
+async def _award_guest_credits(
+    cert_number: str,
+    student_email: str,
+    student_name: str,
+    points: int,
+    event_name: str,
+) -> None:
+    email = student_email.strip().lower()
+    if not email or points <= 0:
+        return
+
+    credit_doc = await StudentCredit.find_one(StudentCredit.student_email == email)
+    semester = await get_current_semester() or "Unknown"
+    entry = CreditHistoryEntry(
+        cert_number=cert_number,
+        event_name=event_name,
+        club_name="Guest Event",
+        cert_type="Guest Certificate",
+        points_awarded=points,
+        semester=semester,
+        awarded_at=datetime.utcnow(),
+    )
+
+    if credit_doc:
+        if any(h.cert_number == cert_number for h in credit_doc.credit_history):
+            return
+        credit_doc.total_credits += points
+        credit_doc.credit_history.append(entry)
+        credit_doc.last_updated = datetime.utcnow()
+        await credit_doc.save()
+    else:
+        await StudentCredit(
+            student_email=email,
+            student_name=student_name,
+            total_credits=points,
+            credit_history=[entry],
+            last_updated=datetime.utcnow(),
+        ).insert()
+
+
 def _safe_session_cert_path(session: GuestSession, cert_path_str: str) -> Path:
     cert_path = Path(cert_path_str)
     base_dir = _guest_certs_dir(str(session.id)).resolve()
@@ -191,6 +252,20 @@ async def start_guest_session(
     in history until they expire (15 days).
     """
     now = datetime.utcnow()
+
+    # Clean up previous draft sessions where no certificates were generated
+    old_drafts = await GuestSession.find(
+        GuestSession.user_id == current_user.id
+    ).to_list()
+    for draft in old_drafts:
+        if not draft.guest_generated_certs:
+            if draft.guest_template_path:
+                try:
+                    Path(draft.guest_template_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            await draft.delete()
+
     session = GuestSession(
         user_id=current_user.id,
         event_name=body.event_name,
@@ -1037,6 +1112,8 @@ async def get_guest_history(
     result = []
     for s in sessions:
         cert_count = len(s.guest_generated_certs) if s.guest_generated_certs else 0
+        if cert_count == 0:
+            continue
         has_downloadable = (
             cert_count > 0
             and any(Path(p).exists() for p in (s.guest_generated_certs or []))

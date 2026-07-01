@@ -1,7 +1,6 @@
 import sys
 import asyncio
 from datetime import datetime
-
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 

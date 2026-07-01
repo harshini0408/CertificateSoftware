@@ -18,28 +18,32 @@ export default function GuestDashboard() {
   const [submittedName, setSubmittedName] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const forceFresh = searchParams.get('new') === '1' || searchParams.get('home') === '1'
-  const resumeRequested = searchParams.get('resume') === '1'
-  const [isRestoring, setIsRestoring] = useState(resumeRequested && !forceFresh)
+  const [isRestoring, setIsRestoring] = useState(!forceFresh)
 
   useEffect(() => {
-    if (forceFresh || !resumeRequested) {
+    if (forceFresh) {
       setSubmittedName('')
       setIsRestoring(false)
     }
-  }, [forceFresh, resumeRequested])
+  }, [forceFresh])
 
   useEffect(() => {
-    if (forceFresh || !resumeRequested) return
+    if (forceFresh) return
     let mounted = true
 
     const restoreSession = async () => {
+      setIsRestoring(true)
       try {
         const { data } = await axiosInstance.get('/guest/status')
         if (mounted && data?.event_name) {
           setSubmittedName(data.event_name)
+        } else if (mounted) {
+          setSubmittedName('')
         }
       } catch {
-        // No active session; stay on the start form.
+        if (mounted) {
+          setSubmittedName('')
+        }
       } finally {
         if (mounted) setIsRestoring(false)
       }
@@ -49,7 +53,7 @@ export default function GuestDashboard() {
     return () => {
       mounted = false
     }
-  }, [forceFresh, resumeRequested])
+  }, [forceFresh])
 
   // Start fresh wrapper
   const handleStartSession = async (e) => {
@@ -64,6 +68,7 @@ export default function GuestDashboard() {
     try {
       await axiosInstance.post('/guest/start-session', { event_name: trimmed })
       setSubmittedName(trimmed)
+      navigate('/guest', { replace: true })
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Failed to start session.'
       addToast({ type: 'error', message: msg })
