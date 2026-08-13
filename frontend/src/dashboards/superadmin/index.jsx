@@ -27,6 +27,7 @@ import {
   useDeleteUser,
   useBulkDeleteUsers,
   useStudentCertificateSearch,
+  useStudentClubMemberships,
 } from './usersApi'
 import {
   useAdminStats,
@@ -931,6 +932,26 @@ function CertificatesTab() {
   )
 }
 
+// ── STUDENT CLUB MEMBERSHIPS ────────────────────────────────────────────────
+function StudentClubMemberships({ studentId }) {
+  const { data: memberships, isLoading } = useStudentClubMemberships(studentId)
+
+  if (isLoading) return <span className="text-xs text-gray-400">Loading memberships...</span>
+  
+  const approved = (memberships || []).filter(m => m.status === 'approved')
+  if (approved.length === 0) return <span className="text-xs text-gray-400">No active club memberships</span>
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {approved.map(m => (
+        <span key={m.id} className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-200">
+          {m.club_name}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 // ── STUDENT CERTIFICATES TAB ────────────────────────────────────────────────
 function StudentCertificatesTab() {
   const [query, setQuery] = useState('')
@@ -991,6 +1012,9 @@ function StudentCertificatesTab() {
                     <p className="text-sm text-gray-500">
                       {item.student.email} · {item.student.registration_number || '—'}
                     </p>
+                    <div className="mt-2">
+                      <StudentClubMemberships studentId={item.student.id} />
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2 text-xs">
                     <span className="rounded bg-navy/10 px-2 py-1 font-semibold text-navy">Total: {item.total_certificates}</span>

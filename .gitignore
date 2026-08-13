@@ -70,8 +70,7 @@ mongodb_data/
 *.sqlite
 
 # Application Files
-storage/certs/
-storage/assets/
+storage/
 *.pdf
 *.xlsx
 *.xls

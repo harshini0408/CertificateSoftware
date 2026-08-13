@@ -1,6 +1,36 @@
 import axios from 'axios'
 
-export const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const APP_BASE_URL = import.meta.env.BASE_URL || '/'
+
+const ensureLeadingSlash = (value = '') => (value.startsWith('/') ? value : `/${value}`)
+const removeTrailingSlash = (value = '') => value.replace(/\/+$/, '')
+
+const appBasePrefix = removeTrailingSlash(ensureLeadingSlash(APP_BASE_URL))
+const fallbackApiUrl = `${appBasePrefix === '' ? '' : appBasePrefix}/api`
+
+export const BACKEND_URL = removeTrailingSlash(
+  import.meta.env.VITE_API_URL || fallbackApiUrl,
+)
+
+const deriveBackendBaseUrl = () => {
+  const explicit = removeTrailingSlash(import.meta.env.VITE_BACKEND_BASE_URL || '')
+  if (explicit) return explicit
+  if (BACKEND_URL.endsWith('/api')) {
+    return removeTrailingSlash(BACKEND_URL.slice(0, -4))
+  }
+  return ''
+}
+
+export const BACKEND_BASE_URL = deriveBackendBaseUrl()
+
+export const toBackendUrl = (path = '') => {
+  if (!path) return BACKEND_BASE_URL || '/'
+  if (/^https?:\/\//i.test(path)) return path
+  if (!path.startsWith('/')) return `${BACKEND_BASE_URL}/${path}`
+  return `${BACKEND_BASE_URL}${path}`
+}
+
+const loginPath = `${APP_BASE_URL}login`
 
 const axiosInstance = axios.create({
   baseURL: BACKEND_URL,
@@ -85,8 +115,8 @@ axiosInstance.interceptors.response.use(
         const { default: queryClient } = await import('./queryClient')
         useAuthStore.getState().clearAuth()
         queryClient.clear()
-        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-          window.history.replaceState(null, '', '/login')
+        if (typeof window !== 'undefined' && window.location.pathname !== loginPath) {
+          window.history.replaceState(null, '', loginPath)
           window.dispatchEvent(new PopStateEvent('popstate'))
         }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import axiosInstance, { toBackendUrl } from '../utils/axiosInstance';
 import TemplateMapper from './TemplateMapper';
 import { ArrowLeft, Image as ImageIcon } from 'lucide-react';
 
@@ -15,7 +15,7 @@ const CertificateConfigurator = () => {
   const fetchTemplates = async () => {
     try {
       setLoading(true);
-      const res = await axios.get('http://localhost:8000/api/admin/certificate-config/templates');
+      const res = await axiosInstance.get('/api/admin/certificate-config/templates');
       setTemplates(res.data);
     } catch (err) {
       console.error("Error fetching templates:", err);
@@ -61,7 +61,7 @@ const CertificateConfigurator = () => {
           >
             <div className="aspect-[1.414/1] bg-gray-100 relative overflow-hidden">
               <img 
-                src={`http://localhost:8000/static/certificate_templates/${template}`} 
+                src={toBackendUrl(`/static/certificate_templates/${template}`)} 
                 alt={template}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />

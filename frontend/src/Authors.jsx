@@ -6,9 +6,9 @@ import ProfileCard from './components/common/ProfileCard'
 const authors = [
   {
     name: 'Dr.MahaVishnu',
-    title: 'Website Coordinator and Assistant Professor(Selection Grade), CSE',
-    handle: 'Dr.V.C.MahaVishnu',
-    status: 'Website Coordinator',
+    title: 'Assistant Professor(Selection Grade), Department of Computer Science and Engineering',
+    /*handle: 'Dr.V.C.MahaVishnu',*/
+    status: 'SDC Director',
     avatarUrl: '/images/Authors/mvvc.png',
     grainUrl: '/images/Authors/grain.png',
   },
@@ -17,9 +17,9 @@ const authors = [
     name: 'Adhithya J',
     title: ' Full-Stack Developer',
     contactEmail: '24z108@psgitech.ac.in',
-    handle: 'Adhithya',
+    /*handle: 'Adhithya',*/
     phone: '8807303793',
-    status: 'Full-Stack Engineer',
+    /*status: 'Full-Stack Engineer',*/
     avatarUrl: '/images/Authors/arya.png',
     grainUrl: '/images/Authors/grain.png',
   },
@@ -27,9 +27,9 @@ const authors = [
     name: 'Harshini Y',
     title: 'Full-Stack Developer',
     contactEmail: '24z158@psgitech.ac.in',
-    handle: 'harshini',
+    /*handle: 'harshini',*/
     phone: '7845990817',
-    status: 'Full-Stack Developer',
+    /*status: 'Full-Stack Developer',*/
     avatarUrl: '/images/Authors/abi.png',
     grainUrl: '/images/Authors/grain.png',
   },

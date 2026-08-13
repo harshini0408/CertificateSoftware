@@ -62,6 +62,17 @@ export function useStudentCertificateSearch(query) {
   })
 }
 
+export function useStudentClubMemberships(userId) {
+  return useQuery({
+    queryKey: ['admin', 'student-club-memberships', userId],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/admin/users/${userId}/club-memberships`)
+      return data
+    },
+    enabled: !!userId,
+  })
+}
+
 export function useTutorMappingSummary() {
   return useQuery({
     queryKey: userKeys.tutorMappingSummary(),

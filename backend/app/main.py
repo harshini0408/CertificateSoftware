@@ -178,14 +178,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ─────────────────────────────────────────────────────────────────
-_ALLOWED_ORIGINS = list({
-    settings.frontend_url,       # from .env / config
-    "http://localhost:5173",      # Vite default
-    "http://localhost:5174",      # Alternative Vite port
-    "http://localhost:3000",      # CRA fallback
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-})
+_ALLOWED_ORIGINS = settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
@@ -199,7 +192,7 @@ app.add_middleware(
 async def _global_exception_handler(request: Request, exc: Exception):
     """Return a JSON 500 with CORS headers so the browser isn't blocked."""
     origin = request.headers.get("origin", "")
-    cors_origin = origin if origin in _ALLOWED_ORIGINS else _ALLOWED_ORIGINS[0]
+    cors_origin = origin if origin in _ALLOWED_ORIGINS else (_ALLOWED_ORIGINS[0] if _ALLOWED_ORIGINS else "*")
     return JSONResponse(
         status_code=500,
         content={"detail": f"Internal server error: {exc}"},

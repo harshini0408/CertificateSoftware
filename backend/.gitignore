@@ -21,9 +21,7 @@ token.json
 *.key
 
 # ── Storage (generated at runtime) ──
-storage/certs/
-storage/assets/
-storage/tmp/
+storage/
 
 # ── IDE ──────────────────────────────
 .vscode/

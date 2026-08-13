@@ -18,6 +18,7 @@ from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.dept_certificate import DeptCertificate
 from ...models.user import User, UserRole
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
 
@@ -169,6 +170,29 @@ async def list_tutor_students(current_user: User = Depends(require_role(UserRole
                 "section": d.section,
             }
         )
+
+    # Bulk-fetch approved club memberships and attach to each row
+    student_emails_lower = [_norm_email(r.get("student_email")) for r in rows if r.get("student_email")]
+    if student_emails_lower:
+        approved_memberships = await StudentClubMembership.find({
+            "student_email": {"$in": student_emails_lower},
+            "status": MembershipStatus.APPROVED.value,
+        }).to_list()
+        clubs_by_email: dict = {}
+        office_bearer_by_email: dict = {}
+        for m in approved_memberships:
+            email_key = _norm_email(m.student_email)
+            clubs_by_email.setdefault(email_key, []).append(m.club_name or "")
+            if m.office_bearer_role:
+                office_bearer_by_email[email_key] = f"{m.office_bearer_role} ({m.club_name or 'Club'})"
+        for row in rows:
+            email_key = _norm_email(row.get("student_email", ""))
+            row["clubs"] = clubs_by_email.get(email_key, [])
+            row["office_bearer"] = office_bearer_by_email.get(email_key, None)
+    else:
+        for row in rows:
+            row["clubs"] = []
+            row["office_bearer"] = None
 
     rows.sort(key=lambda d: (d.get("student_name") or "").lower())
     return rows

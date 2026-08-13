@@ -539,6 +539,34 @@ export default function TutorDashboard() {
                   { key: 'student_email', header: 'Email', searchKey: true },
                   { key: 'total_credits', header: 'Credit Points', align: 'right', render: (v) => renderCreditAgainstTarget(v) },
                   {
+                    key: 'clubs',
+                    header: 'Club Memberships',
+                    render: (v) => {
+                      const clubs = Array.isArray(v) ? v : []
+                      if (!clubs.length) return <span className="text-xs text-gray-400">—</span>
+                      return (
+                        <div className="flex flex-wrap gap-1">
+                          {clubs.map((c) => (
+                            <span key={c} className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-200">{c}</span>
+                          ))}
+                        </div>
+                      )
+                    },
+                  },
+                  {
+                    key: 'office_bearer',
+                    header: 'Office Bearer',
+                    render: (v) => {
+                      if (!v) return <span className="text-xs text-gray-400">—</span>
+                      return (
+                        <span className="inline-flex rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-semibold text-purple-700 ring-1 ring-purple-200">
+                          {v}
+                        </span>
+                      )
+                    },
+                  },
+
+                  {
                     key: '_actions',
                     header: 'Actions',
                     searchKey: false,

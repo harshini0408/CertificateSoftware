@@ -1,0 +1,106 @@
+name: certificate-software
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: certsoftware-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: ${DB_NAME:-certsoftware}
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - certsoftware-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: certsoftware-backend
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      MONGODB_URL: ${MONGODB_URL:-mongodb://mongodb:27017}
+      DB_NAME: ${DB_NAME:-certsoftware}
+      STORAGE_PATH: ${STORAGE_PATH:-/data/storage}
+      FRONTEND_URL: ${FRONTEND_URL:-https://sdc2.psgitech.ac.in}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://sdc2.psgitech.ac.in}
+      BASE_URL: ${BASE_URL:-https://sdc2.psgitech.ac.in/project-name/api}
+      SECRET_KEY: ${SECRET_KEY:-replace-with-random-64-char-hex-string}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_SENDER: ${EMAIL_SENDER:-certs@psgit.edu}
+      EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-PSG iTech Certificates}
+      EMAIL_DAILY_LIMIT: ${EMAIL_DAILY_LIMIT:-500}
+      SECONDARY_SMTP_HOST: ${SECONDARY_SMTP_HOST:-}
+      SECONDARY_SMTP_PORT: ${SECONDARY_SMTP_PORT:-587}
+      SECONDARY_SMTP_USER: ${SECONDARY_SMTP_USER:-}
+      SECONDARY_SMTP_PASSWORD: ${SECONDARY_SMTP_PASSWORD:-}
+      SECONDARY_EMAIL_SENDER: ${SECONDARY_EMAIL_SENDER:-}
+      SECONDARY_EMAIL_SENDER_NAME: ${SECONDARY_EMAIL_SENDER_NAME:-}
+      SUPERADMIN_USERNAME: ${SUPERADMIN_USERNAME:-superadmin}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-change-me-on-first-run}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-admin@psgit.edu}
+      SUPERADMIN_NAME: ${SUPERADMIN_NAME:-Platform Admin}
+    volumes:
+      - backend_storage:/data/storage
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - certsoftware-net
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/project-name/}
+        VITE_API_URL: ${VITE_API_URL:-/project-name/api}
+        VITE_BACKEND_BASE_URL: ${VITE_BACKEND_BASE_URL:-/project-name}
+        VITE_DEV_BACKEND_ORIGIN: ${VITE_DEV_BACKEND_ORIGIN:-http://backend:8000}
+    container_name: certsoftware-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4173:4173"
+    networks:
+      - certsoftware-net
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+networks:
+  certsoftware-net:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  backend_storage:

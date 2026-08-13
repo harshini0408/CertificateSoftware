@@ -2,8 +2,17 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+const normalizeBasePath = (value) => {
+  if (!value) return '/'
+  const withLeadingSlash = value.startsWith('/') ? value : `/${value}`
+  return withLeadingSlash.endsWith('/') ? withLeadingSlash : `${withLeadingSlash}/`
+}
+
+const apiTarget = process.env.VITE_DEV_BACKEND_ORIGIN || 'http://backend:8000'
+
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: normalizeBasePath(process.env.VITE_BASE_PATH || '/'),
   plugins: [react()],
   resolve: {
     alias: {
@@ -13,11 +22,16 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // /storage/* → backend static file server so dev doesn't need CORS for images.
-      // NOTE: All API calls use axiosInstance with baseURL = http://localhost:8000
-      // directly (no /api prefix), so no API proxy is needed here.
+      '/api': {
+        target: apiTarget,
+        changeOrigin: true,
+      },
       '/storage': {
-        target: process.env.VITE_API_URL || 'http://localhost:8000',
+        target: apiTarget,
+        changeOrigin: true,
+      },
+      '/static': {
+        target: apiTarget,
         changeOrigin: true,
       },
     },

@@ -13,6 +13,7 @@ from ...models.certificate import Certificate, CertStatus
 from ...models.participant import Participant
 from ...schemas.club import ClubResponse
 from ...schemas.user import UserResponse
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...services.signature_service import process_signature, save_logo
 from ...services.storage_service import storage_path_to_url, storage_url_to_path
 
@@ -310,3 +311,230 @@ async def coordinator_events(
         }
         for e in events
     ]
+
+
+# ─── GET /coordinator/memberships/requests ────────────────────────────────────────
+
+@coordinator_router.get("/memberships/requests")
+async def list_membership_requests(
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """List all pending membership requests for the coordinator's club."""
+    if not current_user.club_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
+
+    memberships = await StudentClubMembership.find(
+        StudentClubMembership.club_id == current_user.club_id
+    ).sort("-applied_at").to_list()
+
+    return [
+        {
+            "id": str(m.id),
+            "student_id": str(m.student_id),
+            "student_name": m.student_name or "",
+            "student_email": m.student_email or "",
+            "status": m.status.value,
+            "applied_at": m.applied_at,
+            "updated_at": m.updated_at,
+            "review_note": m.review_note,
+            "office_bearer_role": m.office_bearer_role,
+        }
+        for m in memberships
+    ]
+
+
+# ─── PUT /coordinator/memberships/{membership_id}/status ──────────────────────
+
+from pydantic import BaseModel as _BaseModel
+from datetime import datetime as _datetime
+from beanie import PydanticObjectId as _ObjId
+
+
+class MembershipStatusUpdateBody(_BaseModel):
+    status: str  # "approved" or "rejected"
+    review_note: str | None = None
+
+
+@coordinator_router.put("/memberships/{membership_id}/status")
+async def update_membership_status(
+    membership_id: _ObjId,
+    body: MembershipStatusUpdateBody,
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Approve or reject a student's club membership request."""
+    new_status_str = (body.status or "").strip().lower()
+    if new_status_str not in (MembershipStatus.APPROVED.value, MembershipStatus.REJECTED.value):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "status must be 'approved' or 'rejected'")
+
+    membership = await StudentClubMembership.get(membership_id)
+    if not membership:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Membership request not found")
+
+    # Ensure coordinator only manages their own club's memberships (unless super_admin)
+    if current_user.role == UserRole.CLUB_COORDINATOR:
+        if not current_user.club_id or membership.club_id != current_user.club_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this membership request")
+
+    if membership.status not in (MembershipStatus.PENDING,):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only pending requests can be reviewed")
+
+    membership.status = MembershipStatus(new_status_str)
+    membership.reviewed_by = str(current_user.id)
+    membership.review_note = (body.review_note or "").strip() or None
+    membership.updated_at = _datetime.utcnow()
+    await membership.save()
+
+    return {
+        "message": f"Membership request {new_status_str}",
+        "id": str(membership.id),
+        "status": membership.status.value,
+    }
+
+
+# ─── Office Bearers ─────────────────────────────────────────────────────────────
+
+FIXED_OFFICE_BEARERS = [
+    "President",
+    "Vice President",
+    "Secretary",
+    "Joint Secretary",
+    "Treasurer",
+]
+
+
+class AllocateOfficeBearerBody(_BaseModel):
+    position: str
+    student_id: str
+
+
+@coordinator_router.get("/office-bearers")
+async def get_office_bearers(
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Get office bearer allocations and approved members for the coordinator's club."""
+    if not current_user.club_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
+
+    approved_memberships = await StudentClubMembership.find({
+        "club_id": current_user.club_id,
+        "status": MembershipStatus.APPROVED.value,
+    }).to_list()
+
+    student_ids = [m.student_id for m in approved_memberships]
+    users = await User.find({"_id": {"$in": student_ids}}).to_list() if student_ids else []
+    user_map = {str(u.id): u for u in users}
+
+    approved_members = []
+    allocations = {pos: None for pos in FIXED_OFFICE_BEARERS}
+
+    for m in approved_memberships:
+        u = user_map.get(str(m.student_id))
+        item = {
+            "membership_id": str(m.id),
+            "student_id": str(m.student_id),
+            "name": m.student_name or (u.name if u else ""),
+            "email": m.student_email or (u.email if u else ""),
+            "registration_number": u.registration_number if u else None,
+            "department": u.department if u else None,
+            "batch": u.batch if u else None,
+            "section": u.section if u else None,
+            "office_bearer_role": m.office_bearer_role,
+        }
+        approved_members.append(item)
+        if m.office_bearer_role in allocations:
+            allocations[m.office_bearer_role] = item
+
+    return {
+        "positions": FIXED_OFFICE_BEARERS,
+        "allocations": allocations,
+        "approved_members": approved_members,
+    }
+
+
+@coordinator_router.post("/office-bearers/allocate")
+async def allocate_office_bearer(
+    body: AllocateOfficeBearerBody,
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Allocate an approved club member to a fixed office bearer position."""
+    if not current_user.club_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
+
+    position = (body.position or "").strip()
+    if position not in FIXED_OFFICE_BEARERS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Invalid position. Must be one of: {', '.join(FIXED_OFFICE_BEARERS)}",
+        )
+
+    try:
+        target_student_id = _ObjId(body.student_id)
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid student_id")
+
+    # Verify target student is an approved member of this club
+    target_membership = await StudentClubMembership.find_one({
+        "club_id": current_user.club_id,
+        "student_id": target_student_id,
+        "status": MembershipStatus.APPROVED.value,
+    })
+    if not target_membership:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Selected student must be an approved member of this club",
+        )
+
+    # Exclusivity Check: Ensure student is NOT an office bearer in ANY club (including another role in this club)
+    existing_ob = await StudentClubMembership.find_one({
+        "student_id": target_student_id,
+        "office_bearer_role": {"$ne": None},
+    })
+    if existing_ob and (existing_ob.id != target_membership.id):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Student {target_membership.student_name or ''} is already an office bearer ({existing_ob.office_bearer_role}) in {existing_ob.club_name or 'another club'}. A student can be an office bearer in at most one club and position.",
+        )
+
+    # Clear position if held by another member in this club
+    previous_holder = await StudentClubMembership.find_one({
+        "club_id": current_user.club_id,
+        "office_bearer_role": position,
+    })
+    if previous_holder and previous_holder.id != target_membership.id:
+        previous_holder.office_bearer_role = None
+        await previous_holder.save()
+
+    # Assign position to target student
+    target_membership.office_bearer_role = position
+    target_membership.updated_at = _datetime.utcnow()
+    await target_membership.save()
+
+    return {
+        "message": f"Successfully allocated {position} to {target_membership.student_name}",
+        "position": position,
+        "student_id": str(target_student_id),
+    }
+
+
+@coordinator_router.delete("/office-bearers/{position}")
+async def remove_office_bearer(
+    position: str,
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Remove/unassign an office bearer position for the coordinator's club."""
+    if not current_user.club_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
+
+    pos_clean = position.strip()
+    holder = await StudentClubMembership.find_one({
+        "club_id": current_user.club_id,
+        "office_bearer_role": pos_clean,
+    })
+    if holder:
+        holder.office_bearer_role = None
+        holder.updated_at = _datetime.utcnow()
+        await holder.save()
+
+    return {"message": f"Office bearer position '{pos_clean}' unassigned"}
+
+

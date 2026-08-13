@@ -38,10 +38,13 @@ export default function DataTable({
   rowKey = 'id',
   onRowClick,
   stickyHeader = false,
+  pagination = true,
 }) {
   const [sortKey, setSortKey] = useState(null)
   const [sortDir, setSortDir] = useState('asc')   // 'asc' | 'desc'
   const [search, setSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   // ── Sorting ─────────────────────────────────────────────────────────────
   const toggleSort = (key) => {
@@ -86,6 +89,18 @@ export default function DataTable({
 
     return rows
   }, [data, search, searchable, columns, sortKey, sortDir])
+
+  useMemo(() => {
+    setCurrentPage(1)
+  }, [search, data])
+
+  const paginatedData = useMemo(() => {
+    if (!pagination) return processedData
+    const start = (currentPage - 1) * pageSize
+    return processedData.slice(start, start + pageSize)
+  }, [processedData, pagination, currentPage, pageSize])
+
+  const totalPages = Math.ceil(processedData.length / pageSize)
 
   // ── Row key extractor ────────────────────────────────────────────────────
   const getKey = (row, i) =>
@@ -176,7 +191,7 @@ export default function DataTable({
           </thead>
 
           <tbody className="divide-y divide-gray-50 bg-white">
-            {processedData.length === 0 ? (
+            {paginatedData.length === 0 ? (
               <tr>
                 <td
                   colSpan={columns.length}
@@ -186,7 +201,7 @@ export default function DataTable({
                 </td>
               </tr>
             ) : (
-              processedData.map((row, i) => (
+              paginatedData.map((row, i) => (
                 <tr
                   key={getKey(row, i)}
                   onClick={() => onRowClick?.(row)}
@@ -214,13 +229,61 @@ export default function DataTable({
           </tbody>
         </table>
       </div>
-
-      {/* Row count */}
+      {/* Footer (Row count & Pagination) */}
       {!isLoading && data.length > 0 && (
-        <div className="border-t border-gray-100 px-4 py-2 text-right text-xs text-gray-400">
-          {processedData.length !== data.length
-            ? `${processedData.length} of ${data.length} rows`
-            : `${data.length} row${data.length !== 1 ? 's' : ''}`}
+        <div className="border-t border-gray-100 px-4 py-2 flex items-center justify-between text-xs text-gray-500 bg-white">
+          {pagination ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="whitespace-nowrap">Rows per page:</span>
+                <select
+                  className="form-input text-xs py-0.5 px-2 h-7 rounded border-gray-300"
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value))
+                    setCurrentPage(1)
+                  }}
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={75}>75</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-4">
+                <span>
+                  {Math.min((currentPage - 1) * pageSize + 1, processedData.length)}–
+                  {Math.min(currentPage * pageSize, processedData.length)} of {processedData.length}
+                </span>
+                <div className="flex gap-1">
+                  <button
+                    className="rounded p-1 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage((p) => p - 1)}
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    className="rounded p-1 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                    disabled={currentPage === totalPages || totalPages === 0}
+                    onClick={() => setCurrentPage((p) => p + 1)}
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="w-full text-right text-gray-400">
+              {processedData.length !== data.length
+                ? `${processedData.length} of ${data.length} rows`
+                : `${data.length} row${data.length !== 1 ? 's' : ''}`}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -16,6 +16,7 @@ from ...models.credit_rule import CreditRule
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.event import Event
 from ...models.club import Club
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
 
@@ -357,7 +358,89 @@ async def create_manual_credit_submission(
     }
 
 
-# ── /students/{student_id}/credits (admin/coordinator view) ──────────────
+# ── /students/me/clubs ───────────────────────────────────────────────────────
+
+@router.get("/students/me/clubs")
+async def get_my_club_memberships(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    """Return all club membership applications for the current student."""
+    memberships = await StudentClubMembership.find(
+        StudentClubMembership.student_id == current_user.id
+    ).sort("-applied_at").to_list()
+    return [
+        {
+            "id": str(m.id),
+            "club_id": str(m.club_id),
+            "club_name": m.club_name or "",
+            "status": m.status.value,
+            "applied_at": m.applied_at,
+            "updated_at": m.updated_at,
+            "review_note": m.review_note,
+            "office_bearer_role": m.office_bearer_role,
+        }
+        for m in memberships
+    ]
+
+
+@router.post("/students/me/clubs/apply")
+async def apply_for_club(
+    body: dict,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Apply to join a club. A student may have at most 2 active (pending/approved) memberships."""
+    club_id_str = (body.get("club_id") or "").strip()
+    if not club_id_str:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "club_id is required")
+
+    from beanie import PydanticObjectId as ObjId
+    try:
+        club_oid = ObjId(club_id_str)
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid club_id")
+
+    club = await Club.get(club_oid)
+    if not club or not club.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found or inactive")
+
+    # Check for duplicate active application to this club
+    existing_for_club = await StudentClubMembership.find_one({
+        "student_id": current_user.id,
+        "club_id": club_oid,
+        "status": {"$in": [MembershipStatus.PENDING.value, MembershipStatus.APPROVED.value]},
+    })
+    if existing_for_club:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "You already have an active application or membership for this club",
+        )
+
+    # Enforce max 2 active (pending + approved) memberships across all clubs
+    active_count = await StudentClubMembership.find({
+        "student_id": current_user.id,
+        "status": {"$in": [MembershipStatus.PENDING.value, MembershipStatus.APPROVED.value]},
+    }).count()
+    if active_count >= 2:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "You can apply for at most 2 clubs. Please wait for a pending application outcome or have an approved membership removed.",
+        )
+
+    membership = await StudentClubMembership(
+        student_id=current_user.id,
+        student_name=current_user.name,
+        student_email=(current_user.email or "").strip().lower(),
+        club_id=club_oid,
+        club_name=club.name,
+        status=MembershipStatus.PENDING,
+    ).insert()
+
+    return {
+        "message": "Application submitted. Awaiting coordinator approval.",
+        "id": str(membership.id),
+        "club_name": club.name,
+        "status": membership.status.value,
+    }
+
+
 
 @router.get("/students/{student_id}/credits")
 async def get_student_credits(student_id: str):

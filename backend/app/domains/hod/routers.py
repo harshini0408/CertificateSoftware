@@ -12,6 +12,7 @@ from ...models.manual_credit_submission import ManualCreditSubmission
 from ...models.student_credit import StudentCredit
 from ...services.semester_service import get_current_semester
 from ...models.user import User, UserRole
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 
 router = APIRouter(prefix="/hod", tags=["HOD"])
 
@@ -56,7 +57,7 @@ def _build_hod_scope(current_user: User) -> dict:
     return scope
 
 
-def _student_summary(user: User, total_credits: int) -> dict:
+def _student_summary(user: User, total_credits: int, clubs: list | None = None, office_bearer: str | None = None) -> dict:
     return {
         "id": str(user.id),
         "name": user.name,
@@ -66,6 +67,8 @@ def _student_summary(user: User, total_credits: int) -> dict:
         "batch": user.batch,
         "section": user.section,
         "total_credits": int(total_credits or 0),
+        "clubs": clubs or [],
+        "office_bearer": office_bearer,
     }
 
 
@@ -151,12 +154,31 @@ async def list_hod_students(
         if doc.registration_number
     }
 
+    student_ids = [s.id for s in students]
+    approved_memberships = await StudentClubMembership.find({
+        "student_id": {"$in": student_ids},
+        "status": MembershipStatus.APPROVED.value,
+    }).to_list() if student_ids else []
+
+    clubs_by_student: dict = {}
+    office_bearer_by_student: dict = {}
+    for m in approved_memberships:
+        clubs_by_student.setdefault(str(m.student_id), []).append(m.club_name or "")
+        if m.office_bearer_role:
+            office_bearer_by_student[str(m.student_id)] = f"{m.office_bearer_role} ({m.club_name or 'Club'})"
+
     items = []
     for student in students:
         email_key = (student.email or "").strip().lower()
         reg_key = (student.registration_number or "").strip()
         total_credits = credits_by_email.get(email_key, credits_by_reg.get(reg_key, 0))
-        items.append(_student_summary(student, total_credits))
+        items.append(_student_summary(
+            student,
+            total_credits,
+            clubs=clubs_by_student.get(str(student.id), []),
+            office_bearer=office_bearer_by_student.get(str(student.id)),
+        ))
+
 
     return {
         "count": len(items),

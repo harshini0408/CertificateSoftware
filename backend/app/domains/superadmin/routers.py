@@ -28,6 +28,7 @@ from ...models.scan_log import ScanLog
 from ...models.credit_rule import CreditRule
 from ...models.student_credit import StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...services.semester_service import get_current_semester, set_current_semester
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
 from ...schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
@@ -1090,6 +1091,33 @@ async def list_users(
 
     users = await User.find(query).to_list()
     return [_user_response(u) for u in users]
+
+
+@router.get("/users/{user_id}/club-memberships")
+async def get_student_club_memberships(
+    user_id: PydanticObjectId,
+    _user: User = _admin,
+):
+    """Return all club memberships (any status) for a given student user."""
+    student = await User.get(user_id)
+    if not student or student.role != UserRole.STUDENT:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found")
+
+    memberships = await StudentClubMembership.find(
+        StudentClubMembership.student_id == student.id
+    ).sort("-applied_at").to_list()
+
+    return [
+        {
+            "id": str(m.id),
+            "club_id": str(m.club_id),
+            "club_name": m.club_name or "",
+            "status": m.status.value,
+            "applied_at": m.applied_at,
+            "updated_at": m.updated_at,
+        }
+        for m in memberships
+    ]
 
 
 @router.get("/student-certificates/search")

@@ -5,13 +5,14 @@ import { useAuthStore } from '../../store/authStore'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const clubKeys = {
-  all:       ()             => ['clubs'],
-  list:      (filters)      => ['clubs', 'list', filters],
-  detail:    (clubId)       => ['clubs', clubId],
-  dashboard: (clubId)       => ['clubs', clubId, 'dashboard'],
-  assets:    (clubId)       => ['clubs', clubId, 'assets'],
-  members:   (clubId)       => ['clubs', clubId, 'members'],
-  users:     (clubId)       => ['clubs', clubId, 'users'],
+  all:              ()             => ['clubs'],
+  list:             (filters)      => ['clubs', 'list', filters],
+  detail:           (clubId)       => ['clubs', clubId],
+  dashboard:        (clubId)       => ['clubs', clubId, 'dashboard'],
+  assets:           (clubId)       => ['clubs', clubId, 'assets'],
+  members:          (clubId)       => ['clubs', clubId, 'members'],
+  users:            (clubId)       => ['clubs', clubId, 'users'],
+  membershipRequests: ()           => ['coordinator', 'memberships', 'requests'],
 }
 
 // ── useClubs (admin) ──────────────────────────────────────────────────────────
@@ -181,3 +182,110 @@ export function useUpdateClub() {
     },
   })
 }
+
+// ── useMembershipRequests (coordinator) ──────────────────────────────────────
+/**
+ * GET /coordinator/memberships/requests
+ */
+export function useMembershipRequests() {
+  return useQuery({
+    queryKey: clubKeys.membershipRequests(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/coordinator/memberships/requests')
+      return data
+    },
+  })
+}
+
+// ── useUpdateMembershipStatus (coordinator) ─────────────────────────────────
+/**
+ * PUT /coordinator/memberships/{membership_id}/status
+ * Body: { status: 'approved' | 'rejected', review_note?: string }
+ */
+export function useUpdateMembershipStatus() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ membershipId, status, review_note }) =>
+      axiosInstance.put(`/coordinator/memberships/${membershipId}/status`, { status, review_note }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: clubKeys.membershipRequests() })
+      qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      addToast({
+        type: 'success',
+        message: vars.status === 'approved' ? 'Membership approved.' : 'Membership rejected.',
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to update membership status.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useClubOfficeBearers (coordinator) ────────────────────────────────────────
+/**
+ * GET /coordinator/office-bearers
+ */
+export function useClubOfficeBearers() {
+  return useQuery({
+    queryKey: ['coordinator', 'office-bearers'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/coordinator/office-bearers')
+      return data
+    },
+  })
+}
+
+// ── useAllocateOfficeBearer (coordinator) ─────────────────────────────────────
+/**
+ * POST /coordinator/office-bearers/allocate
+ * Body: { position: string, student_id: string }
+ */
+export function useAllocateOfficeBearer() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ position, student_id }) => {
+      const { data } = await axiosInstance.post('/coordinator/office-bearers/allocate', { position, student_id })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      qc.invalidateQueries({ queryKey: clubKeys.membershipRequests() })
+      addToast({ type: 'success', message: data?.message || 'Office bearer allocated successfully.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to allocate office bearer.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useRemoveOfficeBearer (coordinator) ──────────────────────────────────────
+/**
+ * DELETE /coordinator/office-bearers/{position}
+ */
+export function useRemoveOfficeBearer() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (position) => {
+      const { data } = await axiosInstance.delete(`/coordinator/office-bearers/${encodeURIComponent(position)}`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      qc.invalidateQueries({ queryKey: clubKeys.membershipRequests() })
+      addToast({ type: 'success', message: data?.message || 'Office bearer position unassigned.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to unassign office bearer.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+

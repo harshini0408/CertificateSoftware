@@ -11,7 +11,16 @@ import StatusBadge from '../../components/StatusBadge'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import ConfirmModal from '../../components/ConfirmModal'
 import FileUpload from '../../components/FileUpload'
-import { useClubDashboard, useClubAssets, useUpdateClubAssets } from './api'
+import {
+  useClubDashboard,
+  useClubAssets,
+  useUpdateClubAssets,
+  useMembershipRequests,
+  useUpdateMembershipStatus,
+  useClubOfficeBearers,
+  useAllocateOfficeBearer,
+  useRemoveOfficeBearer,
+} from './api'
 import { useCreateEvent, useDeleteEvent, useEvents } from './eventsApi'
 import { useAuthStore } from '../../store/authStore'
 import { useChangePassword } from '../auth/api'
@@ -19,12 +28,15 @@ import axiosInstance from '../../utils/axiosInstance'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ── Tab ids ───────────────────────────────────────────────────────────────────
-const TABS = ['events', 'settings']
+const TABS = ['events', 'members', 'office_bearers', 'settings']
 
 const TAB_LABELS = {
   events: 'Club Dashboard',
+  members: 'Membership Requests',
+  office_bearers: 'Office Bearers',
   settings: 'Settings',
 }
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDate(iso) {
@@ -42,68 +54,10 @@ const Icon = {
 // Dashboard tab
 // ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab({ clubId, dashboard, isLoading }) {
-  const { data: events, isLoading: eventsLoading } = useEvents(clubId)
-  if (isLoading || eventsLoading) return <LoadingSpinner fullPage label="Loading dashboard…" />
-
-  const club = dashboard?.club || {}
-  const eventRows = Array.isArray(events) ? events : []
-  const totalEvents = eventRows.length
-  const totalCertificatesIssued = eventRows.reduce((sum, event) => sum + Number(event?.cert_count ?? 0), 0)
-  const recentEvents = [...eventRows].sort((a, b) => {
-    const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0
-    const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0
-    return bTime - aTime
-  })
-
-  const eventColumns = [
-    { key: 'name', header: 'Event', sortable: true },
-    { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
-    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
-    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
-    { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
-  ]
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-bold text-foreground">{club.name || 'Club Dashboard'}</h1>
-        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold text-navy">{club.slug}</span>
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
-        <StatCard label="Total Events" value={totalEvents} icon={Icon.events} accent="navy" />
-        <StatCard label="Certificates Issued" value={totalCertificatesIssued} icon={Icon.certs} accent="green" />
-      </div>
-
-      {/* Recent events */}
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="section-title">Recent Events</h2>
-        </div>
-        <DataTable
-          columns={eventColumns}
-          data={recentEvents}
-          isLoading={false}
-          emptyMessage="No events yet. Create your first event."
-          rowKey="id"
-        />
-      </div>
-
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Events tab
-// ═══════════════════════════════════════════════════════════════════════════════
-function EventsTab({ clubId }) {
   const navigate = useNavigate()
-  const qc = useQueryClient()
+  const { data: events, isLoading: eventsLoading } = useEvents(clubId)
   const createEvent = useCreateEvent(clubId)
   const deleteEvent = useDeleteEvent(clubId)
-
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
 
@@ -111,21 +65,10 @@ function EventsTab({ clubId }) {
     if (!isModalOpen) return undefined
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = prevOverflow
-    }
+    return () => { document.body.style.overflow = prevOverflow }
   }, [isModalOpen])
 
   const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm()
-
-  const { data: events, isLoading } = useQuery({
-    queryKey: ['events', clubId, 'list'],
-    queryFn: async () => {
-      const { data } = await axiosInstance.get(`/clubs/${clubId}/events`)
-      return data
-    },
-    enabled: !!clubId,
-  })
 
   const onSubmit = (data) => {
     createEvent.mutate(data, {
@@ -144,8 +87,20 @@ function EventsTab({ clubId }) {
     })
   }
 
+  if (isLoading || eventsLoading) return <LoadingSpinner fullPage label="Loading dashboard…" />
+
+  const club = dashboard?.club || {}
+  const eventRows = Array.isArray(events) ? events : []
+  const totalEvents = eventRows.length
+  const totalCertificatesIssued = eventRows.reduce((sum, event) => sum + Number(event?.cert_count ?? 0), 0)
+  const recentEvents = [...eventRows].sort((a, b) => {
+    const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0
+    const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0
+    return bTime - aTime
+  })
+
   const eventColumns = [
-    { key: 'name', header: 'Event Name', sortable: true, searchKey: true,
+    { key: 'name', header: 'Event', sortable: true, searchKey: true,
       render: (v, row) => (
         <button
           className="text-sm font-semibold text-navy hover:underline text-left"
@@ -153,26 +108,32 @@ function EventsTab({ clubId }) {
         >
           {v}
         </button>
-      ) },
+      )
+    },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
     { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
     { key: '_actions', header: 'Actions', align: 'center', searchKey: false, render: (_, row) => (
-        <div className="flex justify-center gap-2">
-          <button onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)} className="text-navy hover:bg-gray-100 p-1.5 rounded" title="Edit">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-          </button>
-          <button onClick={() => setDeleteTarget(row)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Delete">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-          </button>
-        </div>
-      ) }
+      <div className="flex justify-center gap-2">
+        <button onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)} className="text-navy hover:bg-gray-100 p-1.5 rounded" title="Open">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+        </button>
+        <button onClick={() => setDeleteTarget(row)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Delete">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        </button>
+      </div>
+    )},
   ]
 
   return (
-    <div className="space-y-4 relative">
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Events</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-foreground">{club.name || 'Club Dashboard'}</h1>
+          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold text-navy">{club.slug}</span>
+        </div>
         <button
           className="btn-primary"
           onClick={() => setIsModalOpen(true)}
@@ -180,33 +141,48 @@ function EventsTab({ clubId }) {
           + New Event
         </button>
       </div>
-      <DataTable
-        columns={eventColumns}
-        data={events ?? []}
-        isLoading={isLoading}
-        emptyMessage="No events yet. Click '+ New Event' to create one."
-        searchable
-        searchPlaceholder="Search events…"
-      />
 
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
+        <StatCard label="Total Events" value={totalEvents} icon={Icon.events} accent="navy" />
+        <StatCard label="Certificates Issued" value={totalCertificatesIssued} icon={Icon.certs} accent="green" />
+      </div>
+
+      {/* Events table */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="section-title">Events</h2>
+        </div>
+        <DataTable
+          columns={eventColumns}
+          data={recentEvents}
+          isLoading={false}
+          emptyMessage="No events yet. Click '+ New Event' to create one."
+          rowKey="id"
+          searchable
+          searchPlaceholder="Search events…"
+        />
+      </div>
+
+      {/* Create Event Modal */}
       {isModalOpen && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setIsModalOpen(false)}>
           <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
           <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-lg font-bold text-navy">Create New Event</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close modal">x</button>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close modal">×</button>
             </div>
             <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
               <div>
-                <label className="form-label" htmlFor="title">Event Name *</label>
-                <input id="title" type="text" className={`form-input ${errors.name ? 'form-input-error' : ''}`} placeholder="e.g. Hackathon 2024" {...register('name', { required: 'Event name is required' })} />
+                <label className="form-label" htmlFor="dash-event-name">Event Name *</label>
+                <input id="dash-event-name" type="text" className={`form-input ${errors.name ? 'form-input-error' : ''}`} placeholder="e.g. Hackathon 2024" {...register('name', { required: 'Event name is required' })} />
                 {errors.name && <p className="form-error">{errors.name.message}</p>}
               </div>
               <div>
-                <label className="form-label" htmlFor="date">Event Date *</label>
+                <label className="form-label" htmlFor="dash-event-date">Event Date *</label>
                 <input
-                  id="date"
+                  id="dash-event-date"
                   type="date"
                   className={`form-input ${errors.event_date ? 'form-input-error' : ''}`}
                   {...register('event_date', { required: 'Event date is required' })}
@@ -214,9 +190,9 @@ function EventsTab({ clubId }) {
                 {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
               </div>
               <div>
-                <label className="form-label" htmlFor="academic_year">Academic Year *</label>
+                <label className="form-label" htmlFor="dash-academic-year">Academic Year *</label>
                 <select
-                  id="academic_year"
+                  id="dash-academic-year"
                   className={`form-input ${errors.academic_year ? 'form-input-error' : ''}`}
                   {...register('academic_year', { required: 'Academic year is required' })}
                   defaultValue=""
@@ -229,15 +205,18 @@ function EventsTab({ clubId }) {
                 {errors.academic_year && <p className="form-error">{errors.academic_year.message}</p>}
               </div>
               <div className="pt-2 flex justify-end gap-3">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="btn-secondary">Cancel</button>
-                <button type="submit" disabled={isSubmitting} className="btn-primary">{isSubmitting ? 'Creating...' : 'Create'}</button>
+                <button type="button" onClick={() => { setIsModalOpen(false); reset() }} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={isSubmitting || createEvent.isPending} className="btn-primary">
+                  {(isSubmitting || createEvent.isPending) ? 'Creating...' : 'Create Event'}
+                </button>
               </div>
             </form>
           </div>
         </div>,
-        document.body,
+        document.body
       )}
 
+      {/* Delete Confirm Modal */}
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -252,87 +231,281 @@ function EventsTab({ clubId }) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Templates tab  —  shows the PNG image template gallery (read-only)
-// ═══════════════════════════════════════════════════════════════════════════════
-function TemplatesTab() {
-  const { data: templates, isLoading, error, refetch } = useImageTemplates()
 
-  if (isLoading) return <LoadingSpinner fullPage label="Loading templates…" />
+// ═══════════════════════════════════════════════════════════════════════════════
+// Members tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function MembersTab() {
+  const { data: requests, isLoading } = useMembershipRequests()
+  const updateStatus = useUpdateMembershipStatus()
+  const [notes, setNotes] = useState({})
 
-  if (error) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16 text-center">
-        <p className="text-sm text-red-500">Failed to load templates.</p>
-        <button className="btn-secondary text-xs" onClick={() => refetch()}>Retry</button>
-      </div>
-    )
-  }
+  if (isLoading) return <LoadingSpinner fullPage label="Loading membership requests…" />
+
+  const pending  = (requests || []).filter((r) => r.status === 'pending')
+  const reviewed = (requests || []).filter((r) => r.status !== 'pending')
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Certificate Templates</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          These are the pre-built templates available for your events.
-        </p>
-      </div>
-
-      {(!templates || templates.length === 0) ? (
-        <div className="card p-12 text-center text-gray-400">
-          <svg className="h-12 w-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <p className="text-lg font-semibold">No templates found</p>
-          <p className="text-sm mt-2 max-w-sm mx-auto text-gray-400">
-            Add PNG files to{' '}
-            <code className="bg-gray-100 px-1 rounded text-xs">
-              backend/app/static/certificate_templates/
-            </code>{' '}
-            and restart the backend server.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {templates.map((t) => (
-            <div
-              key={t.id}
-              className="group flex flex-col rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white hover:shadow-md hover:border-indigo-300 transition-all duration-200"
-            >
-              {/* Preview */}
-              <div className="w-full bg-gray-50 overflow-hidden" style={{ aspectRatio: '210/297' }}>
-                {t.preview_url ? (
-                  <img
-                    src={BACKEND_URL + t.preview_url}
-                    alt={t.display_name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
+      <div className="card p-5">
+        <h2 className="section-title mb-4">Pending Requests ({pending.length})</h2>
+        {pending.length === 0 ? (
+          <p className="text-sm text-gray-400">No pending membership requests.</p>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {pending.map((req) => (
+              <div key={req.id} className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">{req.student_name || '—'}</p>
+                  <p className="text-xs text-gray-400">{req.student_email}</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Applied {req.applied_at ? new Date(req.applied_at).toLocaleDateString('en-IN') : '—'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col gap-1.5 sm:items-end">
+                  <input
+                    type="text"
+                    placeholder="Optional note…"
+                    className="form-input h-8 text-xs w-48"
+                    value={notes[req.id] || ''}
+                    onChange={(e) => setNotes((p) => ({ ...p, [req.id]: e.target.value }))}
                   />
-                ) : null}
-                <div
-                  className="w-full h-full items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50"
-                  style={{ display: t.preview_url ? 'none' : 'flex' }}
-                >
-                  <svg className="h-10 w-10 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
+                  <div className="flex gap-2">
+                    <button
+                      id={`approve-${req.id}`}
+                      className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+                      disabled={updateStatus.isPending}
+                      onClick={() => updateStatus.mutate({ membershipId: req.id, status: 'approved', review_note: notes[req.id] || undefined })}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      id={`reject-${req.id}`}
+                      className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                      disabled={updateStatus.isPending}
+                      onClick={() => updateStatus.mutate({ membershipId: req.id, status: 'rejected', review_note: notes[req.id] || undefined })}
+                    >
+                      Reject
+                    </button>
+                  </div>
                 </div>
               </div>
-              {/* Info */}
-              <div className="px-3 py-2.5 border-t border-gray-100">
-                <p className="text-sm font-semibold text-gray-800 truncate">{t.display_name}</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">{t.filename}</p>
-                <span className="inline-flex mt-1.5 items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-600">
-                  Read-only
+            ))}
+          </div>
+        )}
+      </div>
+
+      {reviewed.length > 0 && (
+        <div className="card p-5">
+          <h2 className="section-title mb-4">Reviewed Requests</h2>
+          <div className="divide-y divide-gray-100">
+            {reviewed.map((req) => (
+              <div key={req.id} className="flex items-center justify-between py-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-foreground">{req.student_name || '—'}</p>
+                    {req.office_bearer_role && (
+                      <span className="rounded bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy">
+                        {req.office_bearer_role}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">{req.student_email}</p>
+                  {req.review_note && <p className="text-xs text-gray-500 mt-0.5">{req.review_note}</p>}
+                </div>
+                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                  req.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>
+                  {req.status}
                 </span>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>
   )
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Office Bearers tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function OfficeBearersTab() {
+  const { data, isLoading } = useClubOfficeBearers()
+  const allocateMutation = useAllocateOfficeBearer()
+  const removeMutation = useRemoveOfficeBearer()
+
+  const [activeModalRole, setActiveModalRole] = useState(null)
+  const [selectedStudentId, setSelectedStudentId] = useState('')
+
+  if (isLoading) return <LoadingSpinner fullPage label="Loading office bearer allocations…" />
+
+  const positions = data?.positions || ['President', 'Vice President', 'Secretary', 'Joint Secretary', 'Treasurer']
+  const allocations = data?.allocations || {}
+  const approvedMembers = data?.approved_members || []
+
+  const handleOpenModal = (role) => {
+    setActiveModalRole(role)
+    const currentHolder = allocations[role]
+    setSelectedStudentId(currentHolder ? currentHolder.student_id : '')
+  }
+
+  const handleAllocateSubmit = (e) => {
+    e.preventDefault()
+    if (!selectedStudentId) return
+    allocateMutation.mutate(
+      { position: activeModalRole, student_id: selectedStudentId },
+      { onSuccess: () => setActiveModalRole(null) }
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Club Office Bearers</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Allocate fixed office bearer roles for your club. A student can hold an office bearer role in at most one club and position.
+          </p>
+        </div>
+      </div>
+
+      {/* Grid of 5 positions */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {positions.map((pos) => {
+          const holder = allocations[pos]
+          return (
+            <div key={pos} className="card p-5 flex flex-col justify-between space-y-4 border border-gray-100 hover:shadow-md transition-shadow">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-navy bg-navy/5 px-2.5 py-1 rounded-md">
+                    {pos}
+                  </span>
+                  {holder ? (
+                    <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                      Allocated
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
+                      Not Allocated
+                    </span>
+                  )}
+                </div>
+
+                {holder ? (
+                  <div className="pt-2 space-y-1">
+                    <p className="text-base font-bold text-foreground">{holder.name || '—'}</p>
+                    <p className="text-xs text-gray-500">{holder.email}</p>
+                    <div className="pt-1 flex flex-wrap gap-2 text-xs text-gray-600 font-mono">
+                      {holder.registration_number && (
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded">{holder.registration_number}</span>
+                      )}
+                      {holder.department && (
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded">{holder.department}</span>
+                      )}
+                      {holder.batch && (
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded">{holder.batch}</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-4 text-center">
+                    <p className="text-sm text-gray-400 italic">No member assigned to this position yet.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenModal(pos)}
+                  className="flex-1 rounded-md bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy/90 transition-colors"
+                >
+                  {holder ? 'Change Member' : 'Allocate Member'}
+                </button>
+                {holder && (
+                  <button
+                    type="button"
+                    disabled={removeMutation.isPending}
+                    onClick={() => removeMutation.mutate(pos)}
+                    className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Allocation Modal */}
+      {activeModalRole && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setActiveModalRole(null)}>
+          <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-navy">Allocate {activeModalRole}</h3>
+              <button onClick={() => setActiveModalRole(null)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
+            </div>
+            <form onSubmit={handleAllocateSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="form-label" htmlFor="student-select">
+                  Select Approved Club Member *
+                </label>
+                {approvedMembers.length === 0 ? (
+                  <p className="text-sm text-red-500 mt-1">
+                    No approved club members available. Please approve student membership requests first.
+                  </p>
+                ) : (
+                  <select
+                    id="student-select"
+                    className="form-input text-sm"
+                    value={selectedStudentId}
+                    onChange={(e) => setSelectedStudentId(e.target.value)}
+                    required
+                  >
+                    <option value="">-- Choose a student --</option>
+                    {approvedMembers.map((mem) => {
+                      const isCurrentRole = mem.office_bearer_role === activeModalRole
+                      const isOtherRole = mem.office_bearer_role && !isCurrentRole
+                      return (
+                        <option key={mem.student_id} value={mem.student_id} disabled={isOtherRole}>
+                          {mem.name} ({mem.registration_number || mem.email})
+                          {isCurrentRole ? ' - Currently Assigned' : isOtherRole ? ` - (${mem.office_bearer_role})` : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                )}
+              </div>
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveModalRole(null)}
+                  className="btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!selectedStudentId || allocateMutation.isPending}
+                  className="btn-primary"
+                >
+                  {allocateMutation.isPending ? 'Allocating...' : 'Confirm Allocation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Settings tab
@@ -658,8 +831,11 @@ export default function ClubDashboard() {
               </div>
             )}
 
-            {activeTab === 'events' && <EventsTab clubId={effectiveClubId} />}
+            {activeTab === 'events' && <DashboardTab clubId={effectiveClubId} dashboard={dashboard} isLoading={dashLoading} />}
+            {activeTab === 'members' && <MembersTab />}
+            {activeTab === 'office_bearers' && <OfficeBearersTab />}
             {activeTab === 'settings' && (
+
               <SettingsTab
                 club={club}
                 clubId={effectiveClubId}

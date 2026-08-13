@@ -229,6 +229,7 @@ export default function PrincipalDashboard() {
 
   const [eventSearch, setEventSearch] = useState('')
   const [eventSourceType, setEventSourceType] = useState('')
+  const [eventSourceValue, setEventSourceValue] = useState('')
   const [selectedEvent, setSelectedEvent] = useState(null)
 
   const [search, setSearch] = useState('')
@@ -251,6 +252,17 @@ export default function PrincipalDashboard() {
 
   const { data: eventsResp, isLoading: loadingEvents } = usePrincipalEventsOverview(eventFilters)
   const eventRows = eventsResp?.items || []
+
+  const availableSourceNames = useMemo(
+    () => [...new Set(eventRows.map((r) => r.source_name))].filter(Boolean).sort(),
+    [eventRows],
+  )
+
+  const filteredEventRows = useMemo(
+    () => (eventSourceValue ? eventRows.filter((r) => r.source_name === eventSourceValue) : eventRows),
+    [eventRows, eventSourceValue],
+  )
+
 
   const filters = useMemo(() => {
     const f = {}
@@ -299,6 +311,34 @@ export default function PrincipalDashboard() {
     { key: 'batch', header: 'Batch', sortable: true },
     { key: 'section', header: 'Class', sortable: true },
     { key: 'total_credits', header: 'Credit Points', sortable: true, align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
+    {
+      key: 'clubs',
+      header: 'Club Memberships',
+      render: (v) => {
+        const clubs = Array.isArray(v) ? v : []
+        if (!clubs.length) return <span className="text-xs text-gray-400">—</span>
+        return (
+          <div className="flex flex-wrap gap-1">
+            {clubs.map((c) => (
+              <span key={c} className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-200">{c}</span>
+            ))}
+          </div>
+        )
+      },
+    },
+    {
+      key: 'office_bearer',
+      header: 'Office Bearer',
+      render: (v) => {
+        if (!v) return <span className="text-xs text-gray-400">—</span>
+        return (
+          <span className="inline-flex rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-semibold text-purple-700 ring-1 ring-purple-200">
+            {v}
+          </span>
+        )
+      },
+    },
+
     {
       key: '_actions',
       header: 'Actions',
@@ -400,7 +440,7 @@ export default function PrincipalDashboard() {
             {viewMode === 'dashboard' ? (
               <>
                 <div className="card p-4">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <input
                       type="search"
                       placeholder="Search event / club / department"
@@ -408,20 +448,43 @@ export default function PrincipalDashboard() {
                       onChange={(e) => setEventSearch(e.target.value)}
                       className="form-input"
                     />
-                    <select className="form-input" value={eventSourceType} onChange={(e) => setEventSourceType(e.target.value)}>
+                    <select
+                      className="form-input"
+                      value={eventSourceType}
+                      onChange={(e) => {
+                        setEventSourceType(e.target.value)
+                        setEventSourceValue('')
+                      }}
+                    >
                       <option value="">All Sources</option>
                       <option value="club">Club Events</option>
                       <option value="department">Department Events</option>
                     </select>
+                    {eventSourceType && (
+                      <select
+                        className="form-input"
+                        value={eventSourceValue}
+                        onChange={(e) => setEventSourceValue(e.target.value)}
+                      >
+                        <option value="">
+                          {eventSourceType === 'club' ? 'All Clubs' : 'All Departments'}
+                        </option>
+                        {availableSourceNames.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
-                      Total Events: <span className="font-semibold text-navy">{eventsResp?.count ?? 0}</span>
+                      Total Events: <span className="font-semibold text-navy">{filteredEventRows.length}</span>
                     </div>
                   </div>
                 </div>
 
                 <DataTable
                   columns={eventColumns}
-                  data={eventRows}
+                  data={filteredEventRows}
                   isLoading={loadingEvents}
                   emptyMessage="No events found for selected filters."
                   onRowClick={(row) => setSelectedEvent(row)}

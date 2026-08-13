@@ -11,6 +11,11 @@ export const creditKeys = {
   manualSubmissions: ()   => ['credits', 'manual-submissions'],
 }
 
+export const clubMembershipKeys = {
+  myMemberships: () => ['clubs', 'me', 'memberships'],
+  availableClubs: () => ['clubs', 'available'],
+}
+
 // ── Credit weights (mirrors backend config) ───────────────────────────────────
 export const CREDIT_WEIGHTS = {
   participant: 1,
@@ -122,6 +127,57 @@ export function useCreateManualCreditSubmission() {
       addToast({
         type: 'error',
         message: err?.response?.data?.detail || 'Failed to submit certificate.',
+      })
+    },
+  })
+}
+
+/**
+ * GET /clubs — list available clubs (for student to apply to)
+ */
+export function useAvailableClubs() {
+  return useQuery({
+    queryKey: clubMembershipKeys.availableClubs(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/clubs')
+      return data
+    },
+  })
+}
+
+/**
+ * GET /students/me/clubs — list my club memberships
+ */
+export function useMyClubMemberships() {
+  return useQuery({
+    queryKey: clubMembershipKeys.myMemberships(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/students/me/clubs')
+      return data
+    },
+  })
+}
+
+/**
+ * POST /students/me/clubs/apply — apply to a club
+ */
+export function useApplyForClub() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (club_id) => {
+      const { data } = await axiosInstance.post('/students/me/clubs/apply', { club_id })
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: clubMembershipKeys.myMemberships() })
+      addToast({ type: 'success', message: 'Application submitted! Awaiting coordinator approval.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to apply for club.',
       })
     },
   })

@@ -15,6 +15,9 @@ import {
   useMyManualCreditSubmissions,
   useMyProfile,
   useStudentCreditRules,
+  useMyClubMemberships,
+  useApplyForClub,
+  useAvailableClubs,
 } from './api'
 
 // ── Icon helpers ──────────────────────────────────────────────────────────────
@@ -132,7 +135,11 @@ export default function StudentDashboard() {
   const { data: certs,    isLoading: certsLoading    } = useMyCertificates()
   const { data: creditRules, isLoading: rulesLoading } = useStudentCreditRules()
   const { data: manualSubmissions, isLoading: submissionsLoading } = useMyManualCreditSubmissions()
+  const { data: clubMemberships, isLoading: membershipsLoading } = useMyClubMemberships()
+  const { data: availableClubs } = useAvailableClubs()
+  const applyForClub = useApplyForClub()
   const createSubmission = useCreateManualCreditSubmission()
+  const [selectedClubId, setSelectedClubId] = useState('')
 
   const generatedCertificatesCount = (certs || []).filter((c) => ['generated', 'emailed'].includes((c?.status || '').toLowerCase())).length
   const visibleCertificates = (certs || []).filter((c) => c?.status === 'emailed')
@@ -409,6 +416,96 @@ export default function StudentDashboard() {
                 emptyMessage="No semester totals yet."
                 rowKey="semester"
               />
+            </div>
+
+            {/* ─── Club Memberships ─────────────────────────────────── */}
+            <div className="card p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="section-title">My Club Memberships</h2>
+                {clubMemberships && clubMemberships.length > 0 && (
+                  <span className="text-xs text-gray-500">{clubMemberships.length} / 2 slots used</span>
+                )}
+              </div>
+
+              {/* Current memberships */}
+              {membershipsLoading ? (
+                <div className="flex justify-center py-4"><div className="h-6 w-6 animate-spin rounded-full border-2 border-navy border-t-transparent" /></div>
+              ) : clubMemberships && clubMemberships.length > 0 ? (
+                <div className="divide-y divide-gray-100">
+                  {clubMemberships.map((m) => (
+                    <div key={m.id} className="flex items-center justify-between py-2.5">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-foreground">{m.club_name || '—'}</p>
+                          {m.office_bearer_role && (
+                            <span className="inline-flex rounded bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy">
+                              {m.office_bearer_role}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Applied {m.applied_at ? new Date(m.applied_at).toLocaleDateString('en-IN') : '—'}
+                          {m.review_note ? ` • ${m.review_note}` : ''}
+                        </p>
+                      </div>
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${
+                        m.status === 'approved' ? 'bg-green-100 text-green-700' :
+                        m.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                        'bg-amber-100 text-amber-700'
+                      }`}>
+                        {m.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">You haven't applied to any clubs yet.</p>
+              )}
+
+              {/* Apply section — only if fewer than 2 active slots */}
+              {(() => {
+                const activeCount = (clubMemberships || []).filter(
+                  (m) => m.status === 'pending' || m.status === 'approved'
+                ).length
+                if (activeCount >= 2) return null
+
+                const appliedClubIds = new Set(
+                  (clubMemberships || [])
+                    .filter((m) => m.status === 'pending' || m.status === 'approved')
+                    .map((m) => m.club_id)
+                )
+                const eligibleClubs = (availableClubs || []).filter(
+                  (c) => !appliedClubIds.has(c.id)
+                )
+
+                return (
+                  <div className="flex items-center gap-3 border-t border-gray-100 pt-4">
+                    <select
+                      className="form-input flex-1"
+                      value={selectedClubId}
+                      onChange={(e) => setSelectedClubId(e.target.value)}
+                    >
+                      <option value="">Select a club to join…</option>
+                      {eligibleClubs.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      id="apply-club-btn"
+                      className="btn-primary whitespace-nowrap"
+                      disabled={!selectedClubId || applyForClub.isPending}
+                      onClick={() => {
+                        if (!selectedClubId) return
+                        applyForClub.mutate(selectedClubId, {
+                          onSuccess: () => setSelectedClubId('')
+                        })
+                      }}
+                    >
+                      {applyForClub.isPending ? 'Applying…' : 'Apply'}
+                    </button>
+                  </div>
+                )
+              })()}
             </div>
 
             <div className="card p-5">
