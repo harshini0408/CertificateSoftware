@@ -130,6 +130,7 @@ function useNavItems() {
     case 'club_coordinator':
       return [
         { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: `/club/${effectiveClubId}?tab=active_members`,   icon: icons.users,     label: 'Active Members' },
         { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
       ]
 
@@ -183,7 +184,7 @@ export default function Sidebar() {
           fixed top-14 left-0 z-20 flex h-[calc(100dvh-3.5rem)] flex-col
           border-gray-200 bg-white shadow-card
           transition-all duration-300 ease-in-out
-          lg:sticky lg:shadow-none min-h-0
+          lg:sticky lg:top-14 lg:self-start lg:shrink-0 lg:shadow-none min-h-0
           ${sidebarOpen ? 'w-60 translate-x-0 border-r' : 'w-0 -translate-x-full border-none px-0'}
           lg:translate-x-0 lg:border-r lg:w-60
         `}

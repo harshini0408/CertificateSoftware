@@ -294,9 +294,9 @@ export default function HodDashboard() {
   return (
     <>
       <Navbar />
-      <div className="flex">
+      <div className="flex items-start">
         <Sidebar />
-        <main className="flex-1 min-h-[calc(100dvh-3.5rem)] bg-background">
+        <main className="flex-1 min-w-0 min-h-[calc(100dvh-3.5rem)] bg-background">
           <div className="page-container space-y-5">
             <div>
               <h1 className="text-2xl font-bold text-foreground">HOD Dashboard</h1>

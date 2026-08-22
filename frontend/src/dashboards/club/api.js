@@ -289,3 +289,66 @@ export function useRemoveOfficeBearer() {
   })
 }
 
+// ── useAddOfficeBearerPosition (coordinator) ─────────────────────────────────
+/**
+ * POST /coordinator/office-bearers/positions
+ * Body: { position: string }
+ */
+export function useAddOfficeBearerPosition() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (position) => {
+      const { data } = await axiosInstance.post('/coordinator/office-bearers/positions', { position })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      addToast({ type: 'success', message: data?.message || 'Position added successfully.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to add position.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useDeleteOfficeBearerPosition (coordinator) ──────────────────────────────
+/**
+ * DELETE /coordinator/office-bearers/positions/{position}
+ */
+export function useDeleteOfficeBearerPosition() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (position) => {
+      const { data } = await axiosInstance.delete(`/coordinator/office-bearers/positions/${encodeURIComponent(position)}`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      addToast({ type: 'success', message: data?.message || 'Position removed.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to remove position.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useClubActiveMembers (coordinator) ───────────────────────────────────────
+/**
+ * GET /coordinator/active-members
+ */
+export function useClubActiveMembers() {
+  return useQuery({
+    queryKey: ['coordinator', 'active-members'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/coordinator/active-members')
+      return data
+    },
+  })
+}
+

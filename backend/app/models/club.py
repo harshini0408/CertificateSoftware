@@ -1,8 +1,17 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from beanie import Document, Indexed
 from pydantic import BaseModel, Field
+
+
+DEFAULT_OFFICE_BEARER_POSITIONS = [
+    "President",
+    "Vice President",
+    "Secretary",
+    "Joint Secretary",
+    "Treasurer",
+]
 
 
 class ClubAssets(BaseModel):
@@ -24,6 +33,7 @@ class Club(Document):
     slug: Indexed(str, unique=True)  # type: ignore[valid-type]
     contact_email: Optional[str] = None
     assets: ClubAssets = Field(default_factory=ClubAssets)
+    office_bearer_positions: List[str] = Field(default_factory=lambda: list(DEFAULT_OFFICE_BEARER_POSITIONS))
     is_active: bool = True
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

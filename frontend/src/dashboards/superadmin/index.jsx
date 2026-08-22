@@ -51,7 +51,7 @@ function useDebounce(value, delay = 300) {
   const [debounced, setDebounced] = useState(value)
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), delay)
-  return () => clearTimeout(t)
+    return () => clearTimeout(t)
   }, [value, delay])
   return debounced
 }
@@ -93,7 +93,7 @@ function Modal({ isOpen, onClose, title, children, wide = false }) {
     const h = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h)
     document.body.style.overflow = 'hidden'
-  return () => { window.removeEventListener('keydown', h); document.body.style.overflow = '' }
+    return () => { window.removeEventListener('keydown', h); document.body.style.overflow = '' }
   }, [isOpen, onClose])
 
   if (!isOpen) return null
@@ -314,43 +314,43 @@ function EditClubModal({ isOpen, onClose, club }) {
 
   if (!club) return null
   return (
-      <Modal isOpen={isOpen} onClose={onClose} title="Edit Club">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="form-label">Club Name</label>
-            <input className="form-input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-          </div>
-          <div>
-            <label className="form-label">Slug</label>
-            <input className="form-input font-mono bg-gray-50 cursor-not-allowed" value={club.slug} disabled title="Cannot be changed" />
-          </div>
-          <div>
-            <label className="form-label">Contact Email</label>
-            <input type="email" className="form-input" value={form.contact_email} onChange={(e) => setForm((f) => ({ ...f, contact_email: e.target.value }))} />
-          </div>
-          <div>
-            <label className="form-label">Coordinator Username</label>
-            <input
-              className="form-input font-mono"
-              value={form.coordinator_username}
-              onChange={(e) => setForm((f) => ({ ...f, coordinator_username: e.target.value }))}
-              placeholder="club_coordinator_username"
-              disabled={!coordinator}
-            />
-            {!coordinator && (
-              <p className="mt-1 text-xs text-gray-500">
-                No club coordinator user found for this club.
-              </p>
-            )}
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary min-w-[120px]" disabled={updateClub.isPending || updateUser.isPending}>
-              {(updateClub.isPending || updateUser.isPending) ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
-            </button>
-          </div>
-        </form>
-      </Modal>
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit Club">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="form-label">Club Name</label>
+          <input className="form-input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+        </div>
+        <div>
+          <label className="form-label">Slug</label>
+          <input className="form-input font-mono bg-gray-50 cursor-not-allowed" value={club.slug} disabled title="Cannot be changed" />
+        </div>
+        <div>
+          <label className="form-label">Contact Email</label>
+          <input type="email" className="form-input" value={form.contact_email} onChange={(e) => setForm((f) => ({ ...f, contact_email: e.target.value }))} />
+        </div>
+        <div>
+          <label className="form-label">Coordinator Username</label>
+          <input
+            className="form-input font-mono"
+            value={form.coordinator_username}
+            onChange={(e) => setForm((f) => ({ ...f, coordinator_username: e.target.value }))}
+            placeholder="club_coordinator_username"
+            disabled={!coordinator}
+          />
+          {!coordinator && (
+            <p className="mt-1 text-xs text-gray-500">
+              No club coordinator user found for this club.
+            </p>
+          )}
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary min-w-[120px]" disabled={updateClub.isPending || updateUser.isPending}>
+            {(updateClub.isPending || updateUser.isPending) ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -752,32 +752,32 @@ function EditUserModal({ isOpen, onClose, user }) {
 
   if (!user) return null
   return (
-      <Modal isOpen={isOpen} onClose={onClose} title="Edit User">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="form-label">Username</label>
-            <input className="form-input bg-gray-50 cursor-not-allowed" value={user.username} disabled title="Cannot be changed" />
-          </div>
-          <div>
-            <label className="form-label">Role</label>
-            <input className="form-input bg-gray-50 cursor-not-allowed" value={roleLabel[user.role] || user.role} disabled title="Cannot be changed" />
-          </div>
-          <div>
-            <label className="form-label">Full Name</label>
-            <input className="form-input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-          </div>
-          <div>
-            <label className="form-label">Email</label>
-            <input type="email" className="form-input" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary min-w-[120px]" disabled={updateUser.isPending}>
-              {updateUser.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
-            </button>
-          </div>
-        </form>
-      </Modal>
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit User">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="form-label">Username</label>
+          <input className="form-input bg-gray-50 cursor-not-allowed" value={user.username} disabled title="Cannot be changed" />
+        </div>
+        <div>
+          <label className="form-label">Role</label>
+          <input className="form-input bg-gray-50 cursor-not-allowed" value={roleLabel[user.role] || user.role} disabled title="Cannot be changed" />
+        </div>
+        <div>
+          <label className="form-label">Full Name</label>
+          <input className="form-input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+        </div>
+        <div>
+          <label className="form-label">Email</label>
+          <input type="email" className="form-input" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary min-w-[120px]" disabled={updateUser.isPending}>
+            {updateUser.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -791,9 +791,9 @@ export default function AdminDashboard() {
   return (
     <>
       <Navbar />
-      <div className="flex">
+      <div className="flex items-start">
         <Sidebar />
-        <main className="flex-1 min-h-[calc(100dvh-3.5rem)] bg-background">
+        <main className="flex-1 min-w-0 min-h-[calc(100dvh-3.5rem)] bg-background">
           <div className="page-container">
             {activeTab === 'overview' && <OverviewTab />}
             {activeTab === 'clubs' && <ClubsTab />}
@@ -817,12 +817,12 @@ function CertificatesTab() {
   const [clubFilter, setClubFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  
+
   // Pagination
   const [page, setPage] = useState(1)
 
   const { data: clubs } = useClubs()
-  
+
   const filters = useMemo(() => {
     const f = {}
     if (search) f.search = search
@@ -836,7 +836,7 @@ function CertificatesTab() {
   // Triggers API call correctly, keepPreviousData is inside hook
   const { data, isLoading } = useAdminCertificates(filters, page)
   const revokeCert = useRevokeCertificate()
-  
+
   const [revokeTarget, setRevokeTarget] = useState(null)
 
   const certs = data?.items ?? []
@@ -844,31 +844,47 @@ function CertificatesTab() {
   const pages = data?.pages ?? 1
 
   const columns = [
-    { key: 'cert_number', header: 'Cert No.', searchKey: true,
-      render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v ?? '—'}</span> },
-    { key: 'snapshot', header: 'Participant', searchKey: false,
-      render: (snap) => <span className="text-sm">{snap?.name ?? '—'}</span> },
-    { key: 'snapshot.email', header: 'Email', searchKey: false,
-      render: (_, row) => <span className="text-sm">{row?.snapshot?.email ?? '—'}</span> },
-    { key: 'snapshot.club_name', header: 'Club', searchKey: false,
-      render: (_, row) => <span className="text-sm">{row?.snapshot?.club_name ?? '—'}</span> },
-    { key: 'snapshot.event_name', header: 'Event', searchKey: false,
-      render: (_, row) => <span className="text-sm">{row?.snapshot?.event_name ?? '—'}</span> },
-    { key: 'cert_type', header: 'Cert Type',
-      render: (v) => <StatusBadge status={v} size="sm" /> },
-    { key: 'status', header: 'Status',
-      render: (v) => <StatusBadge status={v} size="sm" /> },
+    {
+      key: 'cert_number', header: 'Cert No.', searchKey: true,
+      render: (v) => <span className="font-mono text-xs font-semibold text-navy">{v ?? '—'}</span>
+    },
+    {
+      key: 'snapshot', header: 'Participant', searchKey: false,
+      render: (snap) => <span className="text-sm">{snap?.name ?? '—'}</span>
+    },
+    {
+      key: 'snapshot.email', header: 'Email', searchKey: false,
+      render: (_, row) => <span className="text-sm">{row?.snapshot?.email ?? '—'}</span>
+    },
+    {
+      key: 'snapshot.club_name', header: 'Club', searchKey: false,
+      render: (_, row) => <span className="text-sm">{row?.snapshot?.club_name ?? '—'}</span>
+    },
+    {
+      key: 'snapshot.event_name', header: 'Event', searchKey: false,
+      render: (_, row) => <span className="text-sm">{row?.snapshot?.event_name ?? '—'}</span>
+    },
+    {
+      key: 'cert_type', header: 'Cert Type',
+      render: (v) => <StatusBadge status={v} size="sm" />
+    },
+    {
+      key: 'status', header: 'Status',
+      render: (v) => <StatusBadge status={v} size="sm" />
+    },
     { key: 'issued_at', header: 'Issued', render: (v) => fmtDate(v) },
-    { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
-      !['revoked', 'emailed'].includes((row.status || '').toLowerCase()) && (
-        <button
-          onClick={() => setRevokeTarget(row)}
-          className="rounded p-1 text-xs font-semibold text-red-600 hover:bg-red-50 hover:underline"
-        >
-          Revoke
-        </button>
+    {
+      key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+        !['revoked', 'emailed'].includes((row.status || '').toLowerCase()) && (
+          <button
+            onClick={() => setRevokeTarget(row)}
+            className="rounded p-1 text-xs font-semibold text-red-600 hover:bg-red-50 hover:underline"
+          >
+            Revoke
+          </button>
+        )
       )
-    )},
+    },
   ]
   return (
     <div className="space-y-4">
@@ -899,7 +915,7 @@ function CertificatesTab() {
           <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} className="form-input w-36" title="Date To" />
         </div>
       </div>
-      
+
       <DataTable columns={columns} data={certs} isLoading={isLoading}
         emptyMessage="No certificates found." />
 
@@ -937,7 +953,7 @@ function StudentClubMemberships({ studentId }) {
   const { data: memberships, isLoading } = useStudentClubMemberships(studentId)
 
   if (isLoading) return <span className="text-xs text-gray-400">Loading memberships...</span>
-  
+
   const approved = (memberships || []).filter(m => m.status === 'approved')
   if (approved.length === 0) return <span className="text-xs text-gray-400">No active club memberships</span>
 
@@ -1146,7 +1162,7 @@ function CreditRulesTab() {
 
       <div className="card p-4">
         <h2 className="text-sm font-semibold text-foreground">Add New Credit Rule</h2>
-        <p className="mt-1 text-xs text-gray-500">Example: hackathin with 3 points. This will appear in tutor and student role selections after saving.</p>
+        <p className="mt-1 text-xs text-gray-500">Example: hackathon with 3 points. This will appear in tutor and student role selections after saving.</p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
           <div className="sm:col-span-2">
             <label className="form-label">Rule Name</label>
@@ -1154,7 +1170,7 @@ function CreditRulesTab() {
               className="form-input"
               value={newRuleType}
               onChange={(e) => setNewRuleType(e.target.value)}
-              placeholder="hackathin"
+              placeholder="hackathon"
             />
           </div>
           <div>
@@ -1180,7 +1196,7 @@ function CreditRulesTab() {
           </div>
         </div>
       </div>
-      
+
       {isLoading ? (
         <div className="flex py-12 justify-center"><LoadingSpinner /></div>
       ) : (
@@ -1288,7 +1304,7 @@ function OverviewTab() {
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         This will start the next semester and reset only current semester totals. Certificates will remain visible.
       </div>
-      
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard label="Total Clubs" value={stats?.total_clubs ?? 0} accent="navy" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} />
         <StatCard label="Total Users" value={stats?.total_users ?? 0} accent="blue" isLoading={sl} icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>} />
@@ -1444,13 +1460,15 @@ function ClubsTab() {
     { key: 'slug', header: 'Slug', render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span> },
     { key: 'contact_email', header: 'Email', sortable: true },
     { key: 'created_at', header: 'Created', sortable: true, render: (v) => fmtDate(v) },
-    { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+    {
+      key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <button title="Edit" onClick={() => setEditClub(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
           </button>
         </div>
-    )},
+      )
+    },
   ]
   return (
     <div className="space-y-4">
@@ -1576,24 +1594,26 @@ function DepartmentsTab() {
     { key: 'name', header: 'Department Name', sortable: true, render: (v) => <span className="font-semibold">{v}</span> },
     { key: 'slug', header: 'Slug', render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span> },
     { key: 'created_at', header: 'Created', sortable: true, render: (v) => fmtDate(v) },
-    { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
-      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-        <button
-          title="Edit"
-          onClick={() => setEditDepartment(row)}
-          className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-        </button>
-        <button
-          title="Remove"
-          onClick={() => setRemoveTarget(row)}
-          className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0l1 12a1 1 0 001 1h6a1 1 0 001-1l1-12" /></svg>
-        </button>
-      </div>
-    )},
+    {
+      key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <button
+            title="Edit"
+            onClick={() => setEditDepartment(row)}
+            className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          </button>
+          <button
+            title="Remove"
+            onClick={() => setRemoveTarget(row)}
+            className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0l1 12a1 1 0 001 1h6a1 1 0 001-1l1-12" /></svg>
+          </button>
+        </div>
+      )
+    },
   ]
 
   return (
@@ -1662,7 +1682,7 @@ function BulkImportModal({ isOpen, onClose }) {
               (case-insensitive, in any order):
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {['name','email','username','password','department','registration_number','batch','section','tutor_email'].map(col => (
+              {['name', 'email', 'username', 'password', 'department', 'registration_number', 'batch', 'section', 'tutor_email'].map(col => (
                 <span key={col} className="inline-block rounded bg-blue-100 px-2 py-0.5 font-mono text-[11px] text-blue-800">{col}</span>
               ))}
             </div>
@@ -1698,8 +1718,8 @@ function BulkImportModal({ isOpen, onClose }) {
               {importMutation.isPending ? (
                 <span className="flex items-center gap-2">
                   <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                   </svg>
                   Importing…
                 </span>
@@ -2023,7 +2043,7 @@ function UsersTab() {
 
   const clubMap = useMemo(() => {
     const m = {}
-    ;(clubs || []).forEach((c) => { m[c.id] = c.name })
+      ; (clubs || []).forEach((c) => { m[c.id] = c.name })
     return m
   }, [clubs])
 
@@ -2071,41 +2091,43 @@ function UsersTab() {
     { key: 'username', header: 'Username', render: (v) => <span className="font-mono text-xs">{v}</span> },
     { key: 'role', header: 'Role', render: (v) => <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[v] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>{roleLabel[v] || v}</span> },
     { key: '_scope', header: 'Scope', searchKey: false, render: (_, row) => <span className="text-xs text-gray-500">{getScope(row)}</span> },
-    { key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
-      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-        {row.role === 'tutor' && (
-          <button
-            title="Switch students to another tutor"
-            onClick={() => {
-              setSelectedTutorForSwitch(row)
-              setShowTutorSwitch(true)
-            }}
-            className="rounded p-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 hover:underline"
-          >
-            Switch Students
+    {
+      key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          {row.role === 'tutor' && (
+            <button
+              title="Switch students to another tutor"
+              onClick={() => {
+                setSelectedTutorForSwitch(row)
+                setShowTutorSwitch(true)
+              }}
+              className="rounded p-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 hover:underline"
+            >
+              Switch Students
+            </button>
+          )}
+          <button title="Edit" onClick={() => setEditUser(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
           </button>
-        )}
-        <button title="Edit" onClick={() => setEditUser(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-        </button>
-        {row.role !== 'super_admin' && (
-          <button
-            title="Delete user"
-            onClick={() => handleDeleteUser(row)}
-            disabled={deleteUser.isPending && deletingUserId === row.id}
-            className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {deleteUser.isPending && deletingUserId === row.id ? (
-              <span className="text-[10px] font-semibold">...</span>
-            ) : (
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7" />
-              </svg>
-            )}
-          </button>
-        )}
-      </div>
-    )},
+          {row.role !== 'super_admin' && (
+            <button
+              title="Delete user"
+              onClick={() => handleDeleteUser(row)}
+              disabled={deleteUser.isPending && deletingUserId === row.id}
+              className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {deleteUser.isPending && deletingUserId === row.id ? (
+                <span className="text-[10px] font-semibold">...</span>
+              ) : (
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7" />
+                </svg>
+              )}
+            </button>
+          )}
+        </div>
+      )
+    },
   ]
   return (
     <div className="space-y-4">

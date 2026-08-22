@@ -393,18 +393,24 @@ async def update_membership_status(
 
 # ─── Office Bearers ─────────────────────────────────────────────────────────────
 
-FIXED_OFFICE_BEARERS = [
-    "President",
-    "Vice President",
-    "Secretary",
-    "Joint Secretary",
-    "Treasurer",
-]
+from ...models.club import DEFAULT_OFFICE_BEARER_POSITIONS
+
+
+async def _get_club_positions(club: Club) -> list[str]:
+    """Return the club's office bearer positions, falling back to defaults."""
+    positions = getattr(club, "office_bearer_positions", None)
+    if positions and len(positions) > 0:
+        return list(positions)
+    return list(DEFAULT_OFFICE_BEARER_POSITIONS)
 
 
 class AllocateOfficeBearerBody(_BaseModel):
     position: str
     student_id: str
+
+
+class AddPositionBody(_BaseModel):
+    position: str
 
 
 @coordinator_router.get("/office-bearers")
@@ -414,6 +420,12 @@ async def get_office_bearers(
     """Get office bearer allocations and approved members for the coordinator's club."""
     if not current_user.club_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
+
+    club = await Club.get(current_user.club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    positions = await _get_club_positions(club)
 
     approved_memberships = await StudentClubMembership.find({
         "club_id": current_user.club_id,
@@ -425,7 +437,7 @@ async def get_office_bearers(
     user_map = {str(u.id): u for u in users}
 
     approved_members = []
-    allocations = {pos: None for pos in FIXED_OFFICE_BEARERS}
+    allocations = {pos: None for pos in positions}
 
     for m in approved_memberships:
         u = user_map.get(str(m.student_id))
@@ -441,13 +453,92 @@ async def get_office_bearers(
             "office_bearer_role": m.office_bearer_role,
         }
         approved_members.append(item)
-        if m.office_bearer_role in allocations:
+        if m.office_bearer_role and m.office_bearer_role in allocations:
             allocations[m.office_bearer_role] = item
+        elif m.office_bearer_role and m.office_bearer_role not in allocations:
+            # Role exists in membership but position was removed from list – still show it
+            allocations[m.office_bearer_role] = item
+            if m.office_bearer_role not in positions:
+                positions.append(m.office_bearer_role)
 
     return {
-        "positions": FIXED_OFFICE_BEARERS,
+        "positions": positions,
         "allocations": allocations,
         "approved_members": approved_members,
+    }
+
+
+@coordinator_router.post("/office-bearers/positions")
+async def add_office_bearer_position(
+    body: AddPositionBody,
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Add a new custom office bearer position for the coordinator's club."""
+    if not current_user.club_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
+
+    club = await Club.get(current_user.club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    new_position = (body.position or "").strip()
+    if not new_position:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Position name cannot be empty")
+
+    current_positions = await _get_club_positions(club)
+    # Case-insensitive duplicate check
+    if any(p.lower() == new_position.lower() for p in current_positions):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Position '{new_position}' already exists",
+        )
+
+    current_positions.append(new_position)
+    club.office_bearer_positions = current_positions
+    await club.save()
+
+    return {
+        "message": f"Position '{new_position}' added successfully",
+        "positions": current_positions,
+    }
+
+
+@coordinator_router.delete("/office-bearers/positions/{position}")
+async def delete_office_bearer_position(
+    position: str,
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Remove a custom office bearer position and unassign any holder."""
+    if not current_user.club_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
+
+    club = await Club.get(current_user.club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    pos_clean = position.strip()
+    current_positions = await _get_club_positions(club)
+
+    if pos_clean not in current_positions:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Position '{pos_clean}' not found")
+
+    # Unassign any holder of this position
+    holder = await StudentClubMembership.find_one({
+        "club_id": current_user.club_id,
+        "office_bearer_role": pos_clean,
+    })
+    if holder:
+        holder.office_bearer_role = None
+        holder.updated_at = _datetime.utcnow()
+        await holder.save()
+
+    current_positions.remove(pos_clean)
+    club.office_bearer_positions = current_positions
+    await club.save()
+
+    return {
+        "message": f"Position '{pos_clean}' removed",
+        "positions": current_positions,
     }
 
 
@@ -456,15 +547,20 @@ async def allocate_office_bearer(
     body: AllocateOfficeBearerBody,
     current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
 ):
-    """Allocate an approved club member to a fixed office bearer position."""
+    """Allocate an approved club member to an office bearer position."""
     if not current_user.club_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
 
+    club = await Club.get(current_user.club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
     position = (body.position or "").strip()
-    if position not in FIXED_OFFICE_BEARERS:
+    valid_positions = await _get_club_positions(club)
+    if position not in valid_positions:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Invalid position. Must be one of: {', '.join(FIXED_OFFICE_BEARERS)}",
+            f"Invalid position. Must be one of: {', '.join(valid_positions)}",
         )
 
     try:
@@ -538,3 +634,146 @@ async def remove_office_bearer(
     return {"message": f"Office bearer position '{pos_clean}' unassigned"}
 
 
+# ─── Active Members ─────────────────────────────────────────────────────────────
+
+@coordinator_router.get("/active-members")
+async def get_active_members(
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """List all students with their membership status and cumulative event participation for this club."""
+    if not current_user.club_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to this coordinator")
+
+    club_id = current_user.club_id
+
+    # 1. Get all events conducted by this club
+    all_events = await Event.find(Event.club_id == club_id).to_list()
+    total_events = len(all_events)
+    event_ids = [ev.id for ev in all_events]
+
+    # 2. Get all approved memberships for this club
+    approved_memberships = await StudentClubMembership.find({
+        "club_id": club_id,
+        "status": MembershipStatus.APPROVED.value,
+    }).to_list()
+    approved_student_ids = {str(m.student_id) for m in approved_memberships}
+    approved_emails = set()
+    for m in approved_memberships:
+        if m.student_email:
+            approved_emails.add(m.student_email.strip().lower())
+
+    # 3. Get all participants for club events
+    participants = await Participant.find({
+        "event_id": {"$in": event_ids},
+    }).to_list() if event_ids else []
+
+    # Build a mapping: student_email -> set of event_ids they participated in
+    email_to_events: dict[str, set] = {}
+    for p in participants:
+        email_key = (p.email or "").strip().lower()
+        if email_key:
+            email_to_events.setdefault(email_key, set()).add(str(p.event_id))
+
+    # 4. Collect all unique student emails from participants
+    all_participant_emails = set(email_to_events.keys())
+
+    # 5. Fetch User records for approved members and participants
+    user_query_clauses = []
+    if approved_emails:
+        user_query_clauses.append({"email": {"$in": list(approved_emails)}})
+    if all_participant_emails:
+        user_query_clauses.append({"email": {"$in": list(all_participant_emails)}})
+
+    if user_query_clauses:
+        users = await User.find({
+            "role": UserRole.STUDENT,
+            "$or": user_query_clauses,
+        }).to_list()
+    else:
+        users = []
+
+    # Also fetch approved member users by ID if their email wasn't found
+    member_user_ids = [m.student_id for m in approved_memberships]
+    member_users = await User.find({"_id": {"$in": member_user_ids}}).to_list() if member_user_ids else []
+
+    # Build user map by email and by id
+    user_map_by_email: dict[str, User] = {}
+    user_map_by_id: dict[str, User] = {}
+    for u in users:
+        email_key = (u.email or "").strip().lower()
+        if email_key:
+            user_map_by_email[email_key] = u
+        user_map_by_id[str(u.id)] = u
+    for u in member_users:
+        user_map_by_id[str(u.id)] = u
+        email_key = (u.email or "").strip().lower()
+        if email_key:
+            user_map_by_email[email_key] = u
+
+    # 6. Build the result: include all approved members + any participants who are students
+    seen_emails: set[str] = set()
+    result = []
+
+    # First add all approved members
+    for m in approved_memberships:
+        u = user_map_by_id.get(str(m.student_id))
+        email_key = ""
+        if m.student_email:
+            email_key = m.student_email.strip().lower()
+        elif u and u.email:
+            email_key = u.email.strip().lower()
+
+        if email_key in seen_emails:
+            continue
+        seen_emails.add(email_key)
+
+        events_set = email_to_events.get(email_key, set())
+        events_participated = len(events_set)
+
+        result.append({
+            "name": m.student_name or (u.name if u else ""),
+            "registration_number": u.registration_number if u else None,
+            "department": u.department if u else None,
+            "email": email_key or (m.student_email or ""),
+            "is_member": True,
+            "membership_status": "Yes",
+            "events_participated": events_participated,
+            "total_events": total_events,
+            "participation_ratio": f"{events_participated}/{total_events}",
+            "participation_percentage": round((events_participated / total_events * 100), 1) if total_events > 0 else 0,
+        })
+
+    # Then add any participants who are students but not approved members
+    for email_key, events_set in email_to_events.items():
+        if email_key in seen_emails:
+            continue
+        seen_emails.add(email_key)
+
+        u = user_map_by_email.get(email_key)
+        if not u:
+            continue  # Not a registered student
+
+        events_participated = len(events_set)
+
+        result.append({
+            "name": u.name,
+            "registration_number": u.registration_number,
+            "department": u.department,
+            "email": email_key,
+            "is_member": False,
+            "membership_status": "No",
+            "events_participated": events_participated,
+            "total_events": total_events,
+            "participation_ratio": f"{events_participated}/{total_events}",
+            "participation_percentage": round((events_participated / total_events * 100), 1) if total_events > 0 else 0,
+        })
+
+    # Sort by participation descending, then by name
+    result.sort(key=lambda r: (-r["events_participated"], r["name"].lower()))
+
+    return {
+        "total_events": total_events,
+        "total_approved_members": len(approved_memberships),
+        "total_students": len(result),
+        "members": result,
+    }

@@ -20,6 +20,9 @@ import {
   useClubOfficeBearers,
   useAllocateOfficeBearer,
   useRemoveOfficeBearer,
+  useAddOfficeBearerPosition,
+  useDeleteOfficeBearerPosition,
+  useClubActiveMembers,
 } from './api'
 import { useCreateEvent, useDeleteEvent, useEvents } from './eventsApi'
 import { useAuthStore } from '../../store/authStore'
@@ -28,10 +31,11 @@ import axiosInstance from '../../utils/axiosInstance'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ── Tab ids ───────────────────────────────────────────────────────────────────
-const TABS = ['events', 'members', 'office_bearers', 'settings']
+const TABS = ['events', 'active_members', 'members', 'office_bearers', 'settings']
 
 const TAB_LABELS = {
   events: 'Club Dashboard',
+  active_members: 'Active Members',
   members: 'Membership Requests',
   office_bearers: 'Office Bearers',
   settings: 'Settings',
@@ -328,15 +332,113 @@ function MembersTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Active Members tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function ActiveMembersTab() {
+  const { data, isLoading } = useClubActiveMembers()
+
+  if (isLoading) return <LoadingSpinner fullPage label="Loading active members…" />
+
+  const members = data?.members || []
+  const totalEvents = data?.total_events || 0
+  const totalApproved = data?.total_approved_members || 0
+  const totalStudents = data?.total_students || 0
+
+  const columns = [
+    { key: 'name', header: 'Name', sortable: true, searchKey: true,
+      render: (v) => <span className="text-sm font-semibold text-foreground">{v || '—'}</span>
+    },
+    { key: 'registration_number', header: 'Register Number', sortable: true, searchKey: true,
+      render: (v) => <span className="text-sm text-gray-600 font-mono">{v || '—'}</span>
+    },
+    { key: 'department', header: 'Department', sortable: true, searchKey: true,
+      render: (v) => <span className="text-sm text-gray-600">{v || '—'}</span>
+    },
+    { key: 'email', header: 'Email ID', sortable: true, searchKey: true,
+      render: (v) => <span className="text-sm text-gray-600">{v || '—'}</span>
+    },
+    { key: 'membership_status', header: 'Membership Status', sortable: true,
+      render: (v) => (
+        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${
+          v === 'Yes'
+            ? 'bg-green-50 text-green-700 ring-green-600/20'
+            : 'bg-red-50 text-red-600 ring-red-500/20'
+        }`}>
+          {v}
+        </span>
+      )
+    },
+    { key: 'participation_ratio', header: 'Participation', sortable: false, align: 'center',
+      render: (v, row) => {
+        const pct = row.participation_percentage || 0
+        const barColor = pct >= 75 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : pct >= 25 ? 'bg-orange-500' : 'bg-red-400'
+        return (
+          <div className="flex flex-col items-center gap-1 min-w-[100px]">
+            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ring-1 ring-inset ${
+              pct >= 50 ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-amber-50 text-amber-700 ring-amber-600/20'
+            }`}>
+              {v}
+            </span>
+            <div className="w-full bg-gray-100 rounded-full h-1.5 mt-0.5">
+              <div className={`h-1.5 rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+            </div>
+            <span className="text-[10px] text-gray-500 font-medium">{pct}%</span>
+          </div>
+        )
+      }
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Active Members</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Student participation overview for this club. Participation is calculated as events participated, won, or coordinated out of total club events.
+        </p>
+      </div>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Total Club Events" value={totalEvents} icon={Icon.events} accent="navy" />
+        <StatCard label="Approved Members" value={totalApproved} icon={Icon.certs} accent="green" />
+        <StatCard
+          label="Students Listed"
+          value={totalStudents}
+          icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>}
+          accent="navy"
+        />
+      </div>
+
+      {/* Data table */}
+      <DataTable
+        columns={columns}
+        data={members}
+        isLoading={false}
+        emptyMessage="No students found for this club."
+        rowKey="email"
+        searchable
+        searchPlaceholder="Search by name, register number, department, or email…"
+      />
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Office Bearers tab
 // ═══════════════════════════════════════════════════════════════════════════════
 function OfficeBearersTab() {
   const { data, isLoading } = useClubOfficeBearers()
   const allocateMutation = useAllocateOfficeBearer()
   const removeMutation = useRemoveOfficeBearer()
+  const addPositionMutation = useAddOfficeBearerPosition()
+  const deletePositionMutation = useDeleteOfficeBearerPosition()
 
   const [activeModalRole, setActiveModalRole] = useState(null)
   const [selectedStudentId, setSelectedStudentId] = useState('')
+  const [showAddPositionModal, setShowAddPositionModal] = useState(false)
+  const [newPositionName, setNewPositionName] = useState('')
+  const [deleteConfirmPos, setDeleteConfirmPos] = useState(null)
 
   if (isLoading) return <LoadingSpinner fullPage label="Loading office bearer allocations…" />
 
@@ -359,18 +461,44 @@ function OfficeBearersTab() {
     )
   }
 
+  const handleAddPosition = (e) => {
+    e.preventDefault()
+    const trimmed = (newPositionName || '').trim()
+    if (!trimmed) return
+    addPositionMutation.mutate(trimmed, {
+      onSuccess: () => {
+        setNewPositionName('')
+        setShowAddPositionModal(false)
+      }
+    })
+  }
+
+  const handleDeletePosition = () => {
+    if (!deleteConfirmPos) return
+    deletePositionMutation.mutate(deleteConfirmPos, {
+      onSuccess: () => setDeleteConfirmPos(null)
+    })
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Club Office Bearers</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Allocate fixed office bearer roles for your club. A student can hold an office bearer role in at most one club and position.
+            Allocate office bearer roles for your club. A student can hold an office bearer role in at most one club and position.
           </p>
         </div>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setShowAddPositionModal(true)}
+        >
+          + Add Position
+        </button>
       </div>
 
-      {/* Grid of 5 positions */}
+      {/* Grid of positions */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {positions.map((pos) => {
           const holder = allocations[pos]
@@ -433,6 +561,15 @@ function OfficeBearersTab() {
                     Remove
                   </button>
                 )}
+                <button
+                  type="button"
+                  disabled={deletePositionMutation.isPending}
+                  onClick={() => setDeleteConfirmPos(pos)}
+                  title="Delete this position"
+                  className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
               </div>
             </div>
           )
@@ -501,10 +638,54 @@ function OfficeBearersTab() {
         </div>,
         document.body
       )}
+
+      {/* Add Position Modal */}
+      {showAddPositionModal && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setShowAddPositionModal(false)}>
+          <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-navy">Add New Position</h3>
+              <button onClick={() => setShowAddPositionModal(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
+            </div>
+            <form onSubmit={handleAddPosition} className="p-6 space-y-4">
+              <div>
+                <label className="form-label" htmlFor="new-position-name">Position Name *</label>
+                <input
+                  id="new-position-name"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Event Coordinator"
+                  value={newPositionName}
+                  onChange={(e) => setNewPositionName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="pt-2 flex justify-end gap-3">
+                <button type="button" onClick={() => { setShowAddPositionModal(false); setNewPositionName('') }} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newPositionName.trim() || addPositionMutation.isPending} className="btn-primary">
+                  {addPositionMutation.isPending ? 'Adding...' : 'Add Position'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Delete Position Confirm Modal */}
+      <ConfirmModal
+        isOpen={!!deleteConfirmPos}
+        onClose={() => setDeleteConfirmPos(null)}
+        title="Delete Position"
+        message={`Are you sure you want to delete the "${deleteConfirmPos}" position? Any assigned member will be unassigned.`}
+        confirmLabel="Delete"
+        onConfirm={handleDeletePosition}
+        isLoading={deletePositionMutation.isPending}
+      />
     </div>
   )
 }
-
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -832,6 +1013,7 @@ export default function ClubDashboard() {
             )}
 
             {activeTab === 'events' && <DashboardTab clubId={effectiveClubId} dashboard={dashboard} isLoading={dashLoading} />}
+            {activeTab === 'active_members' && <ActiveMembersTab />}
             {activeTab === 'members' && <MembersTab />}
             {activeTab === 'office_bearers' && <OfficeBearersTab />}
             {activeTab === 'settings' && (
