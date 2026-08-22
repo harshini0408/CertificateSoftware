@@ -149,12 +149,21 @@ function useNavItems() {
     case 'student':
       return [
         { to: '/student', icon: icons.certificate, label: 'My Certificates', end: true },
+        { to: '/student?tab=upcoming', icon: icons.calendar, label: 'Upcoming Events' },
       ]
 
     case 'tutor':
       return [
         { to: '/tutor', icon: icons.student, label: 'Dashboard', end: true },
         { to: '/tutor?tab=verification', icon: icons.creditCard, label: 'Credit Point Verification' },
+      ]
+
+    case 'student_affairs':
+      return [
+        { to: '/student-affairs', icon: icons.dashboard, label: 'Overview', end: true },
+        { to: '/student-affairs?tab=club_events', icon: icons.calendar, label: 'Club Events' },
+        { to: '/student-affairs?tab=dept_events', icon: icons.departments, label: 'Dept Events' },
+        { to: '/student-affairs?tab=upcoming', icon: icons.calendar, label: 'Upcoming' },
       ]
 
     default:

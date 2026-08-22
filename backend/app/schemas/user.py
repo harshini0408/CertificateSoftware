@@ -1,7 +1,16 @@
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+
+
+def validate_psgitech_email(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    val = str(v).strip().lower()
+    if not val.endswith("@psgitech.ac.in"):
+        raise ValueError("Only @psgitech.ac.in email addresses are allowed.")
+    return val
 
 
 class UserCreate(BaseModel):
@@ -15,8 +24,13 @@ class UserCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(..., min_length=8)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: EmailStr) -> EmailStr:
+        return validate_psgitech_email(v)
     role: Literal[
-        "principal", "hod", "club_coordinator", "dept_coordinator", "tutor", "student", "guest"
+        "principal", "hod", "student_affairs", "club_coordinator", "dept_coordinator", "tutor", "student", "guest"
     ]
     is_active: bool = True
 
@@ -91,6 +105,11 @@ class UserUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = None
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: Optional[EmailStr]) -> Optional[EmailStr]:
+        return validate_psgitech_email(v)
 
 
 class UserResponse(BaseModel):

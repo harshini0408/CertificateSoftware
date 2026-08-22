@@ -335,18 +335,18 @@ async def send_otp_email(recipient_email: str, otp_code: str) -> bool:
         return False
 
 
-async def send_department_password_otp_email(recipient_email: str, otp_code: str) -> bool:
-    """Send department password-change OTP email."""
+async def send_password_change_otp_email(recipient_email: str, otp_code: str) -> bool:
+    """Send password-change OTP email for authenticated user."""
     try:
         msg = MIMEMultipart()
         msg["To"] = recipient_email
         msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
-        msg["Subject"] = "Department Password Change OTP"
+        msg["Subject"] = "PSG iTech - Password Change OTP"
 
         body = (
-            f"Your OTP for department password change is: {otp_code}\n"
+            f"Your verification OTP for password change is: {otp_code}\n\n"
             "This code will expire in 10 minutes.\n"
-            "If you did not request this, please ignore this email."
+            "If you did not request this, please contact your system administrator immediately."
         )
         msg.attach(MIMEText(body, "plain"))
 
@@ -354,5 +354,10 @@ async def send_department_password_otp_email(recipient_email: str, otp_code: str
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, provider.send, msg)
     except Exception as exc:
-        logger.error("send_department_password_otp_email failed: %s", exc)
+        logger.error("send_password_change_otp_email failed: %s", exc)
         return False
+
+
+async def send_department_password_otp_email(recipient_email: str, otp_code: str) -> bool:
+    """Send department password-change OTP email."""
+    return await send_password_change_otp_email(recipient_email, otp_code)

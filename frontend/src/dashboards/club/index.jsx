@@ -72,16 +72,81 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
     return () => { document.body.style.overflow = prevOverflow }
   }, [isModalOpen])
 
-  const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm()
+  const [selectedAcademicYears, setSelectedAcademicYears] = useState([])
+  const [acadYearError, setAcadYearError] = useState('')
+  const [selectedPosterFile, setSelectedPosterFile] = useState(null)
+  const [posterError, setPosterError] = useState('')
 
-  const onSubmit = (data) => {
-    createEvent.mutate(data, {
-      onSuccess: (res) => {
+  const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm({
+    defaultValues: {
+      event_time: 'Morning (FN)',
+    },
+  })
+
+  const handleAcadYearToggle = (year) => {
+    setSelectedAcademicYears((prev) => {
+      const next = prev.includes(year) ? prev.filter((y) => y !== year) : [...prev, year]
+      if (next.length > 0) setAcadYearError('')
+      return next
+    })
+  }
+
+  const handlePosterChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) {
+      setSelectedPosterFile(null)
+      setPosterError('')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setPosterError('Poster size must be 2MB or less.')
+      setSelectedPosterFile(null)
+      e.target.value = ''
+      return
+    }
+    setPosterError('')
+    setSelectedPosterFile(file)
+  }
+
+  const onSubmit = async (data) => {
+    if (selectedAcademicYears.length === 0) {
+      setAcadYearError('Please select at least one academic year')
+      return
+    }
+    if (selectedPosterFile && selectedPosterFile.size > 2 * 1024 * 1024) {
+      setPosterError('Poster size must be 2MB or less.')
+      return
+    }
+
+    const payload = {
+      ...data,
+      academic_years: selectedAcademicYears,
+      academic_year: selectedAcademicYears.join(', '),
+    }
+
+    createEvent.mutate(payload, {
+      onSuccess: async (res) => {
+        const event = res?.data ?? res
+        const eventId = event.id ?? event._id
+        if (selectedPosterFile && eventId) {
+          const formData = new FormData()
+          formData.append('poster', selectedPosterFile)
+          try {
+            await axiosInstance.post(`/clubs/${clubId}/events/${eventId}/poster`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            })
+          } catch (e) {
+            console.error('Poster upload failed', e)
+          }
+        }
         setIsModalOpen(false)
         reset()
-        const event = res?.data ?? res
-        navigate(`/club/${clubId}/events/${event.id ?? event._id}`)
-      }
+        setSelectedAcademicYears([])
+        setSelectedPosterFile(null)
+        setAcadYearError('')
+        setPosterError('')
+        navigate(`/club/${clubId}/events/${eventId}`)
+      },
     })
   }
 
@@ -172,43 +237,134 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       {isModalOpen && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setIsModalOpen(false)}>
           <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
-          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
               <h3 className="text-lg font-bold text-navy">Create New Event</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close modal">×</button>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl" aria-label="Close modal">×</button>
             </div>
             <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
               <div>
                 <label className="form-label" htmlFor="dash-event-name">Event Name *</label>
-                <input id="dash-event-name" type="text" className={`form-input ${errors.name ? 'form-input-error' : ''}`} placeholder="e.g. Hackathon 2024" {...register('name', { required: 'Event name is required' })} />
+                <input id="dash-event-name" type="text" className={`form-input ${errors.name ? 'form-input-error' : ''}`} placeholder="e.g. AI & Robotics Hackathon 2026" {...register('name', { required: 'Event name is required' })} />
                 {errors.name && <p className="form-error">{errors.name.message}</p>}
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label" htmlFor="dash-event-date">Event Date *</label>
+                  <input
+                    id="dash-event-date"
+                    type="date"
+                    className={`form-input ${errors.event_date ? 'form-input-error' : ''}`}
+                    {...register('event_date', { required: 'Event date is required' })}
+                  />
+                  {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
+                </div>
+                <div>
+                  <label className="form-label" htmlFor="dash-event-time">Event Session (Time) *</label>
+                  <select
+                    id="dash-event-time"
+                    className="form-input"
+                    {...register('event_time', { required: 'Event session is required' })}
+                  >
+                    <option value="Morning (FN)">Morning (FN)</option>
+                    <option value="Afternoon (AN)">Afternoon (AN)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label" htmlFor="dash-venue">Venue</label>
+                  <input
+                    id="dash-venue"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Auditorium / Lab 3"
+                    {...register('venue')}
+                  />
+                </div>
+                <div>
+                  <label className="form-label" htmlFor="dash-category">Category</label>
+                  <select id="dash-category" className="form-input" {...register('category')}>
+                    <option value="">Select category</option>
+                    <option value="Workshop">Workshop</option>
+                    <option value="Technical Talk">Technical Talk</option>
+                    <option value="Hackathon">Hackathon</option>
+                    <option value="Cultural">Cultural</option>
+                    <option value="Seminar">Seminar</option>
+                    <option value="Competition">Competition</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
-                <label className="form-label" htmlFor="dash-event-date">Event Date *</label>
-                <input
-                  id="dash-event-date"
-                  type="date"
-                  className={`form-input ${errors.event_date ? 'form-input-error' : ''}`}
-                  {...register('event_date', { required: 'Event date is required' })}
+                <label className="form-label">Academic Year (Select all applicable) *</label>
+                <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3">
+                  {['2025-2026(EVEN)', '2026-2027(ODD)', '2026-2027(EVEN)'].map((year) => (
+                    <label key={year} className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={selectedAcademicYears.includes(year)}
+                        onChange={() => handleAcadYearToggle(year)}
+                        className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
+                      />
+                      <span>{year}</span>
+                    </label>
+                  ))}
+                </div>
+                {acadYearError && <p className="form-error mt-1">{acadYearError}</p>}
+              </div>
+
+              <div>
+                <label className="form-label" htmlFor="dash-description">Description *</label>
+                <textarea
+                  id="dash-description"
+                  className={`form-input ${errors.description ? 'form-input-error' : ''}`}
+                  rows={2}
+                  placeholder="Detailed description of the event…"
+                  {...register('description', { required: 'Description is required' })}
                 />
-                {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
+                {errors.description && <p className="form-error">{errors.description.message}</p>}
               </div>
-              <div>
-                <label className="form-label" htmlFor="dash-academic-year">Academic Year *</label>
-                <select
-                  id="dash-academic-year"
-                  className={`form-input ${errors.academic_year ? 'form-input-error' : ''}`}
-                  {...register('academic_year', { required: 'Academic year is required' })}
-                  defaultValue=""
-                >
-                  <option value="" disabled>Select academic year</option>
-                  <option value="2025-2026(EVEN)">2025-2026(EVEN)</option>
-                  <option value="2026-2027(ODD)">2026-2027(ODD)</option>
-                  <option value="2026-2027(EVEN)">2026-2027(EVEN)</option>
-                </select>
-                {errors.academic_year && <p className="form-error">{errors.academic_year.message}</p>}
+
+              {/* Event Poster Upload */}
+              <div className="space-y-1">
+                <label className="form-label" htmlFor="dash-event-poster">
+                  Event Poster (PNG, JPEG, PDF • Max 2MB)
+                </label>
+                <input
+                  id="dash-event-poster"
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+                  onChange={handlePosterChange}
+                  className="form-input text-xs"
+                />
+                <p className="text-[11px] text-gray-500">
+                  Accepted formats: PNG, JPEG, PDF. Maximum image/file size is 2MB. Displayed on Student & Student Affairs feeds.
+                </p>
+                {posterError && <p className="form-error">{posterError}</p>}
+                {selectedPosterFile && (
+                  <p className="text-xs font-medium text-navy mt-1">
+                    ✓ Selected: {selectedPosterFile.name} ({(selectedPosterFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
               </div>
-              <div className="pt-2 flex justify-end gap-3">
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  id="dash-is-published"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
+                  {...register('is_published')}
+                />
+                <label htmlFor="dash-is-published" className="text-sm font-medium text-gray-700 cursor-pointer">
+                  Publish to Upcoming Events (visible on Student & Student Affairs dashboards)
+                </label>
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 flex justify-end gap-3">
                 <button type="button" onClick={() => { setIsModalOpen(false); reset() }} className="btn-secondary">Cancel</button>
                 <button type="submit" disabled={isSubmitting || createEvent.isPending} className="btn-primary">
                   {(isSubmitting || createEvent.isPending) ? 'Creating...' : 'Create Event'}

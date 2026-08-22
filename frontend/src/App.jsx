@@ -18,6 +18,7 @@ import VerifyPage from './pages/Verify'
 import TemplateSelector from './dashboards/club/TemplateSelector'
 import GuestDashboard from './dashboards/guest/GuestDashboard'
 import GuestHistory from './dashboards/guest/GuestHistory'
+import StudentAffairsDashboard from './dashboards/student_affairs'
 import Footer from './components/Footer'
 import Authors from './Authors'
 
@@ -28,6 +29,7 @@ const ROLES = {
   HOD: 'hod',
   CLUB_COORD: 'club_coordinator',
   DEPT_COORD: 'dept_coordinator',
+  STUDENT_AFFAIRS: 'student_affairs',
   TUTOR: 'tutor',
   STUDENT: 'student',
   GUEST: 'guest',
@@ -136,6 +138,16 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.DEPT_COORD, ROLES.SUPER_ADMIN]}>
               <DeptCoordinatorDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Student Affairs ──────────────────────────────────────────── */}
+        <Route
+          path="/student-affairs"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.STUDENT_AFFAIRS, ROLES.SUPER_ADMIN]}>
+              <StudentAffairsDashboard />
             </ProtectedRoute>
           }
         />

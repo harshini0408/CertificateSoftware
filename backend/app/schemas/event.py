@@ -8,30 +8,28 @@ class EventCreate(BaseModel):
     name: str
     description: Optional[str] = None
     event_date: Optional[datetime] = None
-    academic_year: Literal[
-        "2025-2026(EVEN)",
-        "2026-2027(ODD)",
-        "2026-27 ODD",
-        "2026-27 EVEN",
-    ]
+    event_time: Optional[str] = None
+    venue: Optional[str] = None
+    category: Optional[str] = None
+    academic_year: Optional[str] = None
+    academic_years: List[str] = Field(default_factory=list)
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
+    is_published: bool = False
 
 
 class EventUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     event_date: Optional[datetime] = None
-    academic_year: Optional[
-        Literal[
-            "2025-2026(EVEN)",
-            "2026-2027(ODD)",
-            "2026-27 ODD",
-            "2026-27 EVEN",
-        ]
-    ] = None
+    event_time: Optional[str] = None
+    venue: Optional[str] = None
+    category: Optional[str] = None
+    academic_year: Optional[str] = None
+    academic_years: Optional[List[str]] = None
     status: Optional[str] = None
     template_map: Optional[Dict[str, Optional[str]]] = None
     mapping_confirmed: Optional[bool] = None
+    is_published: Optional[bool] = None
 
 
 class EventResponse(BaseModel):
@@ -40,14 +38,11 @@ class EventResponse(BaseModel):
     name: str
     description: Optional[str] = None
     event_date: Optional[datetime] = None
-    academic_year: Optional[
-        Literal[
-            "2025-2026(EVEN)",
-            "2026-2027(ODD)",
-            "2026-27 ODD",
-            "2026-27 EVEN",
-        ]
-    ] = None
+    event_time: Optional[str] = None
+    venue: Optional[str] = None
+    category: Optional[str] = None
+    academic_year: Optional[str] = None
+    academic_years: List[str] = Field(default_factory=list)
     status: str
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
     assets: dict = Field(default_factory=dict)
@@ -55,6 +50,13 @@ class EventResponse(BaseModel):
     participant_count: int = 0
     cert_count: int = 0
     created_at: datetime
+    is_published: bool = False
+    poster_url: Optional[str] = None
+    report_url: Optional[str] = None
+    report_filename: Optional[str] = None
+    report_status: Optional[str] = "not_submitted"
+    report_rejection_reason: Optional[str] = None
+    report_uploaded_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -17,7 +17,7 @@ async def seed():
         {
             "username": "clubdemo",
             "name": "Club Coordinator User",
-            "email": "club@example.com",
+            "email": "club@psgitech.ac.in",
             "password_hash": hash_password("demo1234"),
             "role": UserRole.CLUB_COORDINATOR,
             "club_id": club.id
@@ -25,7 +25,7 @@ async def seed():
         {
             "username": "deptdemo",
             "name": "Dept Coordinator User",
-            "email": "dept@example.com",
+            "email": "dept@psgitech.ac.in",
             "password_hash": hash_password("demo1234"),
             "role": UserRole.DEPT_COORDINATOR,
             "department": "Computer Science"
@@ -33,7 +33,7 @@ async def seed():
         {
             "username": "studentdemo",
             "name": "Student User",
-            "email": "student@example.com",
+            "email": "student@psgitech.ac.in",
             "password_hash": hash_password("demo1234"),
             "role": UserRole.STUDENT,
             "registration_number": "21CS001",

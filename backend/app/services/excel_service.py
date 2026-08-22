@@ -315,6 +315,12 @@ def parse_participants_excel(
             errors.append(f"Row {row_idx}: missing Email — skipped")
             continue
 
+        email_clean = str(email).strip().lower()
+        if not email_clean.endswith("@psgitech.ac.in"):
+            errors.append(f"Row {row_idx}: Email '{email}' is not a @psgitech.ac.in address — skipped")
+            continue
+        email = email_clean
+
         # Canonical keys expected by downstream flows/UI while preserving original values.
         if student_name and not (record.get("Name") or "").strip():
             record["Name"] = student_name

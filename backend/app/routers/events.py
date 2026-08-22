@@ -80,13 +80,22 @@ def _event_response(e: Event, cert_count: int = 0) -> EventResponse:
     return EventResponse(
         id=str(e.id), club_id=str(e.club_id), name=e.name,
         description=e.description, event_date=e.event_date,
+        event_time=e.event_time, venue=e.venue, category=e.category,
         academic_year=e.academic_year,
+        academic_years=getattr(e, "academic_years", []) or ([] if not e.academic_year else [e.academic_year]),
         status=e.status.value, template_map={k: str(v) if v else None for k, v in e.template_map.items()},
         assets=e.assets.model_dump(),
         mapping_confirmed=e.mapping_confirmed,
         participant_count=e.participant_count,
         cert_count=cert_count,
         created_at=e.created_at,
+        is_published=e.is_published,
+        poster_url=e.poster_url,
+        report_url=e.report_url,
+        report_filename=e.report_filename,
+        report_status=e.report_status or "not_submitted",
+        report_rejection_reason=e.report_rejection_reason,
+        report_uploaded_at=e.report_uploaded_at,
     )
 
 
@@ -144,9 +153,19 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
             inherited_assets = latest_with_assets.assets
             await club.set({"assets": inherited_assets.model_dump()})
 
-    event = Event(club_id=club_id, name=body.name,
-                  event_date=body.event_date, academic_year=body.academic_year,
-                  template_map=tmap, assets=inherited_assets)
+    acad_years = body.academic_years or ([] if not body.academic_year else [body.academic_year])
+    acad_year_str = ", ".join(acad_years) if acad_years else body.academic_year
+
+    event = Event(
+        club_id=club_id, name=body.name,
+        description=body.description,
+        event_date=body.event_date, event_time=body.event_time,
+        venue=body.venue, category=body.category,
+        academic_year=acad_year_str,
+        academic_years=acad_years,
+        template_map=tmap, assets=inherited_assets,
+        is_published=body.is_published,
+    )
     await event.insert()
     return _event_response(event)
 
@@ -329,3 +348,70 @@ async def download_excel_template(club_id: PydanticObjectId, event_id: PydanticO
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=certificate_template.xlsx"},
     )
+
+
+# ═══ EVENT POSTER UPLOAD ════════════════════════════════════════════════
+
+@router.post("/{event_id}/poster")
+async def upload_poster(club_id: PydanticObjectId, event_id: PydanticObjectId,
+                        poster: UploadFile = File(...),
+                        _user: User = Depends(require_event_access)):
+    event = await Event.get(event_id)
+    if not event or event.club_id != club_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    club = await Club.get(club_id)
+    club_slug = club.slug if club else "unknown"
+
+    poster_bytes = await poster.read()
+    poster_dir = settings.storage_root / "posters" / club_slug
+    poster_dir.mkdir(parents=True, exist_ok=True)
+    poster_filename = f"{event_id}_{poster.filename}"
+    poster_path = poster_dir / poster_filename
+    poster_path.write_bytes(poster_bytes)
+
+    poster_url = storage_path_to_url(str(poster_path))
+    await event.set({"poster_path": str(poster_path), "poster_url": poster_url})
+
+    return {"message": "Poster uploaded", "poster_url": poster_url}
+
+
+# ═══ EVENT REPORT UPLOAD (CLUB EVENTS ONLY) ════════════════════════════
+
+@router.post("/{event_id}/report")
+async def upload_report(club_id: PydanticObjectId, event_id: PydanticObjectId,
+                        report: UploadFile = File(...),
+                        _user: User = Depends(require_event_access)):
+    """Upload or re-upload an event report. Allowed when status is not_submitted or rejected."""
+    event = await Event.get(event_id)
+    if not event or event.club_id != club_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    if event.report_status not in (None, "not_submitted", "rejected"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Report is already under review or has been accepted",
+        )
+
+    club = await Club.get(club_id)
+    club_slug = club.slug if club else "unknown"
+
+    report_bytes = await report.read()
+    report_dir = settings.storage_root / "reports" / club_slug
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_filename = f"{event_id}_{report.filename}"
+    report_path = report_dir / report_filename
+    report_path.write_bytes(report_bytes)
+
+    from datetime import datetime as _dt
+    report_url = storage_path_to_url(str(report_path))
+    await event.set({
+        "report_path": str(report_path),
+        "report_url": report_url,
+        "report_filename": report.filename,
+        "report_uploaded_at": _dt.utcnow(),
+        "report_status": "pending_review",
+        "report_rejection_reason": None,
+    })
+
+    return {"message": "Report uploaded", "report_url": report_url, "report_status": "pending_review"}

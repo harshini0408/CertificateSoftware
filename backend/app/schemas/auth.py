@@ -1,6 +1,13 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def validate_psgitech_email(v: str) -> str:
+    val = str(v).strip().lower()
+    if not val.endswith("@psgitech.ac.in"):
+        raise ValueError("Only @psgitech.ac.in email addresses are allowed.")
+    return val
 
 
 class LoginRequest(BaseModel):
@@ -32,6 +39,11 @@ class MeResponse(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)
+    otp_code: str = Field(..., min_length=4, max_length=4)
+
+
+class PasswordOtpVerifyRequest(BaseModel):
+    otp_code: str = Field(..., min_length=4, max_length=4)
 
 
 class DepartmentPasswordChangeRequest(BaseModel):
@@ -61,8 +73,18 @@ class VerifyOTPRequest(BaseModel):
     email: str
     otp_code: str = Field(..., min_length=4, max_length=4)
 
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: str) -> str:
+        return validate_psgitech_email(v)
+
 
 class ResetPasswordRequest(BaseModel):
     email: str
     otp_code: str = Field(..., min_length=4, max_length=4)
     new_password: str = Field(..., min_length=4)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: str) -> str:
+        return validate_psgitech_email(v)

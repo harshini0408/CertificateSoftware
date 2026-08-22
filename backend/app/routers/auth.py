@@ -17,6 +17,7 @@ from ..schemas.auth import (
     LoginResponse,
     MeResponse,
     PasswordChangeRequest,
+    PasswordOtpVerifyRequest,
     DepartmentPasswordChangeRequest,
     DepartmentPasswordVerifyRequest,
     TokenResponse,
@@ -25,7 +26,7 @@ from ..schemas.auth import (
     VerifyOTPRequest,
     ResetPasswordRequest,
 )
-from ..services.email_service import send_otp_email, send_department_password_otp_email
+from ..services.email_service import send_otp_email, send_password_change_otp_email, send_department_password_otp_email
 from ..services.auth_service import (
     authenticate_user,
     blacklist_token,
@@ -146,60 +147,51 @@ async def logout(response: Response, refresh_token: str = Cookie(default=None)):
     return TokenResponse(message="Logged out")
 
 
-@router.patch("/password", response_model=TokenResponse)
-async def change_password(
-    body: PasswordChangeRequest,
-    current_user: User = Depends(get_current_user),
-):
-    if not verify_password(body.current_password, current_user.password_hash):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
-
-    current_user.password_hash = hash_password(body.new_password)
-    await current_user.save()
-    return TokenResponse(message="Password updated")
-
-
-@router.post("/department-password/send-otp", response_model=TokenResponse)
-async def send_department_password_otp(current_user: User = Depends(get_current_user)):
-    if current_user.role != UserRole.DEPT_COORDINATOR:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Department access only")
+@router.post("/password/send-otp", response_model=TokenResponse)
+async def send_password_change_otp(current_user: User = Depends(get_current_user)):
     if not current_user.email:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No registered email found")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No registered email found for this account")
 
     email = current_user.email.strip().lower()
+    if not email.endswith("@psgitech.ac.in"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Only accounts with @psgitech.ac.in email addresses can receive verification OTP",
+        )
+
     otp = f"{random.randint(1000, 9999)}"
     expires_at = datetime.utcnow() + timedelta(minutes=10)
 
-    await OTPRequest.find({"email": email, "purpose": "department_password_change"}).delete()
+    await OTPRequest.find({
+        "email": email,
+        "purpose": {"$in": ["password_change", "department_password_change"]},
+    }).delete()
 
     await OTPRequest(
         email=email,
         otp_code=otp,
-        purpose="department_password_change",
+        purpose="password_change",
         expires_at=expires_at,
     ).insert()
 
-    success = await send_department_password_otp_email(email, otp)
+    success = await send_password_change_otp_email(email, otp)
     if not success:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Failed to send OTP email")
 
     return TokenResponse(message=f"OTP sent to your registered email: {_masked_email(email)}")
 
 
-@router.post("/department-password/verify-otp", response_model=TokenResponse)
-async def verify_department_password_otp(
-    body: DepartmentPasswordVerifyRequest,
+@router.post("/password/verify-otp", response_model=TokenResponse)
+async def verify_password_change_otp(
+    body: PasswordOtpVerifyRequest,
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role != UserRole.DEPT_COORDINATOR:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Department access only")
-
     email = (current_user.email or "").strip().lower()
     now = datetime.utcnow()
     otp_req = await OTPRequest.find_one({
         "email": email,
         "otp_code": body.otp_code.strip(),
-        "purpose": "department_password_change",
+        "purpose": {"$in": ["password_change", "department_password_change"]},
         "expires_at": {"$gt": now},
     })
     if not otp_req:
@@ -210,14 +202,11 @@ async def verify_department_password_otp(
     return TokenResponse(message="OTP verified successfully")
 
 
-@router.patch("/department-password", response_model=TokenResponse)
-async def change_department_password(
-    body: DepartmentPasswordChangeRequest,
+@router.patch("/password", response_model=TokenResponse)
+async def change_password(
+    body: PasswordChangeRequest,
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role != UserRole.DEPT_COORDINATOR:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Department access only")
-
     if not verify_password(body.current_password, current_user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
 
@@ -226,17 +215,48 @@ async def change_department_password(
     otp_req = await OTPRequest.find_one({
         "email": email,
         "otp_code": body.otp_code.strip(),
-        "purpose": "department_password_change",
+        "purpose": {"$in": ["password_change", "department_password_change"]},
         "expires_at": {"$gt": now},
         "is_verified": True,
     })
     if not otp_req:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP verification required or session expired")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Email OTP verification required or session expired. Please verify OTP first.",
+        )
 
     current_user.password_hash = hash_password(body.new_password)
     await current_user.save()
     await otp_req.delete()
-    return TokenResponse(message="Password updated")
+    return TokenResponse(message="Password updated successfully")
+
+
+@router.post("/department-password/send-otp", response_model=TokenResponse)
+async def send_department_password_otp(current_user: User = Depends(get_current_user)):
+    return await send_password_change_otp(current_user=current_user)
+
+
+@router.post("/department-password/verify-otp", response_model=TokenResponse)
+async def verify_department_password_otp(
+    body: DepartmentPasswordVerifyRequest,
+    current_user: User = Depends(get_current_user),
+):
+    return await verify_password_change_otp(body=PasswordOtpVerifyRequest(otp_code=body.otp_code), current_user=current_user)
+
+
+@router.patch("/department-password", response_model=TokenResponse)
+async def change_department_password(
+    body: DepartmentPasswordChangeRequest,
+    current_user: User = Depends(get_current_user),
+):
+    return await change_password(
+        body=PasswordChangeRequest(
+            current_password=body.current_password,
+            new_password=body.new_password,
+            otp_code=body.otp_code,
+        ),
+        current_user=current_user,
+    )
 
 
 @router.get("/me", response_model=MeResponse)
@@ -288,6 +308,9 @@ async def forgot_password(body: ForgotPasswordRequest):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found or no registered email.")
 
     email = user.email.strip().lower()
+    if not email.endswith("@psgitech.ac.in"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Account email is not a valid @psgitech.ac.in address.")
+
     otp = f"{random.randint(1000, 9999)}"
     expires_at = datetime.utcnow() + timedelta(minutes=10)
 

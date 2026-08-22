@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""           # Gmail App Password or Brevo SMTP key
-    email_sender: str = "certs@psgit.edu"
+    email_sender: str = "certificate@psgitech.ac.in"
     email_sender_name: str = "PSG iTech Certificates"
     email_daily_limit: int = 500
     secondary_smtp_host: str = ""
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # ── Super Admin Seed ─────────────────────────────────────────────────
     superadmin_username: str = "superadmin"
     superadmin_password: str = "change-me-on-first-run"
-    superadmin_email: str = "admin@psgit.edu"
+    superadmin_email: str = "admin@psgitech.ac.in"
     superadmin_name: str = "Platform Admin"
 
     # ── Derived helpers ──────────────────────────────────────────────────

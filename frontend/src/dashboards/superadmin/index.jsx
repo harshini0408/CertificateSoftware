@@ -66,6 +66,7 @@ function fmtDate(iso) {
 const roleBadge = {
   principal: 'bg-amber-50 text-amber-700 ring-amber-200',
   hod: 'bg-cyan-50 text-cyan-700 ring-cyan-200',
+  student_affairs: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
   dept_coordinator: 'bg-purple-50 text-purple-700 ring-purple-200',
   tutor: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
@@ -76,6 +77,7 @@ const roleBadge = {
 const roleLabel = {
   principal: 'Principal',
   hod: 'HOD',
+  student_affairs: 'Student Affairs',
   club_coordinator: 'Club Coordinator',
   dept_coordinator: 'Dept Coordinator',
   tutor: 'Tutor',
@@ -292,11 +294,15 @@ function EditClubModal({ isOpen, onClose, club }) {
   }
 
   const doSave = async () => {
+    if (form.contact_email && !/^[a-zA-Z0-9._%+-]+@psgitech\.ac\.in$/i.test(form.contact_email.trim())) {
+      addToast({ type: 'error', message: 'Contact email must be a valid @psgitech.ac.in address.' })
+      return
+    }
     try {
       await updateClub.mutateAsync({
         clubId: club.id,
         name: form.name,
-        contact_email: form.contact_email,
+        contact_email: form.contact_email ? form.contact_email.trim().toLowerCase() : '',
       })
 
       if (coordinator && form.coordinator_username && form.coordinator_username !== coordinator.username) {
@@ -360,6 +366,7 @@ function EditClubModal({ isOpen, onClose, club }) {
 const roles = [
   { value: 'principal', label: 'Principal', icon: '🏫', desc: 'College-level student overview' },
   { value: 'hod', label: 'HOD', icon: '🧭', desc: 'Can be assigned to multiple departments' },
+  { value: 'student_affairs', label: 'Student Affairs', icon: '🏛️', desc: 'Student affairs and event oversight' },
   { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
   { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
   { value: 'tutor', label: 'Tutor', icon: '🧑‍🏫', desc: 'Manages one class of students' },
@@ -408,6 +415,7 @@ function NewUserModal({ isOpen, onClose }) {
     if (!form.username.trim()) errs.username = 'Required'
     else if (!/^[a-zA-Z0-9_-]+$/.test(form.username)) errs.username = 'Letters, numbers, underscores, hyphens only'
     if (!form.email.trim()) errs.email = 'Required'
+    else if (!/^[a-zA-Z0-9._%+-]+@psgitech\.ac\.in$/i.test(form.email.trim())) errs.email = 'Only @psgitech.ac.in emails are allowed'
     if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
     if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
@@ -435,8 +443,8 @@ function NewUserModal({ isOpen, onClose }) {
       setErrors((prev) => ({ ...prev, tutor_students: 'Name, Email and Registration Number are required.' }))
       return
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setErrors((prev) => ({ ...prev, tutor_students: 'Enter a valid student email.' }))
+    if (!/^[a-zA-Z0-9._%+-]+@psgitech\.ac\.in$/i.test(email)) {
+      setErrors((prev) => ({ ...prev, tutor_students: 'Must be a valid @psgitech.ac.in student email.' }))
       return
     }
     if (tutorStudents.some((s) => s.email.toLowerCase() === email)) {
@@ -741,13 +749,22 @@ function EditUserModal({ isOpen, onClose, user }) {
   const [form, setForm] = useState({ name: '', email: '' })
   const updateUser = useUpdateUser()
 
+  const [errors, setErrors] = useState({})
+
   useEffect(() => {
-    if (user) setForm({ name: user.name, email: user.email })
+    if (user) {
+      setForm({ name: user.name, email: user.email })
+      setErrors({})
+    }
   }, [user])
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    updateUser.mutate({ userId: user.id, ...form }, { onSuccess: onClose })
+    if (!form.email || !/^[a-zA-Z0-9._%+-]+@psgitech\.ac\.in$/i.test(form.email.trim())) {
+      setErrors({ email: 'Only @psgitech.ac.in emails are allowed' })
+      return
+    }
+    updateUser.mutate({ userId: user.id, ...form, email: form.email.trim().toLowerCase() }, { onSuccess: onClose })
   }
 
   if (!user) return null
@@ -768,7 +785,8 @@ function EditUserModal({ isOpen, onClose, user }) {
         </div>
         <div>
           <label className="form-label">Email</label>
-          <input type="email" className="form-input" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
+          <input type="email" className={`form-input ${errors.email ? 'form-input-error' : ''}`} value={form.email} onChange={(e) => { setForm((f) => ({ ...f, email: e.target.value })); setErrors({}); }} />
+          {errors.email && <p className="form-error">{errors.email}</p>}
         </div>
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
@@ -2171,6 +2189,7 @@ function UsersTab() {
           <option value="">All Roles</option>
           <option value="principal">Principal</option>
           <option value="hod">HOD</option>
+          <option value="student_affairs">Student Affairs</option>
           <option value="club_coordinator">Club Coordinator</option>
           <option value="dept_coordinator">Dept Coordinator</option>
           <option value="tutor">Tutor</option>

@@ -256,3 +256,60 @@ export function useSaveFieldPositions(clubId, eventId) {
     },
   })
 }
+
+// ── useUploadPoster ───────────────────────────────────────────────────────────
+export function useUploadPoster(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (file) => {
+      const formData = new FormData()
+      formData.append('poster', file)
+      const { data } = await axiosInstance.post(
+        `/clubs/${clubId}/events/${eventId}/poster`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      addToast({ type: 'success', message: 'Poster uploaded successfully.' })
+    },
+    onError: (err) => {
+      const msg = extractErrorMsg(err, 'Failed to upload poster.')
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useUploadReport ───────────────────────────────────────────────────────────
+export function useUploadReport(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (file) => {
+      const formData = new FormData()
+      formData.append('report', file)
+      const { data } = await axiosInstance.post(
+        `/clubs/${clubId}/events/${eventId}/report`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      addToast({ type: 'success', message: 'Event report uploaded and submitted for review.' })
+    },
+    onError: (err) => {
+      const msg = extractErrorMsg(err, 'Failed to upload event report.')
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+

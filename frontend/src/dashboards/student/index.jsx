@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
@@ -18,6 +19,9 @@ import {
   useMyClubMemberships,
   useApplyForClub,
   useAvailableClubs,
+  useStudentUpcomingEvents,
+  useRegisterForEvent,
+  useCancelEventRegistration,
 } from './api'
 
 // ── Icon helpers ──────────────────────────────────────────────────────────────
@@ -126,6 +130,9 @@ function CreditsBreakdown({ breakdown, total, creditRules, rulesLoading }) {
 }
 
 export default function StudentDashboard() {
+  const [searchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'certificates'
+
   const [downloadingId, setDownloadingId] = useState(null)
   const [uploadForm, setUploadForm] = useState({ cert_type: '', event_date: '', certificate_image: null })
   const addToast = useToastStore((s) => s.addToast)
@@ -137,9 +144,31 @@ export default function StudentDashboard() {
   const { data: manualSubmissions, isLoading: submissionsLoading } = useMyManualCreditSubmissions()
   const { data: clubMemberships, isLoading: membershipsLoading } = useMyClubMemberships()
   const { data: availableClubs } = useAvailableClubs()
+  const { data: upcomingEvents, isLoading: upcomingLoading } = useStudentUpcomingEvents()
   const applyForClub = useApplyForClub()
   const createSubmission = useCreateManualCreditSubmission()
+  const registerForEvent = useRegisterForEvent()
+  const cancelEventRegistration = useCancelEventRegistration()
+
   const [selectedClubId, setSelectedClubId] = useState('')
+  const [registeringEventId, setRegisteringEventId] = useState(null)
+  const [cancellingEventId, setCancellingEventId] = useState(null)
+  const [eventSearch, setEventSearch] = useState('')
+  const [eventCategoryFilter, setEventCategoryFilter] = useState('')
+
+  const handleRegister = (eventId) => {
+    setRegisteringEventId(eventId)
+    registerForEvent.mutate(eventId, {
+      onSettled: () => setRegisteringEventId(null),
+    })
+  }
+
+  const handleCancelRegistration = (eventId) => {
+    setCancellingEventId(eventId)
+    cancelEventRegistration.mutate(eventId, {
+      onSettled: () => setCancellingEventId(null),
+    })
+  }
 
   const generatedCertificatesCount = (certs || []).filter((c) => ['generated', 'emailed'].includes((c?.status || '').toLowerCase())).length
   const visibleCertificates = (certs || []).filter((c) => c?.status === 'emailed')
@@ -335,6 +364,18 @@ export default function StudentDashboard() {
     },
   ]
 
+  const filteredUpcomingEvents = (upcomingEvents || []).filter((ev) => {
+    if (eventCategoryFilter && ev.category !== eventCategoryFilter) return false
+    if (eventSearch) {
+      const q = eventSearch.toLowerCase()
+      const matchName = (ev.name || '').toLowerCase().includes(q)
+      const matchClub = (ev.club_name || '').toLowerCase().includes(q)
+      const matchVenue = (ev.venue || '').toLowerCase().includes(q)
+      if (!matchName && !matchClub && !matchVenue) return false
+    }
+    return true
+  })
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <Navbar />
@@ -344,6 +385,153 @@ export default function StudentDashboard() {
 
         <main className="flex-1 overflow-y-auto bg-background">
           <div className="page-container space-y-6">
+
+            {activeTab === 'upcoming' ? (
+              <div className="space-y-6">
+                <div>
+                  <h1 className="text-2xl font-bold text-foreground">Upcoming Club Events</h1>
+                  <p className="mt-0.5 text-sm text-gray-500">
+                    Discover and register for upcoming events conducted by college clubs. Note: You can register for only one event per session (Morning / Afternoon) on the same date.
+                  </p>
+                </div>
+
+                {/* Filters */}
+                <div className="card p-4 flex flex-wrap items-center gap-3">
+                  <input
+                    type="search"
+                    placeholder="Search upcoming events…"
+                    value={eventSearch}
+                    onChange={(e) => setEventSearch(e.target.value)}
+                    className="form-input w-full sm:w-64 text-xs"
+                  />
+                  <select
+                    value={eventCategoryFilter}
+                    onChange={(e) => setEventCategoryFilter(e.target.value)}
+                    className="form-input w-full sm:w-48 text-xs"
+                  >
+                    <option value="">All Categories</option>
+                    {['Workshop', 'Technical Talk', 'Hackathon', 'Cultural', 'Seminar', 'Competition', 'Other'].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Events Grid */}
+                {upcomingLoading ? (
+                  <LoadingSpinner fullPage label="Loading upcoming events…" />
+                ) : filteredUpcomingEvents.length === 0 ? (
+                  <div className="card p-8 text-center text-gray-400">
+                    No upcoming events found.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                    {filteredUpcomingEvents.map((ev) => {
+                      const sessionLabel = ev.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'
+                      return (
+                        <div key={ev.id} className="card overflow-hidden flex flex-col justify-between hover:shadow-lg transition-all border border-gray-200">
+                          <div>
+                            {/* Poster */}
+                            {ev.poster_url ? (
+                              <div className="aspect-[16/9] w-full overflow-hidden bg-gray-100 border-b border-gray-200">
+                                {ev.poster_url.toLowerCase().endsWith('.pdf') ? (
+                                  <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-gray-50 text-navy">
+                                    <span className="text-3xl">📄</span>
+                                    <a
+                                      href={`${BACKEND_URL}${ev.poster_url}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs font-semibold text-navy hover:underline mt-1"
+                                    >
+                                      View Event PDF
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <img
+                                    src={ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url}
+                                    alt={ev.name}
+                                    className="w-full h-full object-cover"
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <div className="aspect-[16/9] w-full bg-navy/5 border-b border-gray-200 flex items-center justify-center text-3xl text-navy/40">
+                                📅
+                              </div>
+                            )}
+
+                            <div className="p-5 space-y-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-navy uppercase tracking-wider">{ev.club_name}</span>
+                                <span className="inline-flex rounded-full bg-navy/10 px-2.5 py-0.5 text-[10px] font-semibold text-navy">
+                                  {ev.category || 'Event'}
+                                </span>
+                              </div>
+
+                              <h3 className="text-base font-bold text-foreground line-clamp-1">{ev.name}</h3>
+                              {ev.description && (
+                                <p className="text-xs text-gray-600 line-clamp-3">{ev.description}</p>
+                              )}
+
+                              <div className="space-y-1.5 pt-2 text-xs text-gray-500 border-t border-gray-100">
+                                <div className="flex items-center gap-1.5">
+                                  <span>📅</span>
+                                  <span className="font-medium text-gray-700">
+                                    {ev.event_date ? new Date(ev.event_date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span>🕐</span>
+                                  <span className="font-semibold text-navy">{sessionLabel}</span>
+                                </div>
+                                {ev.venue && (
+                                  <div className="flex items-center gap-1.5">
+                                    <span>📍</span>
+                                    <span>{ev.venue}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-1.5 text-[11px] text-gray-400 pt-1">
+                                  <span>👥</span>
+                                  <span>{ev.registered_count || 0} student(s) registered</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Action Button */}
+                          <div className="p-5 pt-0">
+                            {ev.is_registered ? (
+                              <div className="space-y-2">
+                                <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
+                                  ✓ Registered ({sessionLabel})
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelRegistration(ev.id)}
+                                  disabled={cancelEventRegistration.isPending && cancellingEventId === ev.id}
+                                  className="w-full text-center text-xs text-red-600 hover:text-red-800 hover:underline py-1 font-medium disabled:opacity-50"
+                                >
+                                  {cancelEventRegistration.isPending && cancellingEventId === ev.id ? 'Cancelling…' : 'Cancel Registration'}
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleRegister(ev.id)}
+                                disabled={registerForEvent.isPending && registeringEventId === ev.id}
+                                className="btn-primary w-full text-xs justify-center"
+                              >
+                                {registerForEvent.isPending && registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
 
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -417,6 +605,58 @@ export default function StudentDashboard() {
                 rowKey="semester"
               />
             </div>
+
+            {/* ─── Upcoming Events This Week ──────────────────────── */}
+            {upcomingEvents && upcomingEvents.length > 0 && (
+              <div className="card p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="section-title">Events This Week / Upcoming Events</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Newly published club events you can attend to earn activity points.</p>
+                  </div>
+                  <span className="inline-flex rounded-full bg-navy/10 px-2.5 py-0.5 text-xs font-semibold text-navy">
+                    {upcomingEvents.length} event{upcomingEvents.length > 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {upcomingEvents.map((ev) => (
+                    <div key={ev.id} className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 space-y-3 hover:shadow-md transition-shadow">
+                      {ev.poster_url && (
+                        <div className="aspect-[16/9] rounded-lg overflow-hidden bg-gray-100">
+                          <img
+                            src={ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url}
+                            alt={ev.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-navy uppercase tracking-wider">{ev.club_name}</span>
+                          {ev.category && (
+                            <span className="inline-flex rounded bg-navy/10 px-2 py-0.5 text-[10px] font-medium text-navy">
+                              {ev.category}
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-sm font-bold text-foreground mt-1 line-clamp-1">{ev.name}</h3>
+                        {ev.description && (
+                          <p className="text-xs text-gray-500 mt-1 line-clamp-2">{ev.description}</p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-xs text-gray-500 pt-1 border-t border-gray-200/60">
+                        {ev.event_date && (
+                          <span>📅 {new Date(ev.event_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                        )}
+                        {ev.event_time && <span>🕐 {ev.event_time}</span>}
+                        {ev.venue && <span>📍 {ev.venue}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* ─── Club Memberships ─────────────────────────────────── */}
             <div className="card p-5 space-y-4">
@@ -667,6 +907,8 @@ export default function StudentDashboard() {
                 rowKey="_id"
               />
             </div>
+            </>
+          )}
           </div>
         </main>
       </div>

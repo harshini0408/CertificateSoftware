@@ -1186,6 +1186,11 @@ async def generate_dept_event_certificates(
             skipped_emails.append("<missing-email>")
             continue
 
+        if not participant_email.endswith("@psgitech.ac.in"):
+            skipped += 1
+            skipped_emails.append(f"{participant_email} (non-@psgitech.ac.in)")
+            continue
+
         if participant_email in existing_emails or participant_email in seen_upload_emails:
             skipped += 1
             skipped_emails.append(participant_email)

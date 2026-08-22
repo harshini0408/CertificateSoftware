@@ -182,3 +182,64 @@ export function useApplyForClub() {
     },
   })
 }
+
+/**
+ * GET /student/upcoming-events — published club events for this week
+ */
+export function useStudentUpcomingEvents() {
+  return useQuery({
+    queryKey: ['student', 'upcoming-events'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/student/upcoming-events')
+      return data
+    },
+  })
+}
+
+/**
+ * POST /student/events/:eventId/register
+ */
+export function useRegisterForEvent() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (eventId) => {
+      const { data } = await axiosInstance.post(`/student/events/${eventId}/register`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({ type: 'success', message: data?.message || 'Registered for event successfully!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to register for event.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+/**
+ * POST /student/events/:eventId/cancel-registration
+ */
+export function useCancelEventRegistration() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (eventId) => {
+      const { data } = await axiosInstance.post(`/student/events/${eventId}/cancel-registration`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({ type: 'success', message: data?.message || 'Event registration cancelled.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to cancel registration.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+

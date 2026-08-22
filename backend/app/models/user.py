@@ -12,6 +12,7 @@ class UserRole(str, Enum):
     HOD = "hod"
     CLUB_COORDINATOR = "club_coordinator"
     DEPT_COORDINATOR = "dept_coordinator"
+    STUDENT_AFFAIRS = "student_affairs"
     TUTOR = "tutor"
     STUDENT = "student"
     GUEST = "guest"

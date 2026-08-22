@@ -213,6 +213,7 @@ from .domains.principal.routers import router as principal_router
 from .domains.hod.routers import router as hod_router
 from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
 from .domains.superadmin.routers import router as superadmin_router
+from .domains.student_affairs.routers import router as student_affairs_router
 from .certificate_config.routes import router as cert_config_router
 
 app.include_router(auth.router)
@@ -233,6 +234,7 @@ app.include_router(hod_router)
 app.include_router(image_templates.router)
 app.include_router(guest_router)
 app.include_router(role_presets_router)
+app.include_router(student_affairs_router)
 
 # ── Static files (PNG templates, fonts, etc.) ────────────────────────────────
 from pathlib import Path

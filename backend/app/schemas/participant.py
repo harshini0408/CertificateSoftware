@@ -1,7 +1,14 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def validate_psgitech_email(v: str) -> str:
+    val = str(v).strip().lower()
+    if not val.endswith("@psgitech.ac.in"):
+        raise ValueError("Only @psgitech.ac.in email addresses are allowed.")
+    return val
 
 
 class ParticipantCreate(BaseModel):
@@ -10,6 +17,11 @@ class ParticipantCreate(BaseModel):
     registration_number: Optional[str] = None
     cert_type: str = "participant"
     fields: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: str) -> str:
+        return validate_psgitech_email(v)
 
 
 class ParticipantResponse(BaseModel):

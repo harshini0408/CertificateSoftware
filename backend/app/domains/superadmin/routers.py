@@ -70,6 +70,8 @@ async def _assign_student_to_tutor(
     reg_norm = registration_number.strip()
     if not email_norm or not reg_norm:
         raise ValueError("email and registration_number are required")
+    if not email_norm.endswith("@psgitech.ac.in"):
+        raise ValueError(f"Student email '{email_norm}' must be a @psgitech.ac.in address")
 
     existing = await StudentCredit.find_one(
         StudentCredit.student_email == email_norm,
@@ -708,6 +710,12 @@ async def bulk_import_students(
             if len(password) < 8:
                 raise ValueError("Password must be at least 8 characters")
 
+            if not email.endswith("@psgitech.ac.in"):
+                raise ValueError(f"Student email '{email}' must be a @psgitech.ac.in address")
+
+            if tutor_email and not tutor_email.endswith("@psgitech.ac.in"):
+                raise ValueError(f"Tutor email '{tutor_email}' must be a @psgitech.ac.in address")
+
             resolved_dept = await _resolve_department_name(dept)
             if not resolved_dept:
                 raise ValueError("Department is required")
@@ -868,6 +876,9 @@ async def bulk_import_tutors(
 
             if len(password) < 8:
                 raise ValueError("Password must be at least 8 characters")
+
+            if not email.endswith("@psgitech.ac.in"):
+                raise ValueError(f"Tutor email '{email}' must be a @psgitech.ac.in address")
 
             resolved_dept = await _resolve_department_name(department)
             if not resolved_dept:

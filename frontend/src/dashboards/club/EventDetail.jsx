@@ -8,7 +8,7 @@ import FileUpload from '../../components/FileUpload'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import DataTable from '../../components/DataTable'
 import GuestWizard from '../../components/GuestWizard'
-import { useEvent, eventKeys } from './eventsApi'
+import { useEvent, eventKeys, useUploadReport, useUploadPoster } from './eventsApi'
 import { participantKeys } from './participantsApi'
 import { certKeys } from './certificatesApi'
 import { useToastStore } from '../../store/uiStore'
@@ -78,6 +78,10 @@ function formatDateOnly(value) {
 function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const logoPreview = event?.assets?.logo_url ?? null
   const sigPreview = event?.assets?.signature_url ?? null
+  const uploadPoster = useUploadPoster(clubId, eventId)
+  const uploadReport = useUploadReport(clubId, eventId)
+  const [selectedReportFile, setSelectedReportFile] = useState(null)
+  const [selectedPosterFile, setSelectedPosterFile] = useState(null)
 
   const toAssetSrc = (url, hash) => {
     if (!url) return null
@@ -87,29 +91,194 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     return `${BACKEND_URL}${normalized}`
   }
 
+  const handleReportUpload = () => {
+    if (!selectedReportFile) return
+    uploadReport.mutate(selectedReportFile, {
+      onSuccess: () => setSelectedReportFile(null),
+    })
+  }
+
+  const handlePosterUpload = () => {
+    if (!selectedPosterFile) return
+    uploadPoster.mutate(selectedPosterFile, {
+      onSuccess: () => setSelectedPosterFile(null),
+    })
+  }
+
+  const reportStatus = event?.report_status || 'not_submitted'
+  const reportStatusLabels = {
+    not_submitted: { text: 'Not Submitted', cls: 'bg-gray-100 text-gray-600' },
+    pending_review: { text: 'Under Review by Student Affairs', cls: 'bg-amber-100 text-amber-700' },
+    accepted: { text: 'Report Accepted', cls: 'bg-green-100 text-green-700' },
+    rejected: { text: 'Report Rejected', cls: 'bg-red-100 text-red-700' },
+  }
+  const currentReportStatus = reportStatusLabels[reportStatus] || reportStatusLabels.not_submitted
+
   return (
     <div className="space-y-8 max-w-3xl">
       {/* ── Event details card ─────────────────────────────────────────── */}
       <section className="card p-6">
-        <h2 className="section-title mb-4">Event Details</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="section-title">Event Details</h2>
+          <div className="flex items-center gap-2">
+            {event?.is_published && (
+              <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                Published Upcoming
+              </span>
+            )}
+            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase ${
+              event?.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+            }`}>
+              {event?.status || 'draft'}
+            </span>
+          </div>
+        </div>
         <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {[
-            ['Name',        event?.name],
-            ['Date',        event?.event_date
-                              ? formatDateOnly(event.event_date)
-                              : '—'],
+            ['Name', event?.name],
+            ['Date', event?.event_date ? formatDateOnly(event.event_date) : '—'],
+            ['Time', event?.event_time || '—'],
+            ['Venue', event?.venue || '—'],
+            ['Category', event?.category || '—'],
             ['Academic Year', event?.academic_year || '—'],
+            ['Participants', (event?.participant_count ?? 0).toLocaleString()],
+            ['Certificates Issued', (event?.cert_count ?? 0).toLocaleString()],
           ].map(([label, value]) => (
             <div key={label} className="flex flex-col gap-0.5">
               <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                 {label}
               </dt>
-              <dd className="text-sm text-foreground">
+              <dd className="text-sm font-medium text-foreground">
                 {value}
               </dd>
             </div>
           ))}
         </dl>
+        {event?.description && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">Description</dt>
+            <dd className="mt-1 text-sm text-gray-600">{event.description}</dd>
+          </div>
+        )}
+      </section>
+
+      {/* ── Event Report Section ───────────────────────────────────────── */}
+      <section className="card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="section-title">Event Report</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Submit an event completion report to Student Affairs for review.</p>
+          </div>
+          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${currentReportStatus.cls}`}>
+            {currentReportStatus.text}
+          </span>
+        </div>
+
+        {/* Rejection Alert */}
+        {reportStatus === 'rejected' && (
+          <div className="p-4 rounded-lg bg-red-50 border border-red-200 space-y-1">
+            <p className="text-xs font-bold text-red-800 uppercase tracking-wide">Student Affairs Review Remarks:</p>
+            <p className="text-sm text-red-700">{event?.report_rejection_reason || 'Please review and re-upload the event report.'}</p>
+          </div>
+        )}
+
+        {/* Existing report link */}
+        {event?.report_url && (
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 border border-gray-200">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xl">📄</span>
+              <div className="truncate">
+                <p className="text-sm font-medium text-foreground truncate">{event.report_filename || 'Event Report'}</p>
+                <p className="text-xs text-gray-400">
+                  {event.report_uploaded_at ? `Uploaded ${new Date(event.report_uploaded_at).toLocaleDateString('en-IN')}` : ''}
+                </p>
+              </div>
+            </div>
+            <a
+              href={`${BACKEND_URL}${event.report_url}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary text-xs shrink-0"
+            >
+              View / Download
+            </a>
+          </div>
+        )}
+
+        {/* Upload form if not submitted or rejected */}
+        {(reportStatus === 'not_submitted' || reportStatus === 'rejected') && (
+          <div className="pt-2 space-y-3">
+            <label className="block text-xs font-semibold text-gray-600 uppercase">
+              {reportStatus === 'rejected' ? 'Re-upload Revised Report' : 'Upload Event Report (PDF, DOCX, PNG)'}
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                onChange={(e) => setSelectedReportFile(e.target.files?.[0] || null)}
+                className="form-input text-xs flex-1"
+              />
+              <button
+                type="button"
+                onClick={handleReportUpload}
+                disabled={!selectedReportFile || uploadReport.isPending}
+                className="btn-primary text-xs shrink-0"
+              >
+                {uploadReport.isPending ? 'Uploading…' : reportStatus === 'rejected' ? 'Re-submit Report' : 'Submit Report'}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Event Poster Section ────────────────────────────────────────── */}
+      <section className="card p-6 space-y-4">
+        <h2 className="section-title">Event Poster</h2>
+        {event?.poster_url ? (
+          <div className="space-y-3">
+            <img
+              src={event.poster_url.startsWith('/') ? `${BACKEND_URL}${event.poster_url}` : event.poster_url}
+              alt="Event Poster"
+              className="max-h-64 rounded-lg border border-gray-200 object-contain bg-gray-50"
+            />
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setSelectedPosterFile(e.target.files?.[0] || null)}
+                className="form-input text-xs flex-1"
+              />
+              <button
+                type="button"
+                onClick={handlePosterUpload}
+                disabled={!selectedPosterFile || uploadPoster.isPending}
+                className="btn-secondary text-xs shrink-0"
+              >
+                {uploadPoster.isPending ? 'Updating…' : 'Change Poster'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">Add an event poster to be displayed on the Student and Student Affairs upcoming event feeds.</p>
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setSelectedPosterFile(e.target.files?.[0] || null)}
+                className="form-input text-xs flex-1"
+              />
+              <button
+                type="button"
+                onClick={handlePosterUpload}
+                disabled={!selectedPosterFile || uploadPoster.isPending}
+                className="btn-primary text-xs shrink-0"
+              >
+                {uploadPoster.isPending ? 'Uploading…' : 'Upload Poster'}
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* ── Assets section ─────────────────────────────────────────────── */}
@@ -420,10 +589,10 @@ function ManualEntryTab({ clubId, eventId, event }) {
             id="manual-email"
             type="email"
             className={`form-input ${errors.email ? 'form-input-error' : ''}`}
-            placeholder="participant@example.com"
+            placeholder="participant@psgitech.ac.in"
             {...register('email', {
               required: 'Email is required.',
-              pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email.' },
+              pattern: { value: /^[a-zA-Z0-9._%+-]+@psgitech\.ac\.in$/i, message: 'Only @psgitech.ac.in emails are allowed.' },
             })}
           />
           {errors.email && <p className="form-error">{errors.email.message}</p>}

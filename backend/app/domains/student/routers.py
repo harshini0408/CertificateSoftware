@@ -1,10 +1,12 @@
 from pathlib import Path
 import re
 from datetime import date, datetime
+from typing import Optional, List, Dict
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from beanie import PydanticObjectId
 
 from ...config import get_settings
 from ...core.dependencies import require_role
@@ -17,6 +19,7 @@ from ...models.manual_credit_submission import ManualCreditSubmission, ManualSub
 from ...models.event import Event
 from ...models.club import Club
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
+from ...models.event_registration import EventRegistration
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
 
@@ -547,3 +550,155 @@ async def download_my_certificate(
         filename=f"{cert_number}.png",
         headers={"Content-Disposition": f'attachment; filename="{cert_number}.png"'},
     )
+
+
+# ═══ UPCOMING EVENTS & EVENT REGISTRATION ═══════════════════════════════════
+
+
+def _normalize_session(time_str: Optional[str]) -> str:
+    """Normalize session to 'FN' or 'AN'."""
+    val = (time_str or "").strip().lower()
+    if "an" in val or "afternoon" in val or "pm" in val and not "10" in val and not "11" in val and not "9" in val and not "8" in val:
+        return "AN"
+    return "FN"
+
+
+@router.get("/student/upcoming-events")
+async def list_upcoming_events(
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Return published upcoming club events for the student dashboard with registration status."""
+    from datetime import timedelta
+    now = datetime.utcnow()
+    # List upcoming events starting from today onwards
+    today_start = datetime(now.year, now.month, now.day)
+
+    events = await Event.find({
+        "is_published": True,
+        "event_date": {"$gte": today_start},
+    }).sort(+Event.event_date).to_list()
+
+    clubs = await Club.find().to_list()
+    club_map = {str(c.id): c.name for c in clubs}
+
+    # Fetch this student's registrations
+    registrations = await EventRegistration.find(
+        EventRegistration.student_email == current_user.email.lower(),
+    ).to_list()
+    reg_map = {str(r.event_id): str(r.id) for r in registrations}
+
+    # Count registrations per event
+    all_regs = await EventRegistration.find().to_list()
+    reg_counts = {}
+    for r in all_regs:
+        eid = str(r.event_id)
+        reg_counts[eid] = reg_counts.get(eid, 0) + 1
+
+    results = []
+    for e in events:
+        eid = str(e.id)
+        session = _normalize_session(e.event_time)
+        results.append({
+            "id": eid,
+            "name": e.name,
+            "description": e.description,
+            "club_id": str(e.club_id),
+            "club_name": club_map.get(str(e.club_id), "Unknown"),
+            "event_date": e.event_date.isoformat() if e.event_date else None,
+            "event_time": e.event_time,
+            "session": session,
+            "venue": e.venue,
+            "category": e.category,
+            "poster_url": e.poster_url,
+            "is_registered": eid in reg_map,
+            "registration_id": reg_map.get(eid),
+            "registered_count": reg_counts.get(eid, 0),
+        })
+    return results
+
+
+@router.post("/student/events/{event_id}/register")
+async def register_for_event(
+    event_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Register for an upcoming event. Validates against duplicate registration and same-day same-session collision."""
+    event = await Event.get(event_id)
+    if not event or not event.is_published:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not published")
+
+    student_email = current_user.email.lower()
+
+    # Check if already registered for this event
+    existing_reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == student_email,
+    )
+    if existing_reg:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event")
+
+    # Format event date and session
+    event_date_str = event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
+    session = _normalize_session(event.event_time)
+    session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
+
+    # Collision Check: Cannot register for multiple events on same date & same session
+    collision = await EventRegistration.find_one(
+        EventRegistration.student_email == student_email,
+        EventRegistration.event_date_str == event_date_str,
+        EventRegistration.session == session,
+    )
+    if collision:
+        conflicting_event = await Event.get(collision.event_id)
+        conflict_name = conflicting_event.name if conflicting_event else "another event"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Registration conflict: You are already registered for '{conflict_name}' on {event_date_str} in the {session_label} session.",
+        )
+
+    # Create registration
+    reg = EventRegistration(
+        event_id=event.id,
+        student_id=current_user.id,
+        student_name=current_user.name,
+        student_email=student_email,
+        registration_number=current_user.registration_number,
+        department=current_user.department,
+        event_date_str=event_date_str,
+        session=session,
+    )
+    await reg.insert()
+
+    # Increment participant count
+    await event.set({"participant_count": event.participant_count + 1})
+
+    return {
+        "message": f"Successfully registered for '{event.name}'",
+        "registration_id": str(reg.id),
+        "session": session,
+    }
+
+
+@router.post("/student/events/{event_id}/cancel-registration")
+@router.delete("/student/events/{event_id}/register")
+async def cancel_event_registration(
+    event_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Cancel registration for an upcoming event."""
+    student_email = current_user.email.lower()
+    reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == student_email,
+    )
+    if not reg:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
+
+    await reg.delete()
+
+    event = await Event.get(event_id)
+    if event and event.participant_count > 0:
+        await event.set({"participant_count": max(0, event.participant_count - 1)})
+
+    return {"message": "Registration cancelled successfully"}
+
