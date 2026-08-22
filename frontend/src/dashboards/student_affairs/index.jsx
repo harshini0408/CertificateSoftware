@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
@@ -659,12 +660,9 @@ function UpcomingEventsTab() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Main Dashboard
-// ═══════════════════════════════════════════════════════════════════════════════
-
 export default function StudentAffairsDashboard() {
-  const [activeTab, setActiveTab] = useState('overview')
+  const [searchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'overview'
 
   const renderTab = () => {
     switch (activeTab) {
@@ -677,33 +675,16 @@ export default function StudentAffairsDashboard() {
   }
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
+    <>
       <Navbar />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex items-start">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto bg-background">
+        <main className="flex-1 min-w-0 min-h-[calc(100dvh-3.5rem)] bg-background">
           <div className="page-container space-y-6">
-            {/* Tab navigation */}
-            <div className="flex gap-1 border-b border-gray-200 overflow-x-auto pb-px">
-              {TABS.map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
-                    activeTab === tab
-                      ? 'border-navy text-navy'
-                      : 'border-transparent text-gray-500 hover:text-navy hover:border-gray-300'
-                  }`}
-                >
-                  {TAB_LABELS[tab]}
-                </button>
-              ))}
-            </div>
-
             {renderTab()}
           </div>
         </main>
       </div>
-    </div>
+    </>
   )
 }

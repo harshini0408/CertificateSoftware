@@ -606,58 +606,6 @@ export default function StudentDashboard() {
               />
             </div>
 
-            {/* ─── Upcoming Events This Week ──────────────────────── */}
-            {upcomingEvents && upcomingEvents.length > 0 && (
-              <div className="card p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="section-title">Events This Week / Upcoming Events</h2>
-                    <p className="text-xs text-gray-500 mt-0.5">Newly published club events you can attend to earn activity points.</p>
-                  </div>
-                  <span className="inline-flex rounded-full bg-navy/10 px-2.5 py-0.5 text-xs font-semibold text-navy">
-                    {upcomingEvents.length} event{upcomingEvents.length > 1 ? 's' : ''}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {upcomingEvents.map((ev) => (
-                    <div key={ev.id} className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 space-y-3 hover:shadow-md transition-shadow">
-                      {ev.poster_url && (
-                        <div className="aspect-[16/9] rounded-lg overflow-hidden bg-gray-100">
-                          <img
-                            src={ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url}
-                            alt={ev.name}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold text-navy uppercase tracking-wider">{ev.club_name}</span>
-                          {ev.category && (
-                            <span className="inline-flex rounded bg-navy/10 px-2 py-0.5 text-[10px] font-medium text-navy">
-                              {ev.category}
-                            </span>
-                          )}
-                        </div>
-                        <h3 className="text-sm font-bold text-foreground mt-1 line-clamp-1">{ev.name}</h3>
-                        {ev.description && (
-                          <p className="text-xs text-gray-500 mt-1 line-clamp-2">{ev.description}</p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-2 text-xs text-gray-500 pt-1 border-t border-gray-200/60">
-                        {ev.event_date && (
-                          <span>📅 {new Date(ev.event_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-                        )}
-                        {ev.event_time && <span>🕐 {ev.event_time}</span>}
-                        {ev.venue && <span>📍 {ev.venue}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* ─── Club Memberships ─────────────────────────────────── */}
             <div className="card p-5 space-y-4">
               <div className="flex items-center justify-between">
