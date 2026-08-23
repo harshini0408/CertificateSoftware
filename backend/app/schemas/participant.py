@@ -49,3 +49,6 @@ class UploadResponse(BaseModel):
     created: int = 0          # number of participants successfully imported
     skipped: int = 0          # number skipped (duplicates)
     errors: List[str] = Field(default_factory=list)
+
+class ParticipantTypeUpdate(BaseModel):
+    cert_type: str

@@ -210,24 +210,8 @@ async def change_password(
     if not verify_password(body.current_password, current_user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
 
-    email = (current_user.email or "").strip().lower()
-    now = datetime.utcnow()
-    otp_req = await OTPRequest.find_one({
-        "email": email,
-        "otp_code": body.otp_code.strip(),
-        "purpose": {"$in": ["password_change", "department_password_change"]},
-        "expires_at": {"$gt": now},
-        "is_verified": True,
-    })
-    if not otp_req:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Email OTP verification required or session expired. Please verify OTP first.",
-        )
-
     current_user.password_hash = hash_password(body.new_password)
     await current_user.save()
-    await otp_req.delete()
     return TokenResponse(message="Password updated successfully")
 
 
@@ -249,14 +233,28 @@ async def change_department_password(
     body: DepartmentPasswordChangeRequest,
     current_user: User = Depends(get_current_user),
 ):
-    return await change_password(
-        body=PasswordChangeRequest(
-            current_password=body.current_password,
-            new_password=body.new_password,
-            otp_code=body.otp_code,
-        ),
-        current_user=current_user,
-    )
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
+
+    email = (current_user.email or "").strip().lower()
+    now = datetime.utcnow()
+    otp_req = await OTPRequest.find_one({
+        "email": email,
+        "otp_code": body.otp_code.strip(),
+        "purpose": {"$in": ["password_change", "department_password_change"]},
+        "expires_at": {"$gt": now},
+        "is_verified": True,
+    })
+    if not otp_req:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Email OTP verification required or session expired. Please verify OTP first.",
+        )
+
+    current_user.password_hash = hash_password(body.new_password)
+    await current_user.save()
+    await otp_req.delete()
+    return TokenResponse(message="Password updated successfully")
 
 
 @router.get("/me", response_model=MeResponse)

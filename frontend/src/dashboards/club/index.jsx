@@ -79,7 +79,8 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
   const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm({
     defaultValues: {
-      event_time: 'Morning (FN)',
+      session_type: 'Morning (FN)',
+      timing: '',
     },
   })
 
@@ -120,6 +121,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
     const payload = {
       ...data,
+      event_time: data.timing ? `${data.session_type} | ${data.timing}` : data.session_type,
       academic_years: selectedAcademicYears,
       academic_year: selectedAcademicYears.join(', '),
     }
@@ -261,11 +263,11 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
                 </div>
                 <div>
-                  <label className="form-label" htmlFor="dash-event-time">Event Session (Time) *</label>
+                  <label className="form-label" htmlFor="dash-event-time">Event Session *</label>
                   <select
                     id="dash-event-time"
                     className="form-input"
-                    {...register('event_time', { required: 'Event session is required' })}
+                    {...register('session_type', { required: 'Event session is required' })}
                   >
                     <option value="Morning (FN)">Morning (FN)</option>
                     <option value="Afternoon (AN)">Afternoon (AN)</option>
@@ -275,15 +277,29 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="form-label" htmlFor="dash-venue">Venue</label>
+                  <label className="form-label" htmlFor="dash-timing">Event Timings</label>
+                  <input
+                    id="dash-timing"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. 09:00 AM - 12:00 PM"
+                    {...register('timing')}
+                  />
+                </div>
+                <div>
+                  <label className="form-label" htmlFor="dash-venue">Venue *</label>
                   <input
                     id="dash-venue"
                     type="text"
-                    className="form-input"
+                    className={`form-input ${errors.venue ? 'form-input-error' : ''}`}
                     placeholder="e.g. Auditorium / Lab 3"
-                    {...register('venue')}
+                    {...register('venue', { required: 'Venue is required' })}
                   />
+                  {errors.venue && <p className="form-error">{errors.venue.message}</p>}
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="form-label" htmlFor="dash-category">Category</label>
                   <select id="dash-category" className="form-input" {...register('category')}>
@@ -297,12 +313,27 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                     <option value="Other">Other</option>
                   </select>
                 </div>
+                <div>
+                  <label className="form-label" htmlFor="dash-volunteers-required">Volunteers Required</label>
+                  <input
+                    id="dash-volunteers-required"
+                    type="number"
+                    min="0"
+                    className={`form-input ${errors.volunteers_required ? 'form-input-error' : ''}`}
+                    placeholder="0"
+                    {...register('volunteers_required', {
+                      valueAsNumber: true,
+                      min: { value: 0, message: 'Cannot be negative' }
+                    })}
+                  />
+                  {errors.volunteers_required && <p className="form-error">{errors.volunteers_required.message}</p>}
+                </div>
               </div>
 
               <div>
                 <label className="form-label">Academic Year (Select all applicable) *</label>
                 <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3">
-                  {['2025-2026(EVEN)', '2026-2027(ODD)', '2026-2027(EVEN)'].map((year) => (
+                  {['2026-2027(ODD)', '2026-2027(EVEN)'].map((year) => (
                     <label key={year} className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
                       <input
                         type="checkbox"

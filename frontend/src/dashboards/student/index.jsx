@@ -156,9 +156,9 @@ export default function StudentDashboard() {
   const [eventSearch, setEventSearch] = useState('')
   const [eventCategoryFilter, setEventCategoryFilter] = useState('')
 
-  const handleRegister = (eventId) => {
+  const handleRegister = (eventId, type = 'participant') => {
     setRegisteringEventId(eventId)
-    registerForEvent.mutate(eventId, {
+    registerForEvent.mutate({ eventId, type }, {
       onSettled: () => setRegisteringEventId(null),
     })
   }
@@ -514,14 +514,36 @@ export default function StudentDashboard() {
                                 </button>
                               </div>
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleRegister(ev.id)}
-                                disabled={registerForEvent.isPending && registeringEventId === ev.id}
-                                className="btn-primary w-full text-xs justify-center"
-                              >
-                                {registerForEvent.isPending && registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
-                              </button>
+                              <div className="space-y-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRegister(ev.id, 'participant')}
+                                  disabled={registerForEvent.isPending && registeringEventId === ev.id}
+                                  className="btn-primary w-full text-xs justify-center"
+                                >
+                                  {registerForEvent.isPending && registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
+                                </button>
+                                {(ev.volunteers_required || 0) > 0 && (
+                                  (ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) ? (
+                                    <button
+                                      type="button"
+                                      disabled
+                                      className="btn-secondary w-full text-xs justify-center opacity-50 cursor-not-allowed"
+                                    >
+                                      Enough volunteers present
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRegister(ev.id, 'volunteer')}
+                                      disabled={registerForEvent.isPending && registeringEventId === ev.id}
+                                      className="btn-secondary w-full text-xs justify-center text-teal-700 border-teal-200 hover:bg-teal-50"
+                                    >
+                                      {registerForEvent.isPending && registeringEventId === ev.id ? 'Applying…' : 'Volunteer'}
+                                    </button>
+                                  )
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>

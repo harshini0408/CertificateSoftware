@@ -13,6 +13,7 @@ class EventCreate(BaseModel):
     category: Optional[str] = None
     academic_year: Optional[str] = None
     academic_years: List[str] = Field(default_factory=list)
+    volunteers_required: int = 0
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
     is_published: bool = False
 
@@ -26,6 +27,7 @@ class EventUpdate(BaseModel):
     category: Optional[str] = None
     academic_year: Optional[str] = None
     academic_years: Optional[List[str]] = None
+    volunteers_required: Optional[int] = None
     status: Optional[str] = None
     template_map: Optional[Dict[str, Optional[str]]] = None
     mapping_confirmed: Optional[bool] = None
@@ -48,6 +50,8 @@ class EventResponse(BaseModel):
     assets: dict = Field(default_factory=dict)
     mapping_confirmed: bool = False
     participant_count: int = 0
+    volunteers_required: int = 0
+    volunteers_registered: int = 0
     cert_count: int = 0
     created_at: datetime
     is_published: bool = False

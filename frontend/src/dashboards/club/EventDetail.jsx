@@ -8,8 +8,8 @@ import FileUpload from '../../components/FileUpload'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import DataTable from '../../components/DataTable'
 import GuestWizard from '../../components/GuestWizard'
-import { useEvent, eventKeys, useUploadReport, useUploadPoster } from './eventsApi'
-import { participantKeys } from './participantsApi'
+import { useEvent, eventKeys, useUploadReport, useUploadPoster, useClubCreditRules } from './eventsApi'
+import { participantKeys, useParticipants, useUpdateParticipantType, useVerifyParticipant } from './participantsApi'
 import { certKeys } from './certificatesApi'
 import { useToastStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
@@ -20,16 +20,7 @@ import axiosInstance, { BACKEND_URL } from '../../utils/axiosInstance'
 // ─── Tab ids ──────────────────────────────────────────────────────────────────
 const TABS = ['overview', 'participants', 'certificates']
 
-const CERT_TYPES = [
-  'participant',
-  'coordinator',
-  'winner_1st',
-  'winner_2nd',
-  'winner_3rd',
-  'mentor',
-  'judge',
-  'volunteer',
-]
+// The roles will be fetched dynamically via useClubCreditRules
 
 const IST_TIMEZONE = 'Asia/Kolkata'
 const HAS_TZ_RE = /(Z|[+\-]\d{2}:\d{2})$/i
@@ -505,6 +496,8 @@ function ExcelUploadTab({ clubId, eventId }) {
 function ManualEntryTab({ clubId, eventId, event }) {
   const addToast = useToastStore((s) => s.addToast)
   const qc = useQueryClient()
+  const { data: creditRules } = useClubCreditRules(clubId)
+  const dynamicRoles = creditRules?.map(r => r.cert_type) || ['participant']
 
   const {
     register,
@@ -608,7 +601,7 @@ function ManualEntryTab({ clubId, eventId, event }) {
             className="form-input"
             {...register('cert_type')}
           >
-            {CERT_TYPES.map((ct) => (
+            {dynamicRoles.map((ct) => (
               <option key={ct} value={ct}>
                 {ct.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
               </option>
@@ -635,12 +628,13 @@ function ManualEntryTab({ clubId, eventId, event }) {
 // Participants Tab (with 2 sub-tabs)
 // ─────────────────────────────────────────────────────────────────────────────
 const PARTICIPANT_SUBTABS = [
+  { id: 'list',   label: 'Registered List' },
   { id: 'excel',  label: 'Excel Upload' },
   { id: 'manual', label: 'Manual Entry' },
 ]
 
 function ParticipantsTab({ clubId, eventId, event }) {
-  const [subTab, setSubTab] = useState('excel')
+  const [subTab, setSubTab] = useState('list')
 
   return (
     <div className="space-y-6">
@@ -665,6 +659,12 @@ function ParticipantsTab({ clubId, eventId, event }) {
       </div>
 
       {/* Sub-tab content */}
+      {subTab === 'list' && (
+        <ParticipantListTab
+          clubId={clubId}
+          eventId={eventId}
+        />
+      )}
       {subTab === 'excel' && (
         <ExcelUploadTab
           clubId={clubId}
@@ -682,10 +682,76 @@ function ParticipantsTab({ clubId, eventId, event }) {
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Participant List Sub-tab
+// ─────────────────────────────────────────────────────────────────────────────
+function ParticipantListTab({ clubId, eventId }) {
+  const { data: participants, isLoading } = useParticipants(clubId, eventId)
+  const updateType = useUpdateParticipantType(clubId, eventId)
+  const verifyParticipant = useVerifyParticipant(clubId, eventId)
+  const { data: creditRules } = useClubCreditRules(clubId)
+  const dynamicRoles = creditRules?.map(r => r.cert_type) || ['participant']
+  
+  const columns = [
+    { key: 'name', header: 'Name', searchKey: true, sortable: true, render: (_, row) => row.fields?.Name || '—' },
+    { key: 'email', header: 'Email', searchKey: true, sortable: true },
+    { key: 'registration_number', header: 'Reg No.', searchKey: true, sortable: true, render: (v) => v || '—' },
+    {
+      key: 'cert_type',
+      header: 'Type',
+      sortable: true,
+      render: (v, row) => (
+        <select
+          className="form-input text-xs py-1 h-auto"
+          value={v || 'participant'}
+          onChange={(e) => updateType.mutate({ participantId: row.id, cert_type: e.target.value })}
+          disabled={updateType.isPending}
+        >
+          {dynamicRoles.map((ct) => (
+            <option key={ct} value={ct}>
+              {ct.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            </option>
+          ))}
+        </select>
+      )
+    },
+    { key: 'source', header: 'Source', sortable: true, render: (v) => <span className="capitalize">{v}</span> },
+    { key: 'registered_at', header: 'Added On', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-IN') : '—' },
+    {
+      key: 'verified',
+      header: 'Status',
+      render: (v, row) => (
+        v ? (
+          <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Verified</span>
+        ) : (
+          <button
+            className="btn-primary text-xs py-1 px-2 h-auto"
+            onClick={() => verifyParticipant.mutate(row.id)}
+            disabled={verifyParticipant.isPending}
+          >
+            Accept Request
+          </button>
+        )
+      )
+    }
+  ]
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EventDetail (main export)
-// ─────────────────────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-4">
+      <DataTable
+        columns={columns}
+        data={participants || []}
+        isLoading={isLoading}
+        emptyMessage="No participants found. Students who register or get uploaded will appear here."
+        searchable
+        searchPlaceholder="Search participants..."
+        rowKey="id"
+      />
+    </div>
+  )
+}
+
+
 export default function EventDetail() {
   const { club_id, event_id } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()

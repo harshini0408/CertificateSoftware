@@ -590,9 +590,12 @@ async def list_upcoming_events(
     # Count registrations per event
     all_regs = await EventRegistration.find().to_list()
     reg_counts = {}
+    volunteer_counts = {}
     for r in all_regs:
         eid = str(r.event_id)
         reg_counts[eid] = reg_counts.get(eid, 0) + 1
+        if getattr(r, "registration_type", "participant") == "volunteer":
+            volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
 
     results = []
     for e in events:
@@ -613,6 +616,8 @@ async def list_upcoming_events(
             "is_registered": eid in reg_map,
             "registration_id": reg_map.get(eid),
             "registered_count": reg_counts.get(eid, 0),
+            "volunteers_required": getattr(e, "volunteers_required", 0),
+            "volunteers_registered": volunteer_counts.get(eid, 0),
         })
     return results
 
@@ -620,6 +625,7 @@ async def list_upcoming_events(
 @router.post("/student/events/{event_id}/register")
 async def register_for_event(
     event_id: PydanticObjectId,
+    type: str = "participant",
     current_user: User = Depends(require_role(UserRole.STUDENT)),
 ):
     """Register for an upcoming event. Validates against duplicate registration and same-day same-session collision."""
@@ -656,6 +662,15 @@ async def register_for_event(
             f"Registration conflict: You are already registered for '{conflict_name}' on {event_date_str} in the {session_label} session.",
         )
 
+    # Volunteer capacity check
+    if type == "volunteer":
+        volunteers_registered = await EventRegistration.find(
+            EventRegistration.event_id == event_id,
+            EventRegistration.registration_type == "volunteer"
+        ).count()
+        if volunteers_registered >= (event.volunteers_required or 0):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Volunteer capacity reached for this event")
+
     # Create registration
     reg = EventRegistration(
         event_id=event.id,
@@ -666,8 +681,32 @@ async def register_for_event(
         department=current_user.department,
         event_date_str=event_date_str,
         session=session,
+        registration_type=type,
     )
     await reg.insert()
+
+    from ...models.participant import Participant, ParticipantSource
+    existing_p = await Participant.find_one(
+        Participant.event_id == event_id,
+        Participant.email == student_email
+    )
+    if not existing_p:
+        p = Participant(
+            event_id=event.id,
+            club_id=event.club_id,
+            email=student_email,
+            registration_number=current_user.registration_number,
+            cert_type=type,
+            fields={
+                "Name": current_user.name or "",
+                "Email": student_email,
+                "Registration Number": current_user.registration_number or "",
+                "Department": current_user.department or "",
+            },
+            source=ParticipantSource.REGISTRATION,
+            verified=(type != "volunteer"),
+        )
+        await p.insert()
 
     # Increment participant count
     await event.set({"participant_count": event.participant_count + 1})
@@ -695,6 +734,14 @@ async def cancel_event_registration(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
 
     await reg.delete()
+
+    from ...models.participant import Participant, ParticipantSource
+    p = await Participant.find_one(
+        Participant.event_id == event_id,
+        Participant.email == student_email
+    )
+    if p and p.source == ParticipantSource.REGISTRATION:
+        await p.delete()
 
     event = await Event.get(event_id)
     if event and event.participant_count > 0:

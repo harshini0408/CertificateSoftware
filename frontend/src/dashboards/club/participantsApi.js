@@ -196,3 +196,28 @@ export function useConfirmMapping(clubId, eventId) {
     },
   })
 }
+
+// ── useUpdateParticipantType ──────────────────────────────────────────────────
+/**
+ * PATCH /clubs/:club_id/events/:event_id/participants/:participant_id/type
+ * { cert_type: string }
+ */
+export function useUpdateParticipantType(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ participantId, cert_type }) =>
+      axiosInstance.patch(
+        `/clubs/${clubId}/events/${eventId}/participants/${participantId}/type`,
+        { cert_type },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) })
+      addToast({ type: 'success', message: 'Participant type updated.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: safeDetail(err, 'Update failed.') })
+    },
+  })
+}

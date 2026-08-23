@@ -14,6 +14,8 @@ from ...models.participant import Participant
 from ...schemas.club import ClubResponse
 from ...schemas.user import UserResponse
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
+from ...models.credit_rule import CreditRule
+from ...schemas.credit import CreditRuleResponse
 from ...services.signature_service import process_signature, save_logo
 from ...services.storage_service import storage_path_to_url, storage_url_to_path
 
@@ -106,6 +108,20 @@ async def get_club(
     if not club or not club.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found or inactive")
     return _club_response(club)
+
+
+# ═══ GET /clubs/{club_id}/credit-rules ═══════════════════════════════════════
+
+@router.get("/{club_id}/credit-rules", response_model=List[CreditRuleResponse])
+async def get_club_credit_rules(
+    club_id: PydanticObjectId,
+    _user: User = Depends(require_club_access),
+):
+    club = await Club.get(club_id)
+    if not club or not club.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+    rules = await CreditRule.find_all().to_list()
+    return [CreditRuleResponse(id=str(r.id), cert_type=r.cert_type, points=r.points, updated_at=r.updated_at, updated_by=str(r.updated_by) if r.updated_by else None) for r in rules]
 
 
 # ═══ GET /clubs/{club_id}/dashboard ══════════════════════════════════════════

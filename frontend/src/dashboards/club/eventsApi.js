@@ -313,3 +313,14 @@ export function useUploadReport(clubId, eventId) {
   })
 }
 
+// ── useClubCreditRules ──────────────────────────────────────────────────────
+export function useClubCreditRules(clubId) {
+  return useQuery({
+    queryKey: ['club-credit-rules', clubId],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/clubs/${clubId}/credit-rules`)
+      return data
+    },
+    enabled: !!clubId,
+  })
+}

@@ -61,6 +61,7 @@ class Event(Document):
     assets: EventAssets = Field(default_factory=EventAssets)
     mapping_confirmed: bool = False
     participant_count: int = 0
+    volunteers_required: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Guest flow fields have been moved to GuestSession model.

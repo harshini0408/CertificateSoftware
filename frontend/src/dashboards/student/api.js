@@ -204,8 +204,8 @@ export function useRegisterForEvent() {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: async (eventId) => {
-      const { data } = await axiosInstance.post(`/student/events/${eventId}/register`)
+    mutationFn: async ({ eventId, type = 'participant' }) => {
+      const { data } = await axiosInstance.post(`/student/events/${eventId}/register?type=${type}`)
       return data
     },
     onSuccess: (data) => {
