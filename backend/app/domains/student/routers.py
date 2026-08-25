@@ -585,7 +585,16 @@ async def list_upcoming_events(
     registrations = await EventRegistration.find(
         EventRegistration.student_email == current_user.email.lower(),
     ).to_list()
-    reg_map = {str(r.event_id): str(r.id) for r in registrations}
+    student_reg_map = {}
+    for r in registrations:
+        eid = str(r.event_id)
+        reg_type = getattr(r, "registration_type", "participant")
+        reg_status = getattr(r, "status", "accepted" if reg_type == "participant" else "pending")
+        student_reg_map[eid] = {
+            "id": str(r.id),
+            "type": reg_type,
+            "status": reg_status,
+        }
 
     # Count registrations per event
     all_regs = await EventRegistration.find().to_list()
@@ -593,14 +602,17 @@ async def list_upcoming_events(
     volunteer_counts = {}
     for r in all_regs:
         eid = str(r.event_id)
+        reg_type = getattr(r, "registration_type", "participant")
+        reg_status = getattr(r, "status", "accepted")
         reg_counts[eid] = reg_counts.get(eid, 0) + 1
-        if getattr(r, "registration_type", "participant") == "volunteer":
+        if reg_type == "volunteer" and reg_status != "rejected":
             volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
 
     results = []
     for e in events:
         eid = str(e.id)
         session = _normalize_session(e.event_time)
+        my_reg = student_reg_map.get(eid)
         results.append({
             "id": eid,
             "name": e.name,
@@ -613,10 +625,12 @@ async def list_upcoming_events(
             "venue": e.venue,
             "category": e.category,
             "poster_url": e.poster_url,
-            "is_registered": eid in reg_map,
-            "registration_id": reg_map.get(eid),
+            "is_registered": my_reg is not None,
+            "registration_id": my_reg["id"] if my_reg else None,
+            "registration_type": my_reg["type"] if my_reg else None,
+            "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
             "registered_count": reg_counts.get(eid, 0),
-            "volunteers_required": getattr(e, "volunteers_required", 0),
+            "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
             "volunteers_registered": volunteer_counts.get(eid, 0),
         })
     return results
@@ -664,12 +678,15 @@ async def register_for_event(
 
     # Volunteer capacity check
     if type == "volunteer":
+        if (event.volunteers_required or 0) <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Volunteering is not currently open for this event")
         volunteers_registered = await EventRegistration.find(
             EventRegistration.event_id == event_id,
-            EventRegistration.registration_type == "volunteer"
+            EventRegistration.registration_type == "volunteer",
+            {"$or": [{"status": "accepted"}, {"status": "pending"}]}
         ).count()
         if volunteers_registered >= (event.volunteers_required or 0):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Volunteer capacity reached for this event")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Maximum volunteers already registered for this event")
 
     # Create registration
     reg = EventRegistration(
@@ -682,6 +699,7 @@ async def register_for_event(
         event_date_str=event_date_str,
         session=session,
         registration_type=type,
+        status="pending" if type == "volunteer" else "accepted",
     )
     await reg.insert()
 
@@ -705,14 +723,16 @@ async def register_for_event(
             },
             source=ParticipantSource.REGISTRATION,
             verified=(type != "volunteer"),
+            status="pending" if type == "volunteer" else "accepted",
         )
         await p.insert()
 
     # Increment participant count
     await event.set({"participant_count": event.participant_count + 1})
 
+    msg = f"Volunteer request submitted for '{event.name}'. Awaiting club coordinator approval." if type == "volunteer" else f"Successfully registered for '{event.name}'"
     return {
-        "message": f"Successfully registered for '{event.name}'",
+        "message": msg,
         "registration_id": str(reg.id),
         "session": session,
     }

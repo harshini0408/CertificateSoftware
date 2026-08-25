@@ -76,3 +76,24 @@ class DashboardResponse(BaseModel):
 class DeptCertificateSendRequest(BaseModel):
     allocateCredits: bool = False
     manualPointsPerCert: Optional[int] = None
+
+
+class VolunteerStatusUpdate(BaseModel):
+    status: Literal["accepted", "rejected", "pending"]
+
+
+class VolunteerCountUpdate(BaseModel):
+    volunteers_required: int = Field(..., ge=0)
+
+
+class VolunteerRequestResponse(BaseModel):
+    id: str
+    participant_id: Optional[str] = None
+    registration_id: Optional[str] = None
+    student_name: str
+    student_email: str
+    registration_number: Optional[str] = None
+    department: Optional[str] = None
+    status: str = "pending"
+    verified: bool = False
+    registered_at: datetime

@@ -15,6 +15,7 @@ class EventRegistration(Document):
     event_date_str: str  # YYYY-MM-DD for same-day conflict validation
     session: str  # "FN" or "AN"
     registration_type: str = "participant"
+    status: str = "accepted"  # "accepted", "pending", "rejected"
     registered_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:

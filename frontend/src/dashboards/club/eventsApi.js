@@ -324,3 +324,69 @@ export function useClubCreditRules(clubId) {
     enabled: !!clubId,
   })
 }
+
+// ── Volunteer Requests Hooks ──────────────────────────────────────────────────
+export function useVolunteerRequests(clubId, eventId) {
+  return useQuery({
+    queryKey: ['events', clubId, eventId, 'volunteers'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/clubs/${clubId}/events/${eventId}/volunteers`)
+      return data
+    },
+    enabled: !!clubId && !!eventId,
+  })
+}
+
+export function useUpdateVolunteerStatus(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ itemId, status }) => {
+      const { data } = await axiosInstance.patch(
+        `/clubs/${clubId}/events/${eventId}/volunteers/${itemId}/status`,
+        { status },
+      )
+      return data
+    },
+    onSuccess: (_, { status }) => {
+      qc.invalidateQueries({ queryKey: ['events', clubId, eventId, 'volunteers'] })
+      qc.invalidateQueries({ queryKey: ['participants', clubId, eventId] })
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      addToast({
+        type: 'success',
+        message: `Volunteer request ${status === 'accepted' ? 'accepted' : 'rejected'} successfully.`,
+      })
+    },
+    onError: (err) => {
+      const msg = extractErrorMsg(err, 'Failed to update volunteer status.')
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useUpdateVolunteerCount(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (volunteers_required) => {
+      const { data } = await axiosInstance.patch(
+        `/clubs/${clubId}/events/${eventId}/volunteers-count`,
+        { volunteers_required: Number(volunteers_required) },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      qc.invalidateQueries({ queryKey: ['events', clubId, eventId, 'volunteers'] })
+      addToast({ type: 'success', message: 'Volunteer count updated successfully.' })
+    },
+    onError: (err) => {
+      const msg = extractErrorMsg(err, 'Failed to update volunteer count.')
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}

@@ -93,9 +93,12 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         # Role detection for template selection
         role_name = mapping_data["Role"] or "participant"
         normalized_role = _normalize_role_key(role_name)
+        candidate_roles = [normalized_role]
+        if normalized_role in {"volunteer", "student_volunteer"}:
+            candidate_roles = ["student_volunteer", "volunteer"]
+
         preset = await RoleTemplatePreset.find_one(
-            RoleTemplatePreset.role_name == normalized_role,
-            RoleTemplatePreset.is_active == True,
+            {"role_name": {"$in": candidate_roles}, "is_active": True}
         )
 
         if preset:
@@ -245,7 +248,8 @@ async def generate_certificates(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
 
     participants = await Participant.find(
-        Participant.event_id == event_id
+        Participant.event_id == event_id,
+        Participant.verified == True,
     ).to_list()
 
     existing_certs = await Certificate.find(Certificate.event_id == event_id).to_list()
@@ -283,7 +287,11 @@ async def generate_certificates(
 
         cert_type = p.cert_type or "participant"
         normalized_role = cert_type.lower().replace(" ", "_").replace("-", "_")
-        has_preset = normalized_role in preset_roles
+        candidate_roles = [normalized_role]
+        if normalized_role in {"volunteer", "student_volunteer"}:
+            candidate_roles = ["student_volunteer", "volunteer"]
+
+        has_preset = any(r in preset_roles for r in candidate_roles)
         has_manual = cert_type in fp_types or has_participant_fallback
         if not has_preset and not has_manual:
             skipped_no_template += 1

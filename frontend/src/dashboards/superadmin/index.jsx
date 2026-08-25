@@ -2105,7 +2105,8 @@ function UsersTab() {
         />
       ),
     },
-    { key: 'name', header: 'Name', sortable: true },
+    { key: 'name', header: 'Name', sortable: true, searchKey: true },
+    { key: 'email', header: 'Registered Email', sortable: true, searchKey: true, render: (v) => <span className="text-xs text-gray-600">{v || '—'}</span> },
     { key: 'username', header: 'Username', render: (v) => <span className="font-mono text-xs">{v}</span> },
     { key: 'role', header: 'Role', render: (v) => <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[v] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>{roleLabel[v] || v}</span> },
     { key: '_scope', header: 'Scope', searchKey: false, render: (_, row) => <span className="text-xs text-gray-500">{getScope(row)}</span> },

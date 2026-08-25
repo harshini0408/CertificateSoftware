@@ -183,9 +183,12 @@ async def generate_certificate_from_role_preset(
     from ..models.role_template_preset import RoleTemplatePreset
 
     normalized = _normalize_role_key(role_name or "participant")
+    candidate_roles = [normalized]
+    if normalized in {"volunteer", "student_volunteer"}:
+        candidate_roles = ["student_volunteer", "volunteer"]
+
     preset = await RoleTemplatePreset.find_one(
-        RoleTemplatePreset.role_name == normalized,
-        RoleTemplatePreset.is_active == True,
+        {"role_name": {"$in": candidate_roles}, "is_active": True}
     )
     if not preset:
         raise ValueError(
@@ -204,6 +207,7 @@ async def generate_certificate_from_role_preset(
         "second_place": "Second position",
         "third_place": "Third position",
         "student_volunteer": "volunteered",
+        "volunteer": "volunteered",
         "paper_presenter": "paper",
     }
     role_label = (preset.display_label or "").strip()

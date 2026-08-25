@@ -23,6 +23,7 @@ class Participant(Document):
     field_mapping: Dict[str, str] = Field(default_factory=dict)
     source: ParticipantSource = ParticipantSource.MANUAL
     verified: bool = True
+    status: Optional[str] = "accepted"  # "accepted", "pending", "rejected"
     registered_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:

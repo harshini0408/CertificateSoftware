@@ -92,6 +92,8 @@ async def _seed_credit_rules() -> None:
     targets = [
         ("Technical Talk", 2),
         ("Workshop", 3),
+        ("Student Volunteer", 2),
+        ("Volunteer", 2),
     ]
 
     for target_cert_type, target_points in targets:
@@ -204,6 +206,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
 
 # ── Routers ──────────────────────────────────────────────────────────────
 from .routers import auth, events, participants, templates, certificates, verify, image_templates
+from .routers.attendance import club_attendance_router, student_attendance_router
 from .routers.role_presets import router as role_presets_router
 from .domains.student.routers import router as student_router
 from .domains.tutor.routers import router as tutor_router
@@ -235,6 +238,8 @@ app.include_router(image_templates.router)
 app.include_router(guest_router)
 app.include_router(role_presets_router)
 app.include_router(student_affairs_router)
+app.include_router(club_attendance_router)
+app.include_router(student_attendance_router)
 
 # ── Static files (PNG templates, fonts, etc.) ────────────────────────────────
 from pathlib import Path

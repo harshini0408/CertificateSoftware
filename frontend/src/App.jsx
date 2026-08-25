@@ -171,6 +171,14 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/student/attendance/:eventId/:token"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.STUDENT]}>
+              <StudentDashboard />
+            </ProtectedRoute>
+          }
+        />
 
         {/* ── Fallback ───────────────────────────────────────────────────── */}
         <Route path="/" element={<Navigate to="/login" replace />} />

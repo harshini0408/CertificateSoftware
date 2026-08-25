@@ -242,4 +242,69 @@ export function useCancelEventRegistration() {
   })
 }
 
+/**
+ * POST /student/events/:eventId/validate-qr
+ * Validates a QR scan within 20 seconds.
+ * Returns { valid, event_id, token } — token used for the unique attendance URL.
+ */
+export function useValidateAttendanceQR() {
+  return useMutation({
+    mutationFn: async ({ eventId, qr_payload }) => {
+      const { data } = await axiosInstance.post(
+        `/student/events/${eventId}/validate-qr`,
+        { qr_payload },
+      )
+      return data // { valid, event_id, token }
+    },
+    // Error handling done in the component for richer inline UX
+  })
+}
 
+/**
+ * GET /student/events/:eventId/attendance/:token
+ * Fetches event + session info after a successful QR scan.
+ * No time limit — used on the unique attendance page.
+ */
+export function useAttendanceSession(eventId, token) {
+  return useQuery({
+    queryKey: ['student', 'attendance-session', eventId, token],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(
+        `/student/events/${eventId}/attendance/${token}`,
+      )
+      return data // { event_name, club_name, event_date, venue, student_name, student_email }
+    },
+    enabled: !!eventId && !!token,
+    retry: false,
+  })
+}
+
+/**
+ * POST /student/events/:eventId/attendance/:token/submit
+ * Final attendance + feedback submission.  No time limit.
+ */
+export function useSubmitAttendance() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ eventId, token, feedback }) => {
+      const { data } = await axiosInstance.post(
+        `/student/events/${eventId}/attendance/${token}/submit`,
+        { feedback: feedback || null },
+      )
+      return data // { success, message, event_name, marked_at }
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({ type: 'success', message: data?.message || 'Attendance marked!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to submit attendance.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// Legacy alias kept for any internal usage during refactor — can be removed after testing
+export { useSubmitAttendance as useMarkAttendance }

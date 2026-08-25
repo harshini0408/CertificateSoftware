@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import QRCode from 'qrcode'
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
 import StatCard from '../../components/StatCard'
@@ -25,6 +26,7 @@ import {
   useClubActiveMembers,
 } from './api'
 import { useCreateEvent, useDeleteEvent, useEvents } from './eventsApi'
+import { useGenerateAttendanceQR } from './attendanceApi'
 import { useAuthStore } from '../../store/authStore'
 import { useChangePassword } from '../auth/api'
 import axiosInstance from '../../utils/axiosInstance'
@@ -62,8 +64,60 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
   const { data: events, isLoading: eventsLoading } = useEvents(clubId)
   const createEvent = useCreateEvent(clubId)
   const deleteEvent = useDeleteEvent(clubId)
+  const generateQR = useGenerateAttendanceQR(clubId, null) // eventId set per-call
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+
+  // ── QR Modal state ───────────────────────────────────────────────────────
+  const [qrModal, setQrModal] = useState(null)
+  // qrModal shape: { eventId, eventName, payload, issuedAt, expiresIn, qrDataUrl, secondsLeft, expired }
+  const qrTimerRef = useRef(null)
+  const qrCanvasRef = useRef(null)
+
+  const openQRModal = useCallback(async (row) => {
+    try {
+      const { data } = await axiosInstance.post(
+        `/clubs/${clubId}/events/${row.id ?? row._id}/generate-qr`
+      )
+      const dataUrl = await QRCode.toDataURL(data.payload, {
+        width: 240,
+        margin: 2,
+        color: { dark: '#1E3A5F', light: '#FFFFFF' },
+      })
+      setQrModal({
+        eventId: row.id ?? row._id,
+        eventName: row.name,
+        payload: data.payload,
+        issuedAt: data.issued_at,
+        expiresIn: data.expires_in,
+        qrDataUrl: dataUrl,
+        secondsLeft: data.expires_in,
+        expired: false,
+      })
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Failed to generate QR.'
+      // Show inline error — toast store
+      console.error(msg)
+    }
+  }, [clubId])
+
+  // Count-down timer
+  useEffect(() => {
+    if (!qrModal) return undefined
+    if (qrModal.expired) return undefined
+    qrTimerRef.current = setInterval(() => {
+      setQrModal((prev) => {
+        if (!prev) return null
+        const next = prev.secondsLeft - 1
+        if (next <= 0) {
+          clearInterval(qrTimerRef.current)
+          return { ...prev, secondsLeft: 0, expired: true }
+        }
+        return { ...prev, secondsLeft: next }
+      })
+    }, 1000)
+    return () => clearInterval(qrTimerRef.current)
+  }, [qrModal?.eventId, qrModal?.issuedAt]) // restart when a new QR is generated
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -190,6 +244,18 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
         <button onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)} className="text-navy hover:bg-gray-100 p-1.5 rounded" title="Open">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
         </button>
+        {/* Generate QR — only for active events */}
+        {(row.status === 'active') && (
+          <button
+            onClick={() => openQRModal(row)}
+            className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded"
+            title="Generate Attendance QR"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+            </svg>
+          </button>
+        )}
         <button onClick={() => setDeleteTarget(row)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Delete">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>
@@ -417,6 +483,101 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
         onConfirm={handleDelete}
         isLoading={deleteEvent.isPending}
       />
+
+      {/* ── Attendance QR Modal ─────────────────────────────────────────── */}
+      {qrModal && createPortal(
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+          onClick={() => { clearInterval(qrTimerRef.current); setQrModal(null) }}
+        >
+          <div className="absolute inset-0 bg-navy/50 backdrop-blur-sm" aria-hidden="true" />
+          <div
+            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className={`px-6 py-4 flex items-center justify-between ${
+              qrModal.expired ? 'bg-gray-100' : 'bg-navy'
+            }`}>
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-wider ${
+                  qrModal.expired ? 'text-gray-500' : 'text-white/70'
+                }`}>Attendance QR</p>
+                <h3 className={`text-base font-bold ${
+                  qrModal.expired ? 'text-gray-700' : 'text-white'
+                } line-clamp-1`}>{qrModal.eventName}</h3>
+              </div>
+              <button
+                onClick={() => { clearInterval(qrTimerRef.current); setQrModal(null) }}
+                className={`text-xl font-bold ${
+                  qrModal.expired ? 'text-gray-400 hover:text-gray-600' : 'text-white/70 hover:text-white'
+                }`}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* QR image area */}
+            <div className="flex flex-col items-center py-6 px-6 gap-4">
+              <div className={`relative rounded-xl overflow-hidden border-4 ${
+                qrModal.expired ? 'border-gray-300 opacity-40 grayscale' : 'border-navy/20'
+              }`}>
+                <img
+                  src={qrModal.qrDataUrl}
+                  alt="Attendance QR Code"
+                  className="w-56 h-56 object-contain"
+                />
+                {qrModal.expired && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/80">
+                    <span className="text-2xl font-black text-gray-500 tracking-widest rotate-[-12deg] border-4 border-gray-400 rounded-lg px-3 py-1">
+                      EXPIRED
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Countdown / status badge */}
+              {qrModal.expired ? (
+                <div className="flex flex-col items-center gap-2 w-full">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-red-100 px-4 py-1.5 text-sm font-bold text-red-700">
+                    <span className="h-2 w-2 rounded-full bg-red-500" />
+                    QR Expired
+                  </span>
+                  <p className="text-xs text-gray-500 text-center">Generate a new QR for students to scan.</p>
+                  <button
+                    type="button"
+                    onClick={() => openQRModal({ id: qrModal.eventId, name: qrModal.eventName })}
+                    className="w-full btn-primary justify-center mt-1"
+                  >
+                    🔄 Generate New QR
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2 w-full">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-green-100 px-4 py-1.5 text-sm font-bold text-green-700">
+                    <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                    Active — {qrModal.secondsLeft}s remaining
+                  </span>
+                  {/* Progress bar */}
+                  <div className="w-full bg-gray-100 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full transition-all duration-1000 ${
+                        qrModal.secondsLeft > 10 ? 'bg-green-500' :
+                        qrModal.secondsLeft > 5  ? 'bg-amber-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${(qrModal.secondsLeft / qrModal.expiresIn) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 text-center">
+                    Show this QR to students. It expires automatically in {qrModal.secondsLeft} second{qrModal.secondsLeft !== 1 ? 's' : ''}.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
