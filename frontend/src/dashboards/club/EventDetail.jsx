@@ -84,6 +84,37 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [selectedReportFile, setSelectedReportFile] = useState(null)
   const [selectedPosterFile, setSelectedPosterFile] = useState(null)
 
+  // ── Edit Details state ──
+  const [isEditing, setIsEditing] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [editTime, setEditTime] = useState('')
+  const [editVenue, setEditVenue] = useState('')
+
+  const handleStartEdit = () => {
+    setEditName(event?.name || '')
+    setEditDate(event?.event_date ? String(event.event_date).split('T')[0] : '')
+    setEditTime(event?.event_time || '')
+    setEditVenue(event?.venue || '')
+    setIsEditing(true)
+  }
+
+  const handleSaveEdit = (e) => {
+    e.preventDefault()
+    if (!editName.trim()) return
+    updateEvent.mutate(
+      {
+        name: editName.trim(),
+        event_date: editDate ? `${editDate}T00:00:00` : undefined,
+        event_time: editTime.trim(),
+        venue: editVenue.trim(),
+      },
+      {
+        onSuccess: () => setIsEditing(false),
+      }
+    )
+  }
+
   const toAssetSrc = (url, hash) => {
     if (!url) return null
     const withVersion = hash ? `${url}${url.includes('?') ? '&' : '?'}v=${hash}` : url
@@ -122,6 +153,36 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
         <div className="flex items-center justify-between mb-4">
           <h2 className="section-title">Event Details</h2>
           <div className="flex items-center gap-2">
+            {(event?.status === 'draft' || event?.status === 'active') && !isEditing && (
+              <button
+                type="button"
+                onClick={handleStartEdit}
+                className="text-xs text-navy hover:underline font-semibold flex items-center gap-1 mr-1"
+                title="Edit Event Details"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                Edit Details
+              </button>
+            )}
+
+            {event?.status === 'active' && (
+              <button
+                type="button"
+                onClick={() => updateEvent.mutate({ registration_stopped: !event?.registration_stopped })}
+                disabled={updateEvent.isPending}
+                className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                  event?.registration_stopped
+                    ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'
+                    : 'bg-red-50 text-red-700 border-red-300 hover:bg-red-100'
+                }`}
+                title={event?.registration_stopped ? 'Resume student registrations' : 'Stop student registrations'}
+              >
+                {event?.registration_stopped ? '▶ Resume Registration' : '⏹ Stop Registration'}
+              </button>
+            )}
+
             {event?.is_published && (
               <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
                 Published Upcoming
@@ -145,32 +206,106 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
             </select>
           </div>
         </div>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {[
-            ['Name', event?.name],
-            ['Date', event?.event_date ? formatDateOnly(event.event_date) : '—'],
-            ['Time', event?.event_time || '—'],
-            ['Venue', event?.venue || '—'],
-            ['Category', event?.category || '—'],
-            ['Academic Year', event?.academic_year || '—'],
-            ['Participants', (event?.participant_count ?? 0).toLocaleString()],
-            ['Certificates Issued', (event?.cert_count ?? 0).toLocaleString()],
-          ].map(([label, value]) => (
-            <div key={label} className="flex flex-col gap-0.5">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                {label}
-              </dt>
-              <dd className="text-sm font-medium text-foreground">
-                {value}
-              </dd>
+
+        {isEditing ? (
+          <form onSubmit={handleSaveEdit} className="space-y-4 pt-2 border-t border-gray-100">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="form-label text-xs font-semibold">Event Name *</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                  className="form-input text-sm"
+                  placeholder="e.g. Workshop on AI"
+                />
+              </div>
+              <div>
+                <label className="form-label text-xs font-semibold">Event Date *</label>
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  required
+                  className="form-input text-sm"
+                />
+              </div>
+              <div>
+                <label className="form-label text-xs font-semibold">Event Time *</label>
+                <input
+                  type="text"
+                  value={editTime}
+                  onChange={(e) => setEditTime(e.target.value)}
+                  required
+                  className="form-input text-sm"
+                  placeholder="e.g. Morning (FN) | 10:00 AM"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="form-label text-xs font-semibold">Venue *</label>
+                <input
+                  type="text"
+                  value={editVenue}
+                  onChange={(e) => setEditVenue(e.target.value)}
+                  required
+                  className="form-input text-sm"
+                  placeholder="e.g. Lab 3 / Auditorium"
+                />
+              </div>
             </div>
-          ))}
-        </dl>
-        {event?.description && (
-          <div className="mt-4 pt-4 border-t border-gray-100">
-            <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">Description</dt>
-            <dd className="mt-1 text-sm text-gray-600">{event.description}</dd>
-          </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="btn-secondary text-xs py-1.5 px-3 h-auto"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={updateEvent.isPending || !editName.trim()}
+                className="btn-primary text-xs py-1.5 px-3 h-auto"
+              >
+                {updateEvent.isPending ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {[
+                ['Name', event?.name],
+                ['Date', event?.event_date ? formatDateOnly(event.event_date) : '—'],
+                ['Time', event?.event_time || '—'],
+                ['Venue', event?.venue || '—'],
+                ['Category', event?.category || '—'],
+                ['Academic Year', event?.academic_year || '—'],
+                ['Registration Status', event?.registration_stopped ? 'Stopped' : 'Open'],
+                ['Participants', (event?.participant_count ?? 0).toLocaleString()],
+                ['Certificates Issued', (event?.cert_count ?? 0).toLocaleString()],
+              ].map(([label, value]) => (
+                <div key={label} className="flex flex-col gap-0.5">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    {label}
+                  </dt>
+                  <dd className={`text-sm font-medium ${
+                    label === 'Registration Status'
+                      ? event?.registration_stopped ? 'text-red-600 font-semibold' : 'text-green-600 font-semibold'
+                      : 'text-foreground'
+                  }`}>
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {event?.description && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">Description</dt>
+                <dd className="mt-1 text-sm text-gray-600">{event.description}</dd>
+              </div>
+            )}
+          </>
         )}
       </section>
 
@@ -178,8 +313,13 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
       <section className="card p-6 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="section-title">Event Report</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Submit an event completion report to Student Affairs for review.</p>
+            <div className="flex items-center gap-2">
+              <h2 className="section-title">Event Report</h2>
+              <span className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 uppercase tracking-wide">
+                Mandatory *
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">Submit an event completion report to Student Affairs for review. Report submission is required before certificate generation.</p>
           </div>
           <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${currentReportStatus.cls}`}>
             {currentReportStatus.text}
@@ -751,7 +891,15 @@ function ManualEntryTab({ clubId, eventId, event }) {
   const addToast = useToastStore((s) => s.addToast)
   const qc = useQueryClient()
   const { data: creditRules } = useClubCreditRules(clubId)
-  const dynamicRoles = creditRules?.map(r => r.cert_type) || ['participant']
+  // UI dropdown is restricted to these 5 preset roles.
+  // Excel uploads may contain any cert_type and are processed as-is.
+  const UI_CERT_ROLES = [
+    'non_technical_participant',
+    'technical_participant',
+    'first_place',
+    'second_place',
+    'third_place',
+  ]
 
   const {
     register,
@@ -763,7 +911,7 @@ function ManualEntryTab({ clubId, eventId, event }) {
       name: '',
       email: '',
       registration_number: '',
-      cert_type: 'participant',
+      cert_type: 'non_technical_participant',
     },
   })
 
@@ -855,7 +1003,7 @@ function ManualEntryTab({ clubId, eventId, event }) {
             className="form-input"
             {...register('cert_type')}
           >
-            {dynamicRoles.map((ct) => (
+            {UI_CERT_ROLES.map((ct) => (
               <option key={ct} value={ct}>
                 {ct.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
               </option>
@@ -944,7 +1092,14 @@ function ParticipantListTab({ clubId, eventId }) {
   const updateType = useUpdateParticipantType(clubId, eventId)
   const verifyParticipant = useVerifyParticipant(clubId, eventId)
   const { data: creditRules } = useClubCreditRules(clubId)
-  const dynamicRoles = creditRules?.map(r => r.cert_type) || ['participant']
+  // UI dropdown is restricted to these 5 preset roles (Excel uploads are unrestricted).
+  const UI_CERT_ROLES = [
+    'non_technical_participant',
+    'technical_participant',
+    'first_place',
+    'second_place',
+    'third_place',
+  ]
   
   const columns = [
     { key: 'name', header: 'Name', searchKey: true, sortable: true, render: (_, row) => row.fields?.Name || '—' },
@@ -961,7 +1116,7 @@ function ParticipantListTab({ clubId, eventId }) {
           onChange={(e) => updateType.mutate({ participantId: row.id, cert_type: e.target.value })}
           disabled={updateType.isPending}
         >
-          {dynamicRoles.map((ct) => (
+          {UI_CERT_ROLES.map((ct) => (
             <option key={ct} value={ct}>
               {ct.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
             </option>

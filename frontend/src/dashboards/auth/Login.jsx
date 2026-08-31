@@ -22,7 +22,7 @@ function PsgLogo() {
       <div className="text-center">
         <p className="text-xl font-bold text-navy leading-tight">PSG iTech</p>
         <p className="text-xs font-medium text-gray-500 tracking-wide uppercase">
-          Certificate Platform
+          Activity Points Management Software
         </p>
       </div>
     </div>

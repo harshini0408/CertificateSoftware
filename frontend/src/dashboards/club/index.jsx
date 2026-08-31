@@ -28,6 +28,7 @@ import {
 import { useCreateEvent, useDeleteEvent, useEvents } from './eventsApi'
 import { useGenerateAttendanceQR } from './attendanceApi'
 import { useAuthStore } from '../../store/authStore'
+import { useToastStore } from '../../store/uiStore'
 import { useChangePassword } from '../auth/api'
 import axiosInstance from '../../utils/axiosInstance'
 import { BACKEND_URL } from '../../utils/axiosInstance'
@@ -50,6 +51,17 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+function isEventDay(iso) {
+  if (!iso) return false
+  const options = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }
+  const formatter = new Intl.DateTimeFormat('en-CA', options) // returns YYYY-MM-DD
+  const todayStr = formatter.format(new Date())
+  const eventDate = new Date(iso)
+  if (Number.isNaN(eventDate.getTime())) return false
+  const eventStr = formatter.format(eventDate)
+  return todayStr === eventStr
+}
+
 // ── Icon helpers ──────────────────────────────────────────────────────────────
 const Icon = {
   events: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
@@ -61,6 +73,8 @@ const Icon = {
 // ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab({ clubId, dashboard, isLoading }) {
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
   const { data: events, isLoading: eventsLoading } = useEvents(clubId)
   const createEvent = useCreateEvent(clubId)
   const deleteEvent = useDeleteEvent(clubId)
@@ -70,7 +84,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
   // ── QR Modal state ───────────────────────────────────────────────────────
   const [qrModal, setQrModal] = useState(null)
-  // qrModal shape: { eventId, eventName, payload, issuedAt, expiresIn, qrDataUrl, secondsLeft, expired }
+  // qrModal shape: { eventId, eventName, payload, issuedAt, expiresIn, qrDataUrl, secondsLeft, expired, generationsCount }
   const qrTimerRef = useRef(null)
   const qrCanvasRef = useRef(null)
 
@@ -92,14 +106,17 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
         expiresIn: data.expires_in,
         qrDataUrl: dataUrl,
         secondsLeft: data.expires_in,
+        generationsCount: data.qr_generations_count ?? 1,
         expired: false,
       })
+      // Refresh event list to update generations count live
+      qc.invalidateQueries({ queryKey: ['events', 'list', clubId] })
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Failed to generate QR.'
-      // Show inline error — toast store
+      addToast({ type: 'error', message: msg })
       console.error(msg)
     }
-  }, [clubId])
+  }, [clubId, qc, addToast])
 
   // Count-down timer
   useEffect(() => {
@@ -216,8 +233,21 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
   const club = dashboard?.club || {}
   const eventRows = Array.isArray(events) ? events : []
-  const totalEvents = eventRows.length
-  const totalCertificatesIssued = eventRows.reduce((sum, event) => sum + Number(event?.cert_count ?? 0), 0)
+  
+  const now = new Date()
+  const currentMonth = now.getMonth() // 0-indexed: 6 is July
+  const semStart = currentMonth >= 6 ? new Date(now.getFullYear(), 6, 1) : new Date(now.getFullYear(), 0, 1)
+  const semEnd = currentMonth >= 6 ? new Date(now.getFullYear(), 11, 31, 23, 59, 59) : new Date(now.getFullYear(), 5, 30, 23, 59, 59)
+
+  const completedEvents = eventRows.filter((e) => e?.status === 'completed' || (Number(e?.cert_count ?? 0) > 0 && e?.status !== 'draft'))
+  const eventsThisSemesterCount = dashboard?.stats?.events_this_semester ?? completedEvents.filter((e) => {
+    if (!e?.event_date) return false
+    const d = new Date(e.event_date)
+    return d >= semStart && d <= semEnd
+  }).length
+  const cumulativeEventsCount = dashboard?.stats?.cumulative_events ?? completedEvents.length
+  const totalCertificatesIssued = dashboard?.stats?.total_certificates_issued ?? eventRows.reduce((sum, event) => sum + Number(event?.cert_count ?? 0), 0)
+
   const recentEvents = [...eventRows].sort((a, b) => {
     const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0
     const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0
@@ -245,17 +275,42 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
         </button>
         {/* Generate QR — only for active events */}
-        {(row.status === 'active') && (
-          <button
-            onClick={() => openQRModal(row)}
-            className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded"
-            title="Generate Attendance QR"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-            </svg>
-          </button>
-        )}
+        {(row.status === 'active') && (() => {
+          const isToday = isEventDay(row.event_date)
+          const genCount = row.qr_generations_count ?? 0
+          const genLeft = Math.max(0, 3 - genCount)
+          const isDisabled = !isToday || genLeft <= 0
+
+          return (
+            <div className="flex flex-col items-center justify-center">
+              <button
+                onClick={() => openQRModal(row)}
+                disabled={isDisabled}
+                className={`p-1.5 rounded transition-colors ${
+                  isDisabled
+                    ? 'text-gray-400 bg-gray-100/70 cursor-not-allowed'
+                    : 'text-indigo-600 hover:bg-indigo-50'
+                }`}
+                title={
+                  !isToday
+                    ? 'QR generation is only available on the event day'
+                    : genLeft <= 0
+                    ? 'Maximum QR generation limit (3/3) reached'
+                    : 'Generate Attendance QR'
+                }
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                </svg>
+              </button>
+              <span className={`text-[10px] font-medium leading-tight whitespace-nowrap ${
+                isDisabled ? 'text-gray-400' : 'text-indigo-600'
+              }`}>
+                {genLeft}/3 available
+              </span>
+            </div>
+          )
+        })()}
         <button onClick={() => setDeleteTarget(row)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Delete">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>
@@ -280,8 +335,9 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
-        <StatCard label="Total Events" value={totalEvents} icon={Icon.events} accent="navy" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard label="Events Completed (This Semester)" value={eventsThisSemesterCount} icon={Icon.events} accent="navy" />
+        <StatCard label="Cumulative Events Completed" value={cumulativeEventsCount} icon={Icon.events} accent="navy" />
         <StatCard label="Certificates Issued" value={totalCertificatesIssued} icon={Icon.certs} accent="green" />
       </div>
 
@@ -543,14 +599,28 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                     <span className="h-2 w-2 rounded-full bg-red-500" />
                     QR Expired
                   </span>
-                  <p className="text-xs text-gray-500 text-center">Generate a new QR for students to scan.</p>
-                  <button
-                    type="button"
-                    onClick={() => openQRModal({ id: qrModal.eventId, name: qrModal.eventName })}
-                    className="w-full btn-primary justify-center mt-1"
-                  >
-                    🔄 Generate New QR
-                  </button>
+                  <p className="text-xs text-gray-500 text-center">
+                    {(qrModal.generationsCount ?? 1) >= 3
+                      ? 'Maximum QR generation limit (3/3) reached for this event.'
+                      : 'Generate a new QR for students to scan.'}
+                  </p>
+                  {(qrModal.generationsCount ?? 1) < 3 ? (
+                    <button
+                      type="button"
+                      onClick={() => openQRModal({ id: qrModal.eventId, name: qrModal.eventName })}
+                      className="w-full btn-primary justify-center mt-1"
+                    >
+                      🔄 Generate New QR ({3 - (qrModal.generationsCount ?? 1)} remaining)
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full btn-secondary justify-center mt-1 opacity-50 cursor-not-allowed text-xs py-2"
+                    >
+                      Generation Limit Reached (3/3)
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-2 w-full">

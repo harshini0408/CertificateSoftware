@@ -94,6 +94,8 @@ def _event_response(e: Event, cert_count: int = 0, volunteers_registered: int = 
         volunteers_required=getattr(e, "volunteers_required", 0) or 0,
         volunteers_registered=volunteers_registered,
         cert_count=cert_count,
+        qr_generations_count=getattr(e, "qr_generations_count", 0) or 0,
+        registration_stopped=getattr(e, "registration_stopped", False) or False,
         created_at=e.created_at,
         is_published=e.is_published,
         poster_url=e.poster_url,

@@ -10,17 +10,299 @@ from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
 from ...models.certificate import Certificate, CertStatus
 from ...models.club import Club
-from ...models.event import Event
+from ...models.department import Department
+from ...models.event import Event, EventStatus
 from ...models.dept_event import DeptEvent
 from ...models.dept_certificate import DeptCertificate
 from ...models.credit_rule import CreditRule
 from ...models.manual_credit_submission import ManualCreditSubmission
 from ...services.semester_service import get_current_semester
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
+from bson import ObjectId
 
 router = APIRouter(prefix="/principal", tags=["Principal"])
 
 _principal = Depends(require_role(UserRole.PRINCIPAL, UserRole.SUPER_ADMIN))
+
+
+@router.get("/stats")
+async def get_principal_stats(_user: User = _principal):
+    """Return KPI statistics for the Principal dashboard."""
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    if now.month == 12:
+        month_end = datetime(now.year + 1, 1, 1)
+    else:
+        month_end = datetime(now.year, now.month + 1, 1)
+
+    clubs = await Club.find(Club.is_active == True).to_list()
+    depts = await Department.find(Department.is_active == True).to_list()
+    dept_names = set(d.name for d in depts)
+    all_dept_events = await DeptEvent.find().to_list()
+    for de in all_dept_events:
+        if de.department:
+            dept_names.add(de.department)
+
+    all_completed_club_events = await Event.find({"status": EventStatus.COMPLETED.value}).to_list()
+
+    # Calculate this month's participants across club events and department events
+    month_club_participants = sum(
+        e.participant_count for e in all_completed_club_events
+        if e.event_date and month_start <= e.event_date < month_end
+    )
+    month_dept_participants = sum(
+        e.participant_count for e in all_dept_events
+        if e.event_date and month_start <= e.event_date < month_end
+    )
+
+    return {
+        "total_clubs": len(clubs),
+        "total_departments": len(dept_names),
+        "club_events_count": len(all_completed_club_events),
+        "dept_events_count": len(all_dept_events),
+        "this_month_participants": month_club_participants + month_dept_participants,
+    }
+
+
+@router.get("/rankings")
+async def get_principal_rankings(
+    limit: int = Query(5, ge=1, le=20),
+    _user: User = _principal,
+):
+    """Return top clubs and top departments based on cumulative participants."""
+    clubs = await Club.find(Club.is_active == True).to_list()
+    club_name_by_id = {str(c.id): c.name for c in clubs}
+    completed_club_events = await Event.find({"status": EventStatus.COMPLETED.value}).to_list()
+
+    # Club stats
+    club_stats: dict[str, dict] = {}
+    for c in clubs:
+        cid = str(c.id)
+        club_stats[cid] = {
+            "club_id": cid,
+            "club_name": c.name,
+            "event_count": 0,
+            "total_participants": 0,
+        }
+
+    for e in completed_club_events:
+        cid = str(e.club_id)
+        if cid not in club_stats:
+            club_stats[cid] = {
+                "club_id": cid,
+                "club_name": club_name_by_id.get(cid, "Unknown"),
+                "event_count": 0,
+                "total_participants": 0,
+            }
+        club_stats[cid]["event_count"] += 1
+        club_stats[cid]["total_participants"] += (e.participant_count or 0)
+
+    top_clubs = sorted(
+        club_stats.values(),
+        key=lambda x: (x["total_participants"], x["event_count"]),
+        reverse=True,
+    )[:limit]
+
+    # Department stats
+    dept_stats: dict[str, dict] = {}
+    depts = await Department.find(Department.is_active == True).to_list()
+    for d in depts:
+        dept_stats[d.name] = {
+            "department": d.name,
+            "event_count": 0,
+            "total_participants": 0,
+            "total_certs": 0,
+        }
+
+    dept_events = await DeptEvent.find().to_list()
+    for de in dept_events:
+        dept = de.department or "Unknown"
+        if dept not in dept_stats:
+            dept_stats[dept] = {
+                "department": dept,
+                "event_count": 0,
+                "total_participants": 0,
+                "total_certs": 0,
+            }
+        dept_stats[dept]["event_count"] += 1
+        dept_stats[dept]["total_participants"] += (de.participant_count or 0)
+        dept_stats[dept]["total_certs"] += (de.cert_count or 0)
+
+    top_departments = sorted(
+        dept_stats.values(),
+        key=lambda x: (x["total_participants"], x["event_count"]),
+        reverse=True,
+    )[:limit]
+
+    return {
+        "top_clubs": top_clubs,
+        "top_departments": top_departments,
+    }
+
+
+@router.get("/clubs")
+async def list_principal_clubs(_user: User = _principal):
+    """List all clubs with number of events this semester and cumulative participants."""
+    now = datetime.utcnow()
+    # Current semester window (ODD=Jul-Dec, EVEN=Jan-Jun)
+    if now.month >= 7:
+        sem_start = datetime(now.year, 7, 1)
+        sem_end = datetime(now.year, 12, 31, 23, 59, 59)
+    else:
+        sem_start = datetime(now.year, 1, 1)
+        sem_end = datetime(now.year, 6, 30, 23, 59, 59)
+
+    clubs = await Club.find(Club.is_active == True).to_list()
+    all_completed = await Event.find({"status": EventStatus.COMPLETED.value}).to_list()
+
+    results = []
+    for club in clubs:
+        cid = club.id
+        club_events = [e for e in all_completed if e.club_id == cid]
+        sem_events = [
+            e for e in club_events
+            if e.event_date and sem_start <= e.event_date <= sem_end
+        ]
+        cum_participants = sum((e.participant_count or 0) for e in club_events)
+
+        results.append({
+            "club_id": str(cid),
+            "club_name": club.name,
+            "slug": club.slug,
+            "events_this_semester": len(sem_events),
+            "cumulative_participants": cum_participants,
+            "total_completed_events": len(club_events),
+        })
+
+    results.sort(key=lambda x: (x["cumulative_participants"], x["events_this_semester"]), reverse=True)
+    return results
+
+
+@router.get("/clubs/{club_id}/events")
+async def list_principal_club_events(club_id: PydanticObjectId, _user: User = _principal):
+    """List completed events for a specific club with detailed info."""
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    events = await Event.find({
+        "club_id": ObjectId(str(club_id)),
+        "status": EventStatus.COMPLETED.value,
+    }).sort(-Event.event_date).to_list()
+
+    results = []
+    for e in events:
+        results.append({
+            "id": str(e.id),
+            "name": e.name,
+            "event_date": e.event_date.isoformat() if e.event_date else None,
+            "event_time": e.event_time or "—",
+            "venue": e.venue or "—",
+            "category": e.category or "—",
+            "participant_count": e.participant_count or 0,
+            "report_status": e.report_status or "not_submitted",
+            "report_url": e.report_url,
+            "report_filename": e.report_filename,
+            "description": e.description,
+        })
+
+    return {
+        "club_id": str(club.id),
+        "club_name": club.name,
+        "events": results,
+    }
+
+
+@router.get("/departments")
+async def list_principal_departments(_user: User = _principal):
+    """List all departments with ranking, total events conducted, and cumulative participants."""
+    depts = await Department.find(Department.is_active == True).to_list()
+    dept_names = set(d.name for d in depts)
+    all_dept_events = await DeptEvent.find().to_list()
+    for de in all_dept_events:
+        if de.department:
+            dept_names.add(de.department)
+
+    dept_map: dict[str, dict] = {
+        name: {
+            "department": name,
+            "total_events": 0,
+            "cumulative_participants": 0,
+            "total_certs": 0,
+        }
+        for name in dept_names
+    }
+
+    for de in all_dept_events:
+        dept = de.department or "Unknown"
+        if dept not in dept_map:
+            dept_map[dept] = {
+                "department": dept,
+                "total_events": 0,
+                "cumulative_participants": 0,
+                "total_certs": 0,
+            }
+        dept_map[dept]["total_events"] += 1
+        dept_map[dept]["cumulative_participants"] += (de.participant_count or 0)
+        dept_map[dept]["total_certs"] += (de.cert_count or 0)
+
+    sorted_depts = sorted(
+        dept_map.values(),
+        key=lambda x: (x["cumulative_participants"], x["total_events"]),
+        reverse=True,
+    )
+
+    for idx, item in enumerate(sorted_depts):
+        item["rank"] = idx + 1
+
+    return sorted_depts
+
+
+@router.get("/departments/{department_name}/events")
+async def list_principal_dept_events(department_name: str, _user: User = _principal):
+    """List all events conducted by a specific department with participants details."""
+    dept_events = await DeptEvent.find({
+        "department": {"$regex": f"^{re.escape(department_name)}$", "$options": "i"}
+    }).sort(-DeptEvent.event_date).to_list()
+
+    results = []
+    for de in dept_events:
+        # Extract student rows from excel_rows
+        students = []
+        for idx, row in enumerate(de.excel_rows or []):
+            email = (row.get("Email") or row.get("email") or row.get("Mail") or "").strip().lower()
+            name = row.get("Name") or row.get("name") or row.get("Student Name") or f"Student {idx+1}"
+            reg_no = row.get("Registration Number") or row.get("registration_number") or row.get("Reg No") or row.get("Roll No") or "—"
+            role = row.get("Role") or row.get("role") or row.get("Contribution") or row.get("contribution") or "Participant"
+            class_name = row.get("Class") or row.get("class") or row.get("Section") or row.get("section") or "—"
+
+            students.append({
+                "id": str(idx),
+                "name": name,
+                "email": email or "—",
+                "registration_number": reg_no,
+                "class_name": class_name,
+                "role": role,
+            })
+
+        results.append({
+            "id": str(de.id),
+            "name": de.name,
+            "department": de.department,
+            "event_date": de.event_date.isoformat() if de.event_date else None,
+            "semester": de.semester,
+            "status": de.status.value,
+            "participant_count": de.participant_count or 0,
+            "cert_count": de.cert_count or 0,
+            "excel_file_name": de.excel_file_name,
+            "students": students,
+        })
+
+    return {
+        "department": department_name,
+        "events": results,
+    }
+
 
 
 def _student_summary(user: User, total_credits: int, clubs: list | None = None, office_bearer: str | None = None) -> dict:

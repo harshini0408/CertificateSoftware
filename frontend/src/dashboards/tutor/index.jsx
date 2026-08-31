@@ -18,6 +18,7 @@ import {
   useTutorStudentDetail,
   useTutorStudents,
   useTutorVerifyCreditPoint,
+  useTutorUpdateStudentRegNo,
   downloadTutorAllAssignedCertificates,
   downloadTutorStudentCertificates,
 } from './api'
@@ -87,6 +88,100 @@ function renderCreditAgainstTarget(points) {
   )
 }
 
+function EditRegNoModal({ student, onClose }) {
+  const updateRegNo = useTutorUpdateStudentRegNo()
+  const [regNo, setRegNo] = useState(student?.registration_number || '')
+  const [error, setError] = useState('')
+
+  const editsRemaining = student?.edits_remaining !== undefined
+    ? student.edits_remaining
+    : Math.max(0, 2 - (student?.tutor_reg_no_change_count || 0))
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const clean = regNo.trim()
+    if (!clean) {
+      setError('Please enter a 12-digit registration number.')
+      return
+    }
+    if (!/^\d{12}$/.test(clean)) {
+      setError('Registration number must be exactly 12 numeric digits (e.g. 715522104001).')
+      return
+    }
+    setError('')
+    updateRegNo.mutate(
+      {
+        studentEmail: student.student_email,
+        registration_number: clean,
+      },
+      {
+        onSuccess: () => {
+          onClose()
+        },
+      }
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-gray-100 pb-3">
+          <div>
+            <h3 className="text-base font-bold text-navy">Edit Registration Number</h3>
+            <p className="text-xs text-gray-500 mt-0.5">{student.student_name} ({student.student_email})</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
+        </div>
+
+        <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800 space-y-1">
+          <p className="font-semibold">Tutor Edit Policy:</p>
+          <p>
+            You can change this student's register number a maximum of <strong>2 times</strong>.
+          </p>
+          <p className="font-medium text-blue-900">
+            Edits remaining: <span className="font-bold underline">{editsRemaining} of 2</span>
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="form-label" htmlFor="tutor-reg-input">
+              Registration Number (12 Digits) *
+            </label>
+            <input
+              id="tutor-reg-input"
+              type="text"
+              maxLength={12}
+              value={regNo}
+              onChange={(e) => {
+                setRegNo(e.target.value.replace(/\D/g, ''))
+                setError('')
+              }}
+              placeholder="e.g. 715522104001"
+              className={`form-input font-mono text-sm ${error ? 'border-red-500' : ''}`}
+              autoFocus
+            />
+            {error && <p className="form-error mt-1">{error}</p>}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <button type="button" onClick={onClose} className="btn-secondary text-xs">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={updateRegNo.isPending || editsRemaining <= 0 || !regNo || regNo.length !== 12}
+              className="btn-primary text-xs"
+            >
+              {updateRegNo.isPending ? 'Saving…' : 'Save Register Number'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 function DetailModal({ email, onClose }) {
   const { data, isLoading } = useTutorStudentDetail(email, !!email)
   const semesterTotals = data?.semester_totals || []
@@ -113,6 +208,8 @@ function DetailModal({ email, onClose }) {
     (item) => (item?.semester || 'Unknown') === selectedSemester,
   )?.total_credits ?? 0
 
+  const [editingStudent, setEditingStudent] = useState(null)
+
   if (!email) return null
 
   return (
@@ -132,10 +229,31 @@ function DetailModal({ email, onClose }) {
           <div className="space-y-4">
             <div className="rounded-lg border border-gray-200 p-3 text-sm">
               <div><span className="text-gray-500">Name:</span> <span className="font-semibold">{data?.student_name || '—'}</span></div>
-              <div><span className="text-gray-500">Reg No:</span> <span className="font-semibold">{data?.registration_number || '—'}</span></div>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">Reg No:</span>
+                <span className="font-mono font-semibold">{data?.registration_number || '—'}</span>
+                {data?.can_tutor_edit_reg_no ? (
+                  <button
+                    onClick={() => setEditingStudent({
+                      student_name: data.student_name,
+                      student_email: data.student_email,
+                      registration_number: data.registration_number,
+                      edits_remaining: data.edits_remaining,
+                      tutor_reg_no_change_count: data.tutor_reg_no_change_count,
+                    })}
+                    className="ml-1 inline-flex items-center gap-1 text-xs text-navy hover:underline font-medium"
+                    title={`Edit register number (${data?.edits_remaining}/2 edits left)`}
+                  >
+                    ✏️ Edit ({data?.edits_remaining}/2 left)
+                  </button>
+                ) : (
+                  <span className="ml-1 text-[11px] text-gray-400 italic">(Max 2 edits reached)</span>
+                )}
+              </div>
               <div><span className="text-gray-500">Email:</span> <span className="font-semibold">{data?.student_email || '—'}</span></div>
               <div><span className="text-gray-500">Current Semester Credits:</span> {renderCreditAgainstTarget(data?.total_credits)}</div>
             </div>
+            {editingStudent && <EditRegNoModal student={editingStudent} onClose={() => setEditingStudent(null)} />}
             <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-foreground">Semester Totals</h3>
@@ -307,6 +425,7 @@ export default function TutorDashboard() {
   const { data: creditRules, isLoading: rulesLoading } = useTutorCreditRules()
   const manualCertMutation = useTutorManualCertificate()
   const [selectedStudentEmail, setSelectedStudentEmail] = useState(null)
+  const [editingStudent, setEditingStudent] = useState(null)
   const [manualEntry, setManualEntry] = useState({ student_email: '', cert_type: '', cert_number: '' })
   const [downloadingStudentEmail, setDownloadingStudentEmail] = useState(null)
   const [isDownloadingAllAssigned, setIsDownloadingAllAssigned] = useState(false)
@@ -535,7 +654,39 @@ export default function TutorDashboard() {
                       </button>
                     ),
                   },
-                  { key: 'registration_number', header: 'Reg Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
+                  {
+                    key: 'registration_number',
+                    header: 'Reg Number',
+                    render: (v, row) => {
+                      const editsRem = row.edits_remaining !== undefined
+                        ? row.edits_remaining
+                        : Math.max(0, 2 - (row.tutor_reg_no_change_count || 0))
+                      const canEdit = editsRem > 0
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs font-semibold">{v || '—'}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setEditingStudent(row)
+                            }}
+                            disabled={!canEdit}
+                            className={`p-1 rounded transition-colors ${
+                              canEdit
+                                ? 'text-navy hover:bg-navy/10'
+                                : 'text-gray-300 cursor-not-allowed opacity-40'
+                            }`}
+                            title={canEdit ? `Edit register number (${editsRem}/2 edits left)` : 'Maximum 2 edits limit reached for this student'}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                        </div>
+                      )
+                    },
+                  },
                   { key: 'student_email', header: 'Email', searchKey: true },
                   { key: 'total_credits', header: 'Credit Points', align: 'right', render: (v) => renderCreditAgainstTarget(v) },
                   {
@@ -613,6 +764,7 @@ export default function TutorDashboard() {
       </div>
 
       <DetailModal email={selectedStudentEmail} onClose={() => setSelectedStudentEmail(null)} />
+      {editingStudent && <EditRegNoModal student={editingStudent} onClose={() => setEditingStudent(null)} />}
     </div>
   )
 }

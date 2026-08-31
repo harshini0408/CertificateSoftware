@@ -16,7 +16,7 @@ import json
 import time
 import uuid
 import threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from beanie import PydanticObjectId
@@ -34,8 +34,8 @@ from ..models.attendance_session import AttendanceSession
 _NONCE_LOCK = threading.Lock()
 _ACTIVE_NONCES: dict[str, float] = {}
 
-QR_VALIDITY_SECONDS = 20          # Must-scan-within window is exactly 20 seconds
-NONCE_TTL_SECONDS   = 25          # Hard backend clean limit
+QR_VALIDITY_SECONDS = 45          # Must-scan-within window is 45 seconds
+NONCE_TTL_SECONDS   = 50          # Hard backend clean limit
 
 
 def _cleanup_expired_nonces() -> None:
@@ -64,6 +64,7 @@ class GenerateQRResponse(BaseModel):
     payload: str
     issued_at: float
     expires_in: int
+    qr_generations_count: int = 1
 
 
 class ValidateQRRequest(BaseModel):
@@ -151,6 +152,29 @@ async def generate_attendance_qr(
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found.")
 
+    # 1. Event day validation (Asia/Kolkata timezone: UTC+5:30)
+    ist_offset = timedelta(hours=5, minutes=30)
+    now_ist = (datetime.now(timezone.utc) + ist_offset).date()
+    if event.event_date:
+        event_dt = event.event_date
+        event_ist = (event_dt.replace(tzinfo=timezone.utc) + ist_offset).date() if event_dt.tzinfo is None else (event_dt + ist_offset).date()
+        if now_ist != event_ist:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "QR code generation is only allowed on the event day."
+            )
+
+    # 2. Max 3 generations limit
+    current_count = getattr(event, "qr_generations_count", 0) or 0
+    if current_count >= 3:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Maximum QR code generation limit (3 times) reached for this event."
+        )
+
+    new_count = current_count + 1
+    await event.set({"qr_generations_count": new_count})
+
     nonce = str(uuid.uuid4())
     issued_at = time.time()
 
@@ -167,6 +191,7 @@ async def generate_attendance_qr(
         payload=json.dumps(payload_dict),
         issued_at=issued_at,
         expires_in=QR_VALIDITY_SECONDS,
+        qr_generations_count=new_count,
     )
 
 

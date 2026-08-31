@@ -1,6 +1,8 @@
-# Certificate Software Docker Deployment
+# PSG iTech Activity Points Management Software — Deployment & Overview
 
-This repository is now Dockerized for production with:
+Official self-hosted Activity Points Management and Certificate Generation Platform for PSG Institute of Technology and Applied Research.
+
+This repository is Dockerized for production with:
 - React + Vite frontend container
 - FastAPI backend container
 - MongoDB container with persistent volume
@@ -9,6 +11,14 @@ This repository is now Dockerized for production with:
 
 The app is prepared for deployment under a subpath:
 `/project-name`
+
+## Key Capabilities & Recent Features
+- **Activity Points Management**: Track, calculate, and roll over student activity credits semester by semester.
+- **Club Dashboard**: Mandatory event completion report submission before certificates can be issued; live semester and cumulative completed event counts.
+- **Student Dashboard**: 1-time registration number update for students admitted with temporary IDs (e.g., `T24Z108` → 12-digit permanent ID); credit breakdown, event registration, and certificate verification submissions.
+- **Tutor Dashboard**: Class credit monitoring, external certificate verification, and mapped student registration number editing (strictly up to 2 times).
+- **Semester Reset / Roll-over**: Superadmin credit reset that sets the new academic semester, resets current semester totals to zero, and archives all past semester credits and certificates.
+- **Multi-Role RBAC**: Super Admin, Principal, HOD, Student Affairs, Club Coordinator, Dept Coordinator, Tutor, Student, and Guest.
 
 ## 1. Local Development (Without Docker)
 

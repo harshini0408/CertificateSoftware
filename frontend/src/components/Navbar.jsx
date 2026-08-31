@@ -280,7 +280,7 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
             <img src={logoImg} alt="Logo" className="h-8 w-8 object-contain" />
             <span className="hidden sm:block text-sm font-semibold text-navy leading-tight text-left">
               PSG iTech<br />
-              <span className="font-normal text-xs text-gray-500">Certificate Platform</span>
+              <span className="font-normal text-xs text-gray-500">Activity Points Management Software</span>
             </span>
           </button>
         ) : (
@@ -288,7 +288,7 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
             <img src={logoImg} alt="Logo" className="h-8 w-8 object-contain" />
             <span className="hidden sm:block text-sm font-semibold text-navy leading-tight">
               PSG iTech<br />
-              <span className="font-normal text-xs text-gray-500">Certificate Platform</span>
+              <span className="font-normal text-xs text-gray-500">Activity Points Management Software</span>
             </span>
           </div>
         )}

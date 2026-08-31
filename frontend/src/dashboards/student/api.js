@@ -306,5 +306,32 @@ export function useSubmitAttendance() {
   })
 }
 
+/**
+ * POST /students/me/update-registration-number
+ * Update temporary register number to 12-digit number (1 time only).
+ */
+export function useUpdateStudentRegNo() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (registration_number) => {
+      const { data } = await axiosInstance.post('/students/me/update-registration-number', {
+        registration_number,
+      })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'me', 'profile'] })
+      qc.invalidateQueries({ queryKey: creditKeys.mine() })
+      addToast({ type: 'success', message: data?.message || 'Registration number updated successfully!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to update registration number.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
 // Legacy alias kept for any internal usage during refactor — can be removed after testing
 export { useSubmitAttendance as useMarkAttendance }

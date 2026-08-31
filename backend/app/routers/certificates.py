@@ -247,6 +247,12 @@ async def generate_certificates(
     if not club:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
 
+    if not event.report_url or event.report_status in (None, "not_submitted"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Event report submission is mandatory before certificates can be generated.",
+        )
+
     participants = await Participant.find(
         Participant.event_id == event_id,
         Participant.verified == True,

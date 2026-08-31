@@ -101,22 +101,23 @@ export default function Footer() {
           }
         }
 
-                .footer-bottom-only {
-                    min-height: 52px;
+        .footer-bottom-only {
+          min-height: 48px;
           display: flex;
           align-items: center;
           justify-content: center;
         }
       `}</style>
 
-                <div className="container">
-                <div className="footer-bottom-only d-flex flex-column align-items-center text-center small">
-                    <span className="text-muted">© {year}. All rights reserved. </span>
+                <div className="container mx-auto px-4">
+                  <div className="footer-bottom-only flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-xs text-gray-500">
+                    <span>© {year}. 2026 PSG Institute of Technology and Applied Research. All rights reserved.</span>
+                    <span className="hidden sm:inline text-gray-300 font-light">•</span>
 
                     <button
                         ref={textRef}
                         type="button"
-                        className={`mt-1 sdc-hover-zone ${isActive ? 'active' : ''}`}
+                        className={`sdc-hover-zone ${isActive ? 'active' : ''}`}
                         onPointerEnter={() => !isTouch.current && activate()}
                         onPointerLeave={() => !isTouch.current && deactivate()}
                         onPointerMove={handleMagnetMove}
@@ -133,24 +134,25 @@ export default function Footer() {
                             navigate('/authors')
                         }}
                         style={{
-                            fontSize: '0.82rem',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.08em',
-                            fontWeight: 700,
+                            fontSize: '0.8rem',
+                            letterSpacing: '0.04em',
+                            fontWeight: 600,
                             position: 'relative',
                             background: 'transparent',
                             border: 'none',
-                            color: 'inherit',
-                            padding: 0,
+                            color: '#1E3A5F',
+                            padding: '2px 8px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
                         }}
+                        title="Meet the team behind the software"
                     >
-                        Created by Team SDC
-                        <span className="cta-arrow"> </span>
-
-                        <span className="cta-hint">{isTouch.current ? ' ' : ' '}</span>
+                        <span>Meet the Minds Behind the Software</span>
+                        <span className="text-navy/70 text-xs transition-transform group-hover:translate-x-0.5">→</span>
 
                         {isActive && (
-                            <svg viewBox="0 0 200 40" width="220" height="52">
+                            <svg viewBox="0 0 320 40" width="330" height="46">
                                 <defs>
                                     <filter id="roughen">
                                         <feTurbulence type="fractalNoise" baseFrequency="0.6" numOctaves="1" />
@@ -160,18 +162,18 @@ export default function Footer() {
 
                                 <path
                                     d="
-            M 10 20
-            C 20 6, 180 6, 190 20
-            C 198 32, 180 38, 100 38
-            C 20 38, 2 32, 10 20
-            Z
-          "
+                                      M 10 20
+                                      C 20 5, 300 5, 310 20
+                                      C 318 34, 300 38, 160 38
+                                      C 20 38, 2 34, 10 20
+                                      Z
+                                    "
                                     className="sdc-outline"
                                 />
                             </svg>
                         )}
                     </button>
-                </div>
+                  </div>
                 </div>
             </footer>
         </>

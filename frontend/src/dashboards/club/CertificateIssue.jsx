@@ -144,7 +144,8 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
   // Preflight checks (derived from event prop or certs meta)
   const hasParticipants = (certs?.length ?? 0) > 0 || (event?.participant_count ?? 0) > 0
   const hasAssets       = !!(event?.assets?.logo_url)
-  const allReady        = hasParticipants && hasAssets
+  const hasReport       = !!(event?.report_url) && event?.report_status !== 'not_submitted' && event?.report_status !== 'rejected'
+  const allReady        = hasParticipants && hasAssets && hasReport
 
   const pendingCount    = (certs ?? []).filter((c) => c.status === 'pending').length
   const failedCount     = (certs ?? []).filter((c) => c.status === 'failed').length
@@ -304,6 +305,7 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
             <div className="space-y-2">
               <PreflightItem ok={hasParticipants} label="Participants imported" />
               <PreflightItem ok={hasAssets}       label="Logo & signature uploaded" />
+              <PreflightItem ok={hasReport}       label="Event report submitted (Mandatory)" />
             </div>
           </div>
 

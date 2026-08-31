@@ -19,6 +19,7 @@ from ...models.participant import Participant
 from ...models.certificate import Certificate, CertStatus
 from ...models.student_credit import StudentCredit
 from ...models.credit_rule import CreditRule
+from ...models.event_registration import EventRegistration
 
 router = APIRouter(prefix="/affairs", tags=["Student Affairs"])
 
@@ -132,8 +133,8 @@ async def list_club_events(
     report_status: Optional[str] = None,
     _user: User = _affairs,
 ):
-    """List club events with optional filters."""
-    query: dict = {}
+    """List completed club events only (conducted events) with optional filters."""
+    query: dict = {"status": EventStatus.COMPLETED.value}
 
     if start_date:
         query.setdefault("event_date", {})["$gte"] = datetime.fromisoformat(start_date)
@@ -156,6 +157,7 @@ async def list_club_events(
             "$or": [{"event_id": ObjectId(str(e.id))}, {"event_id": str(e.id)}],
         }).count()
 
+        cert_generated = cert_count > 0
         activity_points = await _count_activity_points_for_event(e.id)
 
         results.append({
@@ -171,6 +173,7 @@ async def list_club_events(
             "status": e.status.value,
             "participant_count": e.participant_count,
             "cert_count": cert_count,
+            "cert_generated": cert_generated,
             "activity_points": activity_points,
             "is_published": e.is_published,
             "poster_url": e.poster_url,
@@ -513,11 +516,21 @@ async def list_upcoming_events(
     category: Optional[str] = None,
     _user: User = _affairs,
 ):
-    """List upcoming published club events (next 7 days and beyond)."""
+    """List active/closed club events (visible in upcoming feed — not draft or completed)."""
     now = datetime.utcnow()
+    today_start = datetime(now.year, now.month, now.day)
+
+    # Auto-complete past active/closed events
+    past_active = await Event.find({
+        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "event_date": {"$lt": today_start},
+    }).to_list()
+    for pe in past_active:
+        await pe.set({"status": EventStatus.COMPLETED.value})
+
     query: dict = {
-        "is_published": True,
-        "event_date": {"$gte": now},
+        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "event_date": {"$gte": today_start},
     }
     if club_id:
         query["club_id"] = ObjectId(club_id)
@@ -529,6 +542,13 @@ async def list_upcoming_events(
 
     results = []
     for e in events:
+        # Count registrations
+        total_reg = await EventRegistration.find({"event_id": e.id}).count()
+        vol_reg = await EventRegistration.find({
+            "event_id": e.id,
+            "registration_type": "volunteer",
+            "status": {"$ne": "rejected"},
+        }).count()
         results.append({
             "id": str(e.id),
             "name": e.name,
@@ -541,5 +561,157 @@ async def list_upcoming_events(
             "category": e.category,
             "poster_url": e.poster_url,
             "status": e.status.value,
+            "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
+            "registered_count": total_reg,
+            "volunteers_registered": vol_reg,
         })
     return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8. Upcoming Event Registrations Detail
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/upcoming-events/{event_id}/registrations")
+async def get_upcoming_event_registrations(
+    event_id: PydanticObjectId,
+    _user: User = _affairs,
+):
+    """Return participant and volunteer registrations for an upcoming event."""
+    event = await Event.get(event_id)
+    if not event:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    regs = await EventRegistration.find({"event_id": event_id}).to_list()
+
+    participants = []
+    volunteers = []
+    for r in regs:
+        entry = {
+            "id": str(r.id),
+            "student_name": r.student_name,
+            "student_email": r.student_email,
+            "registration_number": r.registration_number or "—",
+            "department": r.department or "—",
+            "registered_at": r.registered_at.isoformat() if r.registered_at else None,
+            "status": r.status,
+            "registration_type": r.registration_type,
+        }
+        if r.registration_type == "volunteer":
+            volunteers.append(entry)
+        else:
+            participants.append(entry)
+
+    return {
+        "event_id": str(event.id),
+        "event_name": event.name,
+        "event_date": event.event_date.isoformat() if event.event_date else None,
+        "venue": event.venue,
+        "status": event.status.value,
+        "volunteers_required": getattr(event, "volunteers_required", 0) or 0,
+        "total_participants": len(participants),
+        "total_volunteers": len(volunteers),
+        "participants": participants,
+        "volunteers": volunteers,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. Clubs Summary
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/clubs")
+async def list_clubs_summary(
+    month: Optional[int] = Query(None, description="Month number 1-12"),
+    year: Optional[int] = Query(None, description="Year e.g. 2026"),
+    _user: User = _affairs,
+):
+    """List all clubs with event count metrics per month and current semester."""
+    now = datetime.utcnow()
+    target_month = month or now.month
+    target_year = year or now.year
+
+    # Current semester window (rough: ODD=Jul-Dec, EVEN=Jan-Jun)
+    if now.month >= 7:
+        sem_start = datetime(now.year, 7, 1)
+        sem_end = datetime(now.year, 12, 31, 23, 59, 59)
+    else:
+        sem_start = datetime(now.year, 1, 1)
+        sem_end = datetime(now.year, 6, 30, 23, 59, 59)
+
+    month_start = datetime(target_year, target_month, 1)
+    if target_month == 12:
+        month_end = datetime(target_year + 1, 1, 1)
+    else:
+        month_end = datetime(target_year, target_month + 1, 1)
+
+    clubs = await Club.find(Club.is_active == True).to_list()
+    all_completed = await Event.find({"status": EventStatus.COMPLETED.value}).to_list()
+
+    results = []
+    for club in clubs:
+        cid = club.id
+        club_events = [e for e in all_completed if e.club_id == cid]
+
+        month_events = [
+            e for e in club_events
+            if e.event_date and month_start <= e.event_date < month_end
+        ]
+        sem_events = [
+            e for e in club_events
+            if e.event_date and sem_start <= e.event_date <= sem_end
+        ]
+
+        results.append({
+            "club_id": str(cid),
+            "club_name": club.name,
+            "slug": club.slug,
+            "events_this_month": len(month_events),
+            "events_this_semester": len(sem_events),
+            "total_completed_events": len(club_events),
+        })
+
+    return results
+
+
+@router.get("/clubs/{club_id}/events")
+async def list_club_completed_events(
+    club_id: PydanticObjectId,
+    _user: User = _affairs,
+):
+    """Return all completed events for a specific club with full details."""
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    events = await Event.find({
+        "club_id": ObjectId(str(club_id)),
+        "status": EventStatus.COMPLETED.value,
+    }).sort(-Event.event_date).to_list()
+
+    results = []
+    for e in events:
+        cert_count = await Certificate.find({
+            "$or": [{"event_id": ObjectId(str(e.id))}, {"event_id": str(e.id)}],
+        }).count()
+        results.append({
+            "id": str(e.id),
+            "name": e.name,
+            "event_date": e.event_date.isoformat() if e.event_date else None,
+            "venue": e.venue or "—",
+            "category": e.category or "—",
+            "participant_count": e.participant_count,
+            "cert_count": cert_count,
+            "cert_generated": cert_count > 0,
+            "report_status": e.report_status or "not_submitted",
+            "report_url": e.report_url,
+            "report_filename": e.report_filename,
+        })
+
+    return {
+        "club_id": str(club.id),
+        "club_name": club.name,
+        "events": results,
+    }

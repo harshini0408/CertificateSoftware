@@ -26,7 +26,9 @@ import {
   useValidateAttendanceQR,
   useAttendanceSession,
   useSubmitAttendance,
+  useUpdateStudentRegNo,
 } from './api'
+import { useChangePassword } from '../auth/api'
 
 // ── QR Camera Scanner ─────────────────────────────────────────────────────────
 function AttendanceScannerView({ event, onScanned, onCancel, onError }) {
@@ -129,7 +131,7 @@ function AttendanceScannerView({ event, onScanned, onCancel, onError }) {
           <>
             <div className="text-center">
               <p className="text-sm font-medium text-gray-700">Point your camera at the QR code shown by the event coordinator.</p>
-              <p className="text-xs text-gray-500 mt-1">The QR code is only valid for <strong>20 seconds</strong> after it is generated.</p>
+              <p className="text-xs text-gray-500 mt-1">The QR code is only valid for <strong>45 seconds</strong> after it is generated.</p>
             </div>
 
             {/* Camera viewfinder */}
@@ -454,6 +456,228 @@ function CreditsBreakdown({ breakdown, total, creditRules, rulesLoading }) {
             )
           })}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function StudentSettingsTab({ profile, profileLoading }) {
+  const updateRegNo = useUpdateStudentRegNo()
+  const changePassword = useChangePassword()
+
+  const [newRegNo, setNewRegNo] = useState('')
+  const [regNoError, setRegNoError] = useState('')
+
+  const [pwForm, setPwForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
+  const [pwError, setPwError] = useState('')
+
+  const handleRegNoSubmit = (e) => {
+    e.preventDefault()
+    const clean = newRegNo.trim()
+    if (!clean) {
+      setRegNoError('Please enter your 12-digit registration number.')
+      return
+    }
+    if (!/^\d{12}$/.test(clean)) {
+      setRegNoError('Registration number must be exactly 12 numeric digits (e.g. 715522104001).')
+      return
+    }
+    setRegNoError('')
+    updateRegNo.mutate(clean, {
+      onSuccess: () => {
+        setNewRegNo('')
+      },
+    })
+  }
+
+  const handlePwSubmit = (e) => {
+    e.preventDefault()
+    if (!pwForm.current_password || !pwForm.new_password || !pwForm.confirm_password) {
+      setPwError('Please fill in all password fields.')
+      return
+    }
+    if (pwForm.new_password !== pwForm.confirm_password) {
+      setPwError('New passwords do not match.')
+      return
+    }
+    if (pwForm.new_password.length < 6) {
+      setPwError('New password must be at least 6 characters.')
+      return
+    }
+    setPwError('')
+    changePassword.mutate(
+      {
+        current_password: pwForm.current_password,
+        new_password: pwForm.new_password,
+      },
+      {
+        onSuccess: () => {
+          setPwForm({ current_password: '', new_password: '', confirm_password: '' })
+        },
+      }
+    )
+  }
+
+  if (profileLoading) return <LoadingSpinner fullPage label="Loading settings..." />
+
+  const canUpdate = profile?.can_update_reg_no
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Settings & Profile</h1>
+        <p className="mt-0.5 text-sm text-gray-500">
+          Manage your account profile and registration details.
+        </p>
+      </div>
+
+      {/* Account Info */}
+      <div className="card p-6 space-y-4">
+        <h2 className="section-title">Profile Information</h2>
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <dt className="text-xs font-semibold uppercase text-gray-400">Full Name</dt>
+            <dd className="text-sm font-medium text-foreground mt-0.5">{profile?.name || '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase text-gray-400">Email Address (Permanent ID)</dt>
+            <dd className="text-sm font-medium text-foreground mt-0.5">{profile?.email || '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase text-gray-400">Department</dt>
+            <dd className="text-sm font-medium text-foreground mt-0.5">{profile?.department || '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase text-gray-400">Batch & Section</dt>
+            <dd className="text-sm font-medium text-foreground mt-0.5">
+              {(profile?.batch || '')} {profile?.section ? `(${profile.section})` : ''}
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      {/* Registration Number Management */}
+      <div className="card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="section-title">Registration Number</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Your official academic identifier used for certificates and credit tracking.
+            </p>
+          </div>
+          {canUpdate ? (
+            <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+              Temporary Number
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800">
+              ✓ Verified 12-Digit
+            </span>
+          )}
+        </div>
+
+        {canUpdate ? (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-amber-800 font-bold text-sm">⚠ Temporary Register Number Assigned</span>
+              </div>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                You are currently registered with a temporary ID (<strong className="font-mono">{profile?.registration_number || profile?.username}</strong>).
+                When you receive your official 12-digit university registration number, enter it below.
+                <strong className="block mt-1">IMPORTANT: This register number can be updated only ONCE. Once submitted, it cannot be changed again by you.</strong>
+              </p>
+            </div>
+
+            <form onSubmit={handleRegNoSubmit} className="space-y-3">
+              <div>
+                <label className="form-label" htmlFor="student-reg-no-input">
+                  New 12-Digit Registration Number *
+                </label>
+                <input
+                  id="student-reg-no-input"
+                  type="text"
+                  maxLength={12}
+                  value={newRegNo}
+                  onChange={(e) => {
+                    setNewRegNo(e.target.value.replace(/\D/g, ''))
+                    setRegNoError('')
+                  }}
+                  placeholder="e.g. 715522104001"
+                  className={`form-input font-mono text-sm ${regNoError ? 'border-red-500' : ''}`}
+                />
+                {regNoError && <p className="form-error mt-1">{regNoError}</p>}
+                <p className="text-[11px] text-gray-400 mt-1">Must be exactly 12 numeric digits.</p>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={updateRegNo.isPending || !newRegNo || newRegNo.length !== 12}
+                  className="btn-primary text-xs py-2 px-4"
+                >
+                  {updateRegNo.isPending ? 'Updating…' : 'Update Register Number (1-Time)'}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between rounded-lg bg-gray-50 border border-gray-200 p-4">
+            <div>
+              <p className="text-xs text-gray-400 uppercase font-semibold">Current Register Number</p>
+              <p className="text-base font-mono font-bold text-navy mt-0.5">{profile?.registration_number || '—'}</p>
+            </div>
+            <span className="text-xs text-gray-500 italic">
+              {profile?.student_reg_no_change_count > 0 ? 'Updated by student' : 'Permanent 12-digit registered'}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Change Password */}
+      <div className="card p-6 space-y-4">
+        <h2 className="section-title">Change Password</h2>
+        <form onSubmit={handlePwSubmit} className="space-y-3">
+          {pwError && <p className="form-error">{pwError}</p>}
+          <div>
+            <label className="form-label">Current Password *</label>
+            <input
+              type="password"
+              value={pwForm.current_password}
+              onChange={(e) => setPwForm((p) => ({ ...p, current_password: e.target.value }))}
+              className="form-input text-sm"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="form-label">New Password *</label>
+              <input
+                type="password"
+                value={pwForm.new_password}
+                onChange={(e) => setPwForm((p) => ({ ...p, new_password: e.target.value }))}
+                className="form-input text-sm"
+              />
+            </div>
+            <div>
+              <label className="form-label">Confirm New Password *</label>
+              <input
+                type="password"
+                value={pwForm.confirm_password}
+                onChange={(e) => setPwForm((p) => ({ ...p, confirm_password: e.target.value }))}
+                className="form-input text-sm"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              disabled={changePassword.isPending}
+              className="btn-primary text-xs py-2 px-4"
+            >
+              {changePassword.isPending ? 'Updating…' : 'Update Password'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
@@ -990,6 +1214,15 @@ export default function StudentDashboard() {
                                     : 'Cancel Registration'}
                                 </button>
                               </div>
+                            ) : ev.registration_stopped ? (
+                              <div className="w-full flex flex-col items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 text-center space-y-1">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-amber-700">
+                                  <span>⚠️</span> Max Participants Reached
+                                </span>
+                                <p className="text-xs font-medium text-amber-800 leading-snug">
+                                  Max participants reached. We will be coming up with new events.
+                                </p>
+                              </div>
                             ) : (
                               <div className="space-y-2">
                                 <button
@@ -1032,6 +1265,8 @@ export default function StudentDashboard() {
                   </div>
                 )}
               </div>
+            ) : activeTab === 'settings' ? (
+              <StudentSettingsTab profile={profile} profileLoading={profileLoading} />
             ) : (
               <>
 
@@ -1198,85 +1433,98 @@ export default function StudentDashboard() {
               })()}
             </div>
 
-            <div className="card p-5">
-              <h2 className="section-title mb-3">Submit Certificate For Credit Verification</h2>
-              <p className="mb-3 text-sm text-gray-500">
-                Upload your certificate, choose role and event date. Credits are added only after tutor verification.
-              </p>
-
-              <form className="grid grid-cols-1 gap-3 sm:grid-cols-4" onSubmit={handleManualSubmit}>
+            {activeTab === 'cert_verification' && (
+              <div className="space-y-6">
                 <div>
-                  <label className="form-label">Role *</label>
-                  <select
-                    className="form-input"
-                    value={uploadForm.cert_type}
-                    onChange={(e) => setUploadForm((p) => ({ ...p, cert_type: e.target.value }))}
-                    disabled={rulesLoading}
-                  >
-                    <option value="">Select role</option>
-                    {(creditRules || []).map((r) => (
-                      <option key={r.cert_type} value={r.cert_type}>
-                        {r.cert_type} (+{r.points})
-                      </option>
-                    ))}
-                  </select>
+                  <h1 className="text-2xl font-bold text-foreground">Certificate Verification</h1>
+                  <p className="mt-0.5 text-sm text-gray-500">
+                    Submit your certificates from external or other events for credit verification by your tutor.
+                  </p>
+                </div>
+
+                <div className="card p-5">
+                  <h2 className="section-title mb-3">Submit Certificate For Credit Verification</h2>
+                  <p className="mb-3 text-sm text-gray-500">
+                    Upload your certificate, choose role and event date. Credits are added only after tutor verification.
+                  </p>
+
+                  <form className="grid grid-cols-1 gap-3 sm:grid-cols-4" onSubmit={handleManualSubmit}>
+                    <div>
+                      <label className="form-label">Role *</label>
+                      <select
+                        className="form-input"
+                        value={uploadForm.cert_type}
+                        onChange={(e) => setUploadForm((p) => ({ ...p, cert_type: e.target.value }))}
+                        disabled={rulesLoading}
+                      >
+                        <option value="">Select role</option>
+                        {(creditRules || []).map((r) => (
+                          <option key={r.cert_type} value={r.cert_type}>
+                            {r.cert_type} (+{r.points})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="form-label">Event Date *</label>
+                      <input
+                        type="date"
+                        className="form-input"
+                        value={uploadForm.event_date}
+                        onChange={(e) => setUploadForm((p) => ({ ...p, event_date: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="form-label">Certificate Image *</label>
+                      <input
+                        id="student-certificate-upload"
+                        type="file"
+                        accept="image/*"
+                        className="form-input"
+                        onChange={(e) => setUploadForm((p) => ({ ...p, certificate_image: e.target.files?.[0] || null }))}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-4 flex justify-end">
+                      <button
+                        type="submit"
+                        className="btn-primary"
+                        disabled={createSubmission.isPending || !uploadForm.cert_type || !uploadForm.event_date || !uploadForm.certificate_image}
+                      >
+                        {createSubmission.isPending ? 'Submitting...' : 'Submit For Verification'}
+                      </button>
+                    </div>
+                  </form>
                 </div>
 
                 <div>
-                  <label className="form-label">Event Date *</label>
-                  <input
-                    type="date"
-                    className="form-input"
-                    value={uploadForm.event_date}
-                    onChange={(e) => setUploadForm((p) => ({ ...p, event_date: e.target.value }))}
+                  <h2 className="section-title mb-3">My Verification Requests</h2>
+                  <DataTable
+                    columns={[
+                      { key: 'cert_type', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
+                      { key: 'semester', header: 'Semester', render: (v) => <span className="text-xs text-gray-500">{v || 'Unknown'}</span> },
+                      { key: 'event_date', header: 'Event Date', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
+                      { key: 'certificate_image_url', header: 'Certificate', render: (v) => (
+                        v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View Image</a> : '—'
+                      ) },
+                      { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+                      { key: 'points_awarded', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
+                      { key: 'review_comment', header: 'Tutor Remarks', render: (v) => v || '—' },
+                      { key: 'submitted_at', header: 'Submitted', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
+                    ]}
+                    data={manualSubmissions || []}
+                    isLoading={submissionsLoading}
+                    emptyMessage="No verification requests yet."
+                    rowKey="id"
                   />
                 </div>
+              </div>
+            )}
 
-                <div className="sm:col-span-2">
-                  <label className="form-label">Certificate Image *</label>
-                  <input
-                    id="student-certificate-upload"
-                    type="file"
-                    accept="image/*"
-                    className="form-input"
-                    onChange={(e) => setUploadForm((p) => ({ ...p, certificate_image: e.target.files?.[0] || null }))}
-                  />
-                </div>
-
-                <div className="sm:col-span-4 flex justify-end">
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={createSubmission.isPending || !uploadForm.cert_type || !uploadForm.event_date || !uploadForm.certificate_image}
-                  >
-                    {createSubmission.isPending ? 'Submitting...' : 'Submit For Verification'}
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            <div>
-              <h2 className="section-title mb-3">My Verification Requests</h2>
-              <DataTable
-                columns={[
-                  { key: 'cert_type', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
-                  { key: 'semester', header: 'Semester', render: (v) => <span className="text-xs text-gray-500">{v || 'Unknown'}</span> },
-                  { key: 'event_date', header: 'Event Date', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
-                  { key: 'certificate_image_url', header: 'Certificate', render: (v) => (
-                    v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View Image</a> : '—'
-                  ) },
-                  { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
-                  { key: 'points_awarded', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
-                  { key: 'review_comment', header: 'Tutor Remarks', render: (v) => v || '—' },
-                  { key: 'submitted_at', header: 'Submitted', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
-                ]}
-                data={manualSubmissions || []}
-                isLoading={submissionsLoading}
-                emptyMessage="No verification requests yet."
-                rowKey="id"
-              />
-            </div>
-
+            {activeTab !== 'cert_verification' && (
+              <>
             <div>
               <h2 className="section-title mb-3">Credit History</h2>
               <DataTable
@@ -1357,6 +1605,8 @@ export default function StudentDashboard() {
                 rowKey="_id"
               />
             </div>
+              </>
+            )}
             </>
           )}
           </>

@@ -4,14 +4,17 @@ import { useToastStore } from '../../store/uiStore'
 
 // ── Query keys ────────────────────────────────────────────────────────────────
 export const affairsKeys = {
-  stats:          () => ['affairs', 'stats'],
-  clubEvents:     (filters) => ['affairs', 'club-events', filters],
-  clubEventDetail:(id) => ['affairs', 'club-events', id],
-  deptEvents:     (filters) => ['affairs', 'dept-events', filters],
-  deptEventDetail:(id) => ['affairs', 'dept-events', id],
-  departments:    () => ['affairs', 'departments'],
-  rankings:       (limit) => ['affairs', 'rankings', limit],
-  upcoming:       (filters) => ['affairs', 'upcoming', filters],
+  stats:              () => ['affairs', 'stats'],
+  clubEvents:         (filters) => ['affairs', 'club-events', filters],
+  clubEventDetail:    (id) => ['affairs', 'club-events', id],
+  deptEvents:         (filters) => ['affairs', 'dept-events', filters],
+  deptEventDetail:    (id) => ['affairs', 'dept-events', id],
+  departments:        () => ['affairs', 'departments'],
+  rankings:           (limit) => ['affairs', 'rankings', limit],
+  upcoming:           (filters) => ['affairs', 'upcoming', filters],
+  upcomingRegs:       (eventId) => ['affairs', 'upcoming-regs', eventId],
+  clubs:              (filters) => ['affairs', 'clubs', filters],
+  clubDrilldown:      (clubId) => ['affairs', 'clubs', clubId, 'events'],
 }
 
 
@@ -149,3 +152,45 @@ export function useReviewReport(eventId) {
     },
   })
 }
+
+
+// ── Upcoming Event Registrations ─────────────────────────────────────────
+export function useAffairsUpcomingEventRegistrations(eventId) {
+  return useQuery({
+    queryKey: affairsKeys.upcomingRegs(eventId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/affairs/upcoming-events/${eventId}/registrations`)
+      return data
+    },
+    enabled: !!eventId,
+  })
+}
+
+
+// ── Clubs Summary ──────────────────────────────────────────────────
+export function useAffairsClubsSummary(filters = {}) {
+  return useQuery({
+    queryKey: affairsKeys.clubs(filters),
+    queryFn: async () => {
+      const params = {}
+      if (filters.month) params.month = filters.month
+      if (filters.year) params.year = filters.year
+      const { data } = await axiosInstance.get('/affairs/clubs', { params })
+      return data
+    },
+  })
+}
+
+
+// ── Club Drilldown (completed events) ─────────────────────────────────
+export function useAffairsClubDrilldown(clubId) {
+  return useQuery({
+    queryKey: affairsKeys.clubDrilldown(clubId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/affairs/clubs/${clubId}/events`)
+      return data
+    },
+    enabled: !!clubId,
+  })
+}
+

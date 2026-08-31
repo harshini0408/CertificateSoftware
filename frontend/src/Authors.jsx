@@ -37,7 +37,6 @@ const authors = [
 
 export default function Authors() {
   const navigate = useNavigate()
-  const [leadAuthor, ...teamAuthors] = authors
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -104,14 +103,14 @@ export default function Authors() {
           max-width: 1200px;
           margin: 0 auto;
           text-align: center;
-          padding: clamp(4rem, 10vh, 6rem) 1rem clamp(3rem, 8vh, 5rem);
+          padding: clamp(2.5rem, 6vh, 3.8rem) 1rem clamp(1.5rem, 3.5vh, 2.2rem);
         }
 
         .authors-marquee {
           letter-spacing: 0.45em;
           font-size: clamp(0.75rem, 2vw, 1.05rem);
           font-weight: 600;
-          margin-bottom: 1.1rem;
+          margin-bottom: 0.85rem;
           text-transform: uppercase;
           color: #475569;
         }
@@ -130,7 +129,7 @@ export default function Authors() {
         }
 
         .authors-heading-bottom {
-          margin-top: 0.45rem;
+          margin-top: 0.35rem;
           font-size: clamp(2rem, 5.8vw, 4rem);
           font-style: italic;
           color: #bc1d1d;
@@ -140,22 +139,22 @@ export default function Authors() {
         .authors-subtext {
           font-size: clamp(1.05rem, 3vw, 1.2rem);
           max-width: 760px;
-          margin: 1.6rem auto 0;
+          margin: 1.2rem auto 0;
           color: #334155;
-          line-height: 1.9;
+          line-height: 1.8;
         }
 
         .authors-divider {
           height: 2px;
           width: 160px;
           background: linear-gradient(90deg, #8b4513, transparent);
-          margin: 0 auto 4rem;
+          margin: 0 auto 2rem;
         }
 
         .authors-section {
-          max-width: 1200px;
+          max-width: 1100px;
           margin: 0 auto;
-          padding: 0 1rem 6rem;
+          padding: 0 1rem 4rem;
         }
 
         .authors-kicker {
@@ -164,53 +163,27 @@ export default function Authors() {
           text-transform: uppercase;
           font-size: 0.75rem;
           color: #64748b;
-          margin-bottom: 2.75rem;
+          margin-bottom: 1.75rem;
         }
 
         .authors-grid {
           display: grid;
           grid-template-columns: repeat(1, minmax(0, 1fr));
-          gap: 1.5rem;
-        }
-
-        .authors-top {
-          display: flex;
-          justify-content: center;
-          margin-bottom: 1.75rem;
-        }
-
-        .authors-grid-bottom {
-          display: grid;
-          grid-template-columns: repeat(1, minmax(0, 1fr));
-          gap: 1.5rem;
+          gap: 2rem;
           justify-items: center;
+          align-items: stretch;
         }
 
         .author-slot {
           display: flex;
           justify-content: center;
-        }
-
-        .authors-outro {
-          max-width: 900px;
-          margin: 0 auto;
-          text-align: center;
-          padding: 0 1rem 4.5rem;
-          color: #475569;
-          line-height: 1.9;
-          font-size: 1.1rem;
+          width: 100%;
         }
 
         @media (min-width: 768px) {
-          .authors-grid-bottom {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-        }
-
-        @media (min-width: 1024px) {
-          .authors-grid-bottom {
-            max-width: 760px;
-            margin: 0 auto;
+          .authors-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1.75rem;
           }
         }
       `}</style>
@@ -222,7 +195,7 @@ export default function Authors() {
         <Navbar onBrandClick={handleHeaderClick} brandAriaLabel="Go to previous page" />
 
         <section className="authors-hero">
-          <p className="authors-marquee">Team SDC · Credit Points Management System</p>
+          <p className="authors-marquee">Team SDC · Activity Points Management System</p>
 
           <h1 className="authors-heading">
             <div className="authors-heading-top">The Minds</div>
@@ -237,19 +210,11 @@ export default function Authors() {
           <p className="authors-kicker">Core Contributors</p>
 
           <div className="authors-grid">
-            <div className="authors-top">
-              <div className="author-slot">
-                <ProfileCard {...leadAuthor} showUserInfo enableMobileTilt />
+            {authors.map((author) => (
+              <div key={author.name} className="author-slot">
+                <ProfileCard {...author} showUserInfo enableMobileTilt />
               </div>
-            </div>
-
-            <div className="authors-grid-bottom">
-              {teamAuthors.map((author) => (
-                <div key={author.name} className="author-slot">
-                  <ProfileCard {...author} showUserInfo enableMobileTilt />
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
         </section>
 

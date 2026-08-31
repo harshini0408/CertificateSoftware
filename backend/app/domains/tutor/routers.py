@@ -31,6 +31,10 @@ class TutorManualCertificateRequest(BaseModel):
     cert_number: str | None = None
 
 
+class TutorUpdateRegNoRequest(BaseModel):
+    registration_number: str
+
+
 class SubmissionReviewRequest(BaseModel):
     reason: Optional[str] = None
 
@@ -171,9 +175,15 @@ async def list_tutor_students(current_user: User = Depends(require_role(UserRole
             }
         )
 
-    # Bulk-fetch approved club memberships and attach to each row
+    # Bulk-fetch approved club memberships and user edit tracking
     student_emails_lower = [_norm_email(r.get("student_email")) for r in rows if r.get("student_email")]
     if student_emails_lower:
+        users = await User.find({
+            "email": {"$in": student_emails_lower},
+            "role": UserRole.STUDENT,
+        }).to_list()
+        user_by_email = {_norm_email(u.email): u for u in users}
+
         approved_memberships = await StudentClubMembership.find({
             "student_email": {"$in": student_emails_lower},
             "status": MembershipStatus.APPROVED.value,
@@ -189,10 +199,25 @@ async def list_tutor_students(current_user: User = Depends(require_role(UserRole
             email_key = _norm_email(row.get("student_email", ""))
             row["clubs"] = clubs_by_email.get(email_key, [])
             row["office_bearer"] = office_bearer_by_email.get(email_key, None)
+            u = user_by_email.get(email_key)
+            if u:
+                if u.registration_number:
+                    row["registration_number"] = u.registration_number
+                edits = getattr(u, "tutor_reg_no_change_count", 0) or 0
+                row["tutor_reg_no_change_count"] = edits
+                row["can_tutor_edit_reg_no"] = edits < 2
+                row["edits_remaining"] = max(0, 2 - edits)
+            else:
+                row["tutor_reg_no_change_count"] = 0
+                row["can_tutor_edit_reg_no"] = True
+                row["edits_remaining"] = 2
     else:
         for row in rows:
             row["clubs"] = []
             row["office_bearer"] = None
+            row["tutor_reg_no_change_count"] = 0
+            row["can_tutor_edit_reg_no"] = True
+            row["edits_remaining"] = 2
 
     rows.sort(key=lambda d: (d.get("student_name") or "").lower())
     return rows
@@ -212,6 +237,14 @@ async def get_tutor_student_detail(
     })
     if not doc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found for this tutor")
+
+    student_user = await User.find_one({
+        "email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"},
+        "role": UserRole.STUDENT,
+    })
+    tutor_edits = getattr(student_user, "tutor_reg_no_change_count", 0) or 0 if student_user else 0
+    can_tutor_edit = tutor_edits < 2
+    reg_no = student_user.registration_number if (student_user and student_user.registration_number) else doc.registration_number
 
     linked_docs = await _linked_credit_docs_for_tutor(doc, tutor_email)
     total_credits, rolled_history, semester_totals, current_semester = await _rollup_credit_docs(linked_docs)
@@ -234,12 +267,10 @@ async def get_tutor_student_detail(
         try:
             event_ids.append(PydanticObjectId(str(c.event_id)))
         except Exception:
-            continue
-    event_ids = list({eid for eid in event_ids})
-    event_by_id: Dict[str, Event] = {}
-    if event_ids:
-        events = await Event.find({"_id": {"$in": event_ids}}).to_list()
-        event_by_id = {str(e.id): e for e in events}
+            pass
+
+    events = await Event.find({"_id": {"$in": event_ids}}).to_list() if event_ids else []
+    event_by_id = {str(e.id): e for e in events}
 
     # Fetch relevant DeptCertificates to handle images for department events
     dept_certs = await DeptCertificate.find({
@@ -250,16 +281,12 @@ async def get_tutor_student_detail(
     event_details = []
     for entry in rolled_history:
         cert = cert_by_number.get(entry.cert_number) or dept_cert_by_number.get(entry.cert_number)
-        event_date = None
+        event = event_by_id.get(str(cert.event_id)) if cert and isinstance(cert, Certificate) and cert.event_id else None
+        event_date = event.event_date if event else None
         
-        # If it's a club certificate, get date from event
-        if cert and isinstance(cert, Certificate) and cert.event_id:
-            event = event_by_id.get(str(cert.event_id))
-            if event:
-                event_date = event.event_date
         # If it's a dept certificate, it might not have a direct event link in the same way, 
         # or it might have a created_at we can use as fallback
-        elif cert and isinstance(cert, DeptCertificate):
+        if cert and isinstance(cert, DeptCertificate):
             dc = cert
             event_details.append(
                 {
@@ -293,17 +320,100 @@ async def get_tutor_student_detail(
     return {
         "student_name": doc.student_name,
         "student_email": doc.student_email,
-        "registration_number": doc.registration_number,
+        "registration_number": reg_no,
         "department": doc.department,
         "batch": doc.batch,
         "section": doc.section,
         "total_credits": current_total,
         "current_semester": current_semester,
+        "tutor_reg_no_change_count": tutor_edits,
+        "can_tutor_edit_reg_no": can_tutor_edit,
+        "edits_remaining": max(0, 2 - tutor_edits),
         "semester_totals": [
             {"semester": sem, "total_credits": total}
             for sem, total in sorted(semester_totals.items())
         ],
         "event_details": event_details,
+    }
+
+
+@router.post("/tutor/students/{student_email}/update-registration-number")
+async def tutor_update_student_registration_number(
+    student_email: str,
+    body: TutorUpdateRegNoRequest,
+    current_user: User = Depends(require_role(UserRole.TUTOR)),
+):
+    tutor_email = _norm_email(current_user.email)
+    student_email_norm = _norm_email(student_email)
+
+    # Verify that this student is mapped to the current tutor
+    doc = await StudentCredit.find_one({
+        "student_email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"},
+        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+    })
+    if not doc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You are not the assigned tutor for this student.",
+        )
+
+    student_user = await User.find_one({
+        "email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"},
+        "role": UserRole.STUDENT,
+    })
+    if not student_user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Student user account not found.")
+
+    current_edits = getattr(student_user, "tutor_reg_no_change_count", 0) or 0
+    if current_edits >= 2:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration number can only be changed a maximum of 2 times by the tutor.",
+        )
+
+    new_reg = body.registration_number.strip()
+    if not re.fullmatch(r"^\d{12}$", new_reg):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration number must be a valid 12-digit number (e.g. 715522104001).",
+        )
+
+    # Check for uniqueness against other users
+    existing_user = await User.find_one({
+        "_id": {"$ne": student_user.id},
+        "$or": [
+            {"registration_number": {"$regex": f"^{re.escape(new_reg)}$", "$options": "i"}},
+            {"username": {"$regex": f"^{re.escape(new_reg)}$", "$options": "i"}},
+        ]
+    })
+    if existing_user:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This registration number is already registered to another student.",
+        )
+
+    old_reg = student_user.registration_number
+    student_user.registration_number = new_reg
+    # If the student's username was their old register number, sync username
+    if student_user.username == old_reg or not bool(re.fullmatch(r"^\d{12}$", student_user.username or "")):
+        student_user.username = new_reg
+    student_user.tutor_reg_no_change_count = current_edits + 1
+    await student_user.save()
+
+    # Sync all StudentCredit docs for this student
+    credit_docs = await StudentCredit.find({
+        "student_email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"}
+    }).to_list()
+    for cd in credit_docs:
+        cd.registration_number = new_reg
+        await cd.save()
+
+    return {
+        "message": "Registration number updated successfully",
+        "registration_number": new_reg,
+        "tutor_reg_no_change_count": student_user.tutor_reg_no_change_count,
+        "can_tutor_edit_reg_no": student_user.tutor_reg_no_change_count < 2,
+        "edits_remaining": max(0, 2 - student_user.tutor_reg_no_change_count),
     }
 
 

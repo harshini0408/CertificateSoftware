@@ -143,7 +143,7 @@ async def _seed_credit_rules() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────
-    print("[START] Starting PSG iTech Certificate Platform...")
+    print("[START] Starting PSG iTech Activity Points Management Software...")
     settings.ensure_storage_dirs()
     await connect_db()
 
@@ -169,8 +169,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="PSG iTech Certificate Platform",
-    description="Self-hosted certificate generation and verification platform",
+    title="PSG iTech Activity Points Management Software",
+    description="Activity Points Management and certificate verification platform",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -258,7 +258,7 @@ async def health_check():
 @app.get("/")
 async def root():
     return {
-        "message": "PSG iTech Certificate Platform API",
+        "message": "PSG iTech Activity Points Management Software API",
         "version": "1.0.0",
         "docs": "/docs",
     }

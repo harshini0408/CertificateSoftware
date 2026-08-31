@@ -18,16 +18,20 @@ import {
   useAffairsRankings,
   useAffairsUpcomingEvents,
   useReviewReport,
+  useAffairsUpcomingEventRegistrations,
+  useAffairsClubsSummary,
+  useAffairsClubDrilldown,
 } from './api'
 
 // ── Tab ids ───────────────────────────────────────────────────────────────────
-const TABS = ['overview', 'club_events', 'dept_events', 'upcoming']
+const TABS = ['overview', 'club_events', 'dept_events', 'upcoming', 'clubs']
 
 const TAB_LABELS = {
-  overview: 'Overview',
-  club_events: 'Club Events',
-  dept_events: 'Dept Events',
-  upcoming: 'Upcoming Events',
+  overview:   'Overview',
+  club_events:'Club Events',
+  dept_events:'Dept Events',
+  upcoming:   'Upcoming Events',
+  clubs:      'Clubs',
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -37,6 +41,7 @@ const Icons = {
   star: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>,
   upcoming: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
   report: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
+  club: <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -187,6 +192,13 @@ function ClubEventsTab() {
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'venue', header: 'Venue', render: (v) => v || '—' },
     { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    {
+      key: 'cert_generated',
+      header: 'Certificate',
+      render: (v) => v
+        ? <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">✓ Generated</span>
+        : <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">— Not yet</span>,
+    },
     { key: 'report_status', header: 'Report', render: (v) => <ReportStatusBadge status={v} /> },
   ]
 
@@ -591,13 +603,14 @@ function DeptEventDetailModal({ eventId, onClose }) {
 
 function UpcomingEventsTab() {
   const [filters, setFilters] = useState({})
+  const [selectedEventId, setSelectedEventId] = useState(null)
   const { data: events, isLoading } = useAffairsUpcomingEvents(filters)
 
   if (isLoading) return <LoadingSpinner fullPage label="Loading upcoming events…" />
 
   return (
     <div className="space-y-5">
-      <h2 className="text-xl font-bold text-foreground">Upcoming Events — Next Week</h2>
+      <h2 className="text-xl font-bold text-foreground">Upcoming Events</h2>
 
       <div className="card p-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -615,14 +628,18 @@ function UpcomingEventsTab() {
 
       {(events || []).length === 0 ? (
         <div className="card p-8 text-center">
-          <p className="text-gray-400 text-sm">No upcoming events for the next week.</p>
+          <p className="text-gray-400 text-sm">No upcoming events found.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {(events || []).map((event) => (
-            <div key={event.id} className="card overflow-hidden hover:shadow-lg transition-shadow">
+            <button
+              key={event.id}
+              onClick={() => setSelectedEventId(event.id)}
+              className="card overflow-hidden hover:shadow-lg transition-shadow text-left w-full"
+            >
               {/* Poster */}
-              {event.poster_url && (
+              {event.poster_url ? (
                 <div className="aspect-[16/9] bg-gray-100">
                   <img
                     src={event.poster_url.startsWith('/') ? `${BACKEND_URL}${event.poster_url}` : event.poster_url}
@@ -630,8 +647,7 @@ function UpcomingEventsTab() {
                     className="w-full h-full object-cover"
                   />
                 </div>
-              )}
-              {!event.poster_url && (
+              ) : (
                 <div className="aspect-[16/9] bg-gradient-to-br from-navy/10 to-navy/5 flex items-center justify-center">
                   <span className="text-4xl opacity-30">📅</span>
                 </div>
@@ -644,18 +660,271 @@ function UpcomingEventsTab() {
                   {event.event_time && <span>🕐 {event.event_time}</span>}
                   {event.venue && <span>📍 {event.venue}</span>}
                 </div>
+                <div className="flex gap-3 text-xs text-gray-500 pt-1">
+                  <span>👥 {event.registered_count || 0} registered</span>
+                  {(event.volunteers_required || 0) > 0 && (
+                    <span>🤝 {event.volunteers_registered || 0}/{event.volunteers_required} volunteers</span>
+                  )}
+                </div>
                 {event.category && (
                   <span className="inline-flex rounded-full bg-navy/10 px-2 py-0.5 text-xs font-medium text-navy">{event.category}</span>
                 )}
-                {event.description && (
-                  <p className="text-xs text-gray-500 line-clamp-2">{event.description}</p>
-                )}
+                <div className="text-[11px] text-indigo-600 font-semibold mt-1">Click to view registrations →</div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
+
+      {/* Registrations Modal */}
+      {selectedEventId && (
+        <UpcomingEventRegistrationsModal eventId={selectedEventId} onClose={() => setSelectedEventId(null)} />
+      )}
     </div>
+  )
+}
+
+
+// ── Upcoming Event Registrations Modal ───────────────────────────────
+
+function UpcomingEventRegistrationsModal({ eventId, onClose }) {
+  const { data, isLoading } = useAffairsUpcomingEventRegistrations(eventId)
+  const [activeSection, setActiveSection] = useState('participants')
+
+  const participants = data?.participants || []
+  const volunteers = data?.volunteers || []
+
+  const regColumns = [
+    { key: 'student_name', header: 'Name', sortable: true, searchKey: true },
+    { key: 'registration_number', header: 'Reg No.', render: (v) => v || '—' },
+    { key: 'department', header: 'Department', render: (v) => v || '—' },
+    { key: 'student_email', header: 'Email' },
+    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+  ]
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
+      <div
+        className="relative bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-navy truncate">{data?.event_name || 'Event Registrations'}</h3>
+            {data && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                {fmtDate(data.event_date)} {data.venue ? `• ${data.venue}` : ''}
+              </p>
+            )}
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl" aria-label="Close">×</button>
+        </div>
+
+        {/* Summary pills */}
+        {data && (
+          <div className="px-6 pt-4 flex gap-3 shrink-0">
+            <button
+              onClick={() => setActiveSection('participants')}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                activeSection === 'participants' ? 'bg-navy text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              👥 Participants ({data.total_participants})
+            </button>
+            {(data.volunteers_required || 0) > 0 && (
+              <button
+                onClick={() => setActiveSection('volunteers')}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                  activeSection === 'volunteers' ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                🤝 Volunteers ({data.total_volunteers} / {data.volunteers_required} slots)
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {isLoading ? (
+            <LoadingSpinner fullPage label="Loading registrations…" />
+          ) : (
+            <DataTable
+              columns={regColumns}
+              data={activeSection === 'participants' ? participants : volunteers}
+              isLoading={false}
+              emptyMessage={activeSection === 'participants' ? 'No participants registered yet.' : 'No volunteers registered yet.'}
+              rowKey="id"
+              searchable
+              searchPlaceholder="Search by name…"
+            />
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Clubs Tab
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ClubsTab() {
+  const now = new Date()
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear] = useState(now.getFullYear())
+  const [selectedClubId, setSelectedClubId] = useState(null)
+  const { data: clubs, isLoading } = useAffairsClubsSummary({ month, year })
+
+  const MONTHS = [
+    'January','February','March','April','May','June',
+    'July','August','September','October','November','December',
+  ]
+
+  const columns = [
+    {
+      key: 'club_name',
+      header: 'Club',
+      sortable: true,
+      searchKey: true,
+      render: (v, row) => (
+        <button
+          className="text-sm font-semibold text-navy hover:underline text-left"
+          onClick={() => setSelectedClubId(row.club_id)}
+        >
+          {v}
+        </button>
+      ),
+    },
+    {
+      key: 'events_this_month',
+      header: `Events in ${MONTHS[month - 1]}`,
+      align: 'right',
+      render: (v) => <span className="font-semibold text-navy">{v ?? 0}</span>,
+    },
+    {
+      key: 'events_this_semester',
+      header: 'Events (Semester)',
+      align: 'right',
+      render: (v) => <span className="font-semibold text-indigo-700">{v ?? 0}</span>,
+    },
+    {
+      key: 'total_completed_events',
+      header: 'Total Conducted',
+      align: 'right',
+      render: (v) => <span className="font-semibold text-gray-700">{v ?? 0}</span>,
+    },
+  ]
+
+  return (
+    <div className="space-y-5">
+      <h2 className="text-xl font-bold text-foreground">Clubs Overview</h2>
+
+      {/* Month/Year filter */}
+      <div className="card p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <label className="form-label">Month</label>
+            <select
+              className="form-input"
+              value={month}
+              onChange={(e) => setMonth(Number(e.target.value))}
+            >
+              {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Year</label>
+            <select
+              className="form-input"
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+            >
+              {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={clubs || []}
+        isLoading={isLoading}
+        emptyMessage="No clubs found."
+        rowKey="club_id"
+        searchable
+        searchPlaceholder="Search clubs…"
+      />
+
+      {selectedClubId && (
+        <ClubDrilldownModal clubId={selectedClubId} onClose={() => setSelectedClubId(null)} />
+      )}
+    </div>
+  )
+}
+
+
+// ── Club Drilldown Modal ────────────────────────────────────────────
+
+function ClubDrilldownModal({ clubId, onClose }) {
+  const { data, isLoading } = useAffairsClubDrilldown(clubId)
+  const events = data?.events || []
+
+  const columns = [
+    { key: 'name', header: 'Event Name', sortable: true, searchKey: true },
+    { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
+    { key: 'venue', header: 'Venue', render: (v) => v || '—' },
+    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    {
+      key: 'cert_generated',
+      header: 'Certificate',
+      render: (v) => v
+        ? <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">✓ Generated</span>
+        : <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">— Pending</span>,
+    },
+    { key: 'report_status', header: 'Report', render: (v) => <ReportStatusBadge status={v} /> },
+  ]
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
+      <div
+        className="relative bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-navy">{data?.club_name || 'Club Events'}</h3>
+            <p className="text-xs text-gray-500 mt-0.5">{events.length} completed event{events.length !== 1 ? 's' : ''}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl" aria-label="Close">×</button>
+        </div>
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {isLoading ? (
+            <LoadingSpinner fullPage label="Loading club events…" />
+          ) : (
+            <DataTable
+              columns={columns}
+              data={events}
+              isLoading={false}
+              emptyMessage="No completed events for this club yet."
+              rowKey="id"
+              searchable
+              searchPlaceholder="Search events…"
+            />
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -666,11 +935,12 @@ export default function StudentAffairsDashboard() {
 
   const renderTab = () => {
     switch (activeTab) {
-      case 'overview': return <OverviewTab />
+      case 'overview':    return <OverviewTab />
       case 'club_events': return <ClubEventsTab />
       case 'dept_events': return <DeptEventsTab />
-      case 'upcoming': return <UpcomingEventsTab />
-      default: return <OverviewTab />
+      case 'upcoming':    return <UpcomingEventsTab />
+      case 'clubs':       return <ClubsTab />
+      default:            return <OverviewTab />
     }
   }
 

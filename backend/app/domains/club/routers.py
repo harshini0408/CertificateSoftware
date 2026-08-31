@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -153,7 +154,22 @@ async def club_dashboard(
         completed_events.append(ev)
 
     completed_event_ids = [ev.id for ev in completed_events]
-    total_events = len(completed_events)
+    now = datetime.utcnow()
+    # Current semester window (ODD=Jul-Dec, EVEN=Jan-Jun)
+    if now.month >= 7:
+        sem_start = datetime(now.year, 7, 1)
+        sem_end = datetime(now.year, 12, 31, 23, 59, 59)
+    else:
+        sem_start = datetime(now.year, 1, 1)
+        sem_end = datetime(now.year, 6, 30, 23, 59, 59)
+
+    events_this_semester = [
+        ev for ev in completed_events
+        if ev.event_date and sem_start <= ev.event_date <= sem_end
+    ]
+
+    total_events_this_semester = len(events_this_semester)
+    cumulative_completed_events = len(completed_events)
     total_certificates_issued = sum(len(certs_by_event.get(str(ev.id), [])) for ev in completed_events)
     total_participants = await Participant.find(
         {"event_id": {"$in": completed_event_ids}},
@@ -187,7 +203,9 @@ async def club_dashboard(
     return {
         "club": club_payload,
         "stats": {
-            "total_events": total_events,
+            "total_events": total_events_this_semester,
+            "events_this_semester": total_events_this_semester,
+            "cumulative_events": cumulative_completed_events,
             "total_certificates_issued": total_certificates_issued,
             "total_participants": total_participants,
         },

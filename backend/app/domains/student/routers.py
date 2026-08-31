@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.responses import FileResponse
 from beanie import PydanticObjectId
 
+from pydantic import BaseModel
 from ...config import get_settings
 from ...core.dependencies import require_role
 from ...models.user import User, UserRole
@@ -16,7 +17,7 @@ from ...models.certificate import Certificate, CertStatus
 from ...models.dept_certificate import DeptCertificate
 from ...models.credit_rule import CreditRule
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
-from ...models.event import Event
+from ...models.event import Event, EventStatus
 from ...models.club import Club
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...models.event_registration import EventRegistration
@@ -28,6 +29,101 @@ router = APIRouter(tags=["Student"])
 
 def _norm_email(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+def is_temporary_reg_no(reg_no: Optional[str]) -> bool:
+    if not reg_no:
+        return True
+    clean = reg_no.strip()
+    return not bool(re.fullmatch(r"^\d{12}$", clean))
+
+
+class StudentUpdateRegNoRequest(BaseModel):
+    registration_number: str
+
+
+# ── /students/me ─────────────────────────────────────────────────────────
+
+@router.get("/students/me")
+async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    is_temp = is_temporary_reg_no(current_user.registration_number)
+    can_update = is_temp and (getattr(current_user, "student_reg_no_change_count", 0) or 0) == 0
+    return {
+        "id": str(current_user.id),
+        "name": current_user.name,
+        "username": current_user.username,
+        "email": current_user.email,
+        "registration_number": current_user.registration_number,
+        "batch": current_user.batch,
+        "department": current_user.department,
+        "section": current_user.section,
+        "is_temporary_reg_no": is_temp,
+        "can_update_reg_no": can_update,
+        "student_reg_no_change_count": getattr(current_user, "student_reg_no_change_count", 0) or 0,
+    }
+
+
+@router.post("/students/me/update-registration-number")
+async def student_update_registration_number(
+    body: StudentUpdateRegNoRequest,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    if (getattr(current_user, "student_reg_no_change_count", 0) or 0) >= 1:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration number can only be updated once by the student.",
+        )
+    if not is_temporary_reg_no(current_user.registration_number):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "You already have a valid 12-digit registration number and cannot update it.",
+        )
+
+    new_reg = body.registration_number.strip()
+    if not re.fullmatch(r"^\d{12}$", new_reg):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration number must be a valid 12-digit number (e.g. 715522104001).",
+        )
+
+    # Check if another user already has this registration_number or username
+    existing_user = await User.find_one({
+        "_id": {"$ne": current_user.id},
+        "$or": [
+            {"registration_number": {"$regex": f"^{re.escape(new_reg)}$", "$options": "i"}},
+            {"username": {"$regex": f"^{re.escape(new_reg)}$", "$options": "i"}},
+        ]
+    })
+    if existing_user:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This registration number is already registered by another student.",
+        )
+
+    old_reg = current_user.registration_number
+    current_user.registration_number = new_reg
+    if current_user.username == old_reg or is_temporary_reg_no(current_user.username):
+        current_user.username = new_reg
+    current_user.student_reg_no_change_count = (getattr(current_user, "student_reg_no_change_count", 0) or 0) + 1
+    await current_user.save()
+
+    # Sync registration number across StudentCredit docs for this student's email
+    norm_email = _norm_email(current_user.email)
+    credit_docs = await StudentCredit.find({
+        "student_email": {"$regex": f"^{re.escape(norm_email)}$", "$options": "i"}
+    }).to_list()
+    for cd in credit_docs:
+        cd.registration_number = new_reg
+        await cd.save()
+
+    return {
+        "message": "Registration number updated successfully",
+        "registration_number": new_reg,
+        "username": current_user.username,
+        "can_update_reg_no": False,
+        "is_temporary_reg_no": False,
+        "student_reg_no_change_count": current_user.student_reg_no_change_count,
+    }
 
 
 def _norm_cert_type(value: str | None) -> str:
@@ -82,20 +178,6 @@ async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
     return None
 
 
-# ── /students/me ─────────────────────────────────────────────────────────
-
-@router.get("/students/me")
-async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT))):
-    return {
-        "id": str(current_user.id),
-        "name": current_user.name,
-        "username": current_user.username,
-        "email": current_user.email,
-        "registration_number": current_user.registration_number,
-        "batch": current_user.batch,
-        "department": current_user.department,
-        "section": current_user.section,
-    }
 
 
 # ── /students/me/credits ─────────────────────────────────────────────────
@@ -567,14 +649,20 @@ def _normalize_session(time_str: Optional[str]) -> str:
 async def list_upcoming_events(
     current_user: User = Depends(require_role(UserRole.STUDENT)),
 ):
-    """Return published upcoming club events for the student dashboard with registration status."""
-    from datetime import timedelta
+
     now = datetime.utcnow()
-    # List upcoming events starting from today onwards
     today_start = datetime(now.year, now.month, now.day)
 
+    # Auto-complete past active/closed events
+    past_active = await Event.find({
+        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "event_date": {"$lt": today_start},
+    }).to_list()
+    for pe in past_active:
+        await pe.set({"status": EventStatus.COMPLETED.value})
+
     events = await Event.find({
-        "is_published": True,
+        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
         "event_date": {"$gte": today_start},
     }).sort(+Event.event_date).to_list()
 
@@ -632,6 +720,7 @@ async def list_upcoming_events(
             "registered_count": reg_counts.get(eid, 0),
             "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
             "volunteers_registered": volunteer_counts.get(eid, 0),
+            "registration_stopped": getattr(e, "registration_stopped", False) or False,
         })
     return results
 
@@ -644,8 +733,14 @@ async def register_for_event(
 ):
     """Register for an upcoming event. Validates against duplicate registration and same-day same-session collision."""
     event = await Event.get(event_id)
-    if not event or not event.is_published:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not published")
+    if not event or event.status != EventStatus.ACTIVE:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
+
+    if getattr(event, "registration_stopped", False):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration has been stopped for this event. Max participants reached."
+        )
 
     student_email = current_user.email.lower()
 

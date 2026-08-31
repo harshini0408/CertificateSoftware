@@ -28,6 +28,8 @@ class EventUpdate(BaseModel):
     academic_year: Optional[str] = None
     academic_years: Optional[List[str]] = None
     volunteers_required: Optional[int] = None
+    qr_generations_count: Optional[int] = None
+    registration_stopped: Optional[bool] = None
     status: Optional[str] = None
     template_map: Optional[Dict[str, Optional[str]]] = None
     mapping_confirmed: Optional[bool] = None
@@ -53,6 +55,8 @@ class EventResponse(BaseModel):
     volunteers_required: int = 0
     volunteers_registered: int = 0
     cert_count: int = 0
+    qr_generations_count: int = 0
+    registration_stopped: bool = False
     created_at: datetime
     is_published: bool = False
     poster_url: Optional[str] = None
