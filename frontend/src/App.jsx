@@ -19,6 +19,7 @@ import TemplateSelector from './dashboards/club/TemplateSelector'
 import GuestDashboard from './dashboards/guest/GuestDashboard'
 import GuestHistory from './dashboards/guest/GuestHistory'
 import StudentAffairsDashboard from './dashboards/student_affairs'
+import FacultyDashboard from './dashboards/faculty/FacultyDashboard'
 import Footer from './components/Footer'
 import Authors from './Authors'
 
@@ -30,6 +31,7 @@ const ROLES = {
   CLUB_COORD: 'club_coordinator',
   DEPT_COORD: 'dept_coordinator',
   STUDENT_AFFAIRS: 'student_affairs',
+  FACULTY: 'faculty',
   TUTOR: 'tutor',
   STUDENT: 'student',
   GUEST: 'guest',
@@ -152,7 +154,25 @@ export default function App() {
           }
         />
 
-        {/* ── Student ────────────────────────────────────────────────────── */}
+        {/* ── Faculty ────────────────────────────────────────────────────── */}
+        <Route
+          path="/faculty"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.FACULTY, ROLES.TUTOR, ROLES.SUPER_ADMIN]}>
+              <FacultyDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/faculty/history"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.FACULTY, ROLES.TUTOR, ROLES.SUPER_ADMIN]}>
+              <FacultyDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Tutor ──────────────────────────────────────────────────────── */}
         <Route
           path="/tutor"
           element={

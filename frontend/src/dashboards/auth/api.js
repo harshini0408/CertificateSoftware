@@ -25,6 +25,8 @@ const roleRedirect = (data) => {
       return '/student'
     case 'guest':
       return '/guest'
+    case 'faculty':
+      return '/faculty'
     default:
       return '/login'
   }
@@ -33,7 +35,7 @@ const roleRedirect = (data) => {
 // ── useLogin ─────────────────────────────────────────────────────────────────
 /**
  * POST /auth/login
- * On success: populates authStore + navigates to role dashboard.
+ * On success: populates authStore + navigates to role dashboard (if password change not required).
  */
 export function useLogin() {
   const setAuth = useAuthStore((s) => s.setAuth)
@@ -49,7 +51,9 @@ export function useLogin() {
 
     onSuccess: ({ data }) => {
       setAuth(data)
-      navigate(roleRedirect(data), { replace: true })
+      if (!data.requires_password_change) {
+        navigate(roleRedirect(data), { replace: true })
+      }
     },
 
     onError: (err) => {
@@ -249,5 +253,43 @@ export function useVerifyDeptPasswordOtp() {
 
 export function useChangeDeptPassword() {
   return useChangePassword()
+}
+
+export function useFirstLoginChangePassword() {
+  const setAuth = useAuthStore((s) => s.setAuth)
+  const navigate = useNavigate()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (payload) => axiosInstance.post('/auth/first-login/change-password', payload),
+    onSuccess: ({ data }) => {
+      setAuth(data)
+      addToast({ type: 'success', message: 'Password changed successfully! Welcome to your dashboard.' })
+      navigate(roleRedirect(data), { replace: true })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to update password. Please check your OTP.',
+      })
+    },
+  })
+}
+
+export function useFirstLoginResendOtp() {
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (payload) => axiosInstance.post('/auth/first-login/resend-otp', payload),
+    onSuccess: ({ data }) => {
+      addToast({ type: 'success', message: data?.message || 'OTP resent to your registered email.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to resend OTP.',
+      })
+    },
+  })
 }
 

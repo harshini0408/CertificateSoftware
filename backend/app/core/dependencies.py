@@ -49,15 +49,31 @@ def require_role(*roles: UserRole):
     return _checker
 
 
-# ── Guest-only gate ──────────────────────────────────────────────────────
+# ── Certificate Generator Gate (Guest, Faculty, Tutor, Student, SuperAdmin) ───
+
+CERT_GENERATOR_ROLES = {
+    UserRole.GUEST,
+    UserRole.FACULTY,
+    UserRole.TUTOR,
+    UserRole.STUDENT,
+    UserRole.SUPER_ADMIN,
+}
+
+
+async def require_cert_generator(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allow access to guest, faculty, tutor, student, and super_admin users for certificate wizard."""
+    if current_user.role not in CERT_GENERATOR_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Certificate generation access denied")
+    return current_user
+
 
 async def require_guest(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """Allow access only to active guest users."""
-    if current_user.role != UserRole.GUEST:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Guest access only")
-    return current_user
+    """Allow access to active cert generator users (guest, faculty, tutor, student)."""
+    return await require_cert_generator(current_user=current_user)
 
 
 # ── Club access gate ─────────────────────────────────────────────────────

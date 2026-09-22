@@ -23,7 +23,12 @@ import {
   useBulkImportTutors,
   useDownloadTutorImportSample,
   useReassignTutorStudents,
+  useAddTutorClass,
+  useRemoveTutorClass,
   useTutorMappingSummary,
+  useMakeFacultyTutor,
+  useBulkImportFaculty,
+  useDownloadFacultyImportSample,
   useDeleteUser,
   useBulkDeleteUsers,
   useStudentCertificateSearch,
@@ -70,6 +75,7 @@ const roleBadge = {
   club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
   dept_coordinator: 'bg-purple-50 text-purple-700 ring-purple-200',
   tutor: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  faculty: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   student: 'bg-green-50 text-green-700 ring-green-200',
   guest: 'bg-amber-50 text-amber-700 ring-amber-200',
   super_admin: 'bg-red-50 text-red-700 ring-red-200',
@@ -81,6 +87,7 @@ const roleLabel = {
   club_coordinator: 'Club Coordinator',
   dept_coordinator: 'Dept Coordinator',
   tutor: 'Tutor',
+  faculty: 'Faculty',
   student: 'Student',
   guest: 'Guest',
   super_admin: 'Super Admin',
@@ -370,6 +377,7 @@ const roles = [
   { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
   { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
   { value: 'tutor', label: 'Tutor', icon: '🧑‍🏫', desc: 'Manages one class of students' },
+  { value: 'faculty', label: 'Faculty', icon: '👨‍🏫', desc: 'Institutional certificate generator' },
   { value: 'student', label: 'Student', icon: '📚', desc: 'Has certificates & credits' },
   { value: 'guest', label: 'Guest', icon: '🎟️', desc: 'Limited access account' },
 ]
@@ -416,9 +424,14 @@ function NewUserModal({ isOpen, onClose }) {
     else if (!/^[a-zA-Z0-9_-]+$/.test(form.username)) errs.username = 'Letters, numbers, underscores, hyphens only'
     if (!form.email.trim()) errs.email = 'Required'
     else if (!/^[a-zA-Z0-9._%+-]+@psgitech\.ac\.in$/i.test(form.email.trim())) errs.email = 'Only @psgitech.ac.in emails are allowed'
-    if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
+    if (selectedRole !== 'faculty') {
+      if (!form.password || form.password.length < 8) errs.password = 'Min 8 characters'
+    } else if (form.password && form.password.length < 8) {
+      errs.password = 'Min 8 characters if provided'
+    }
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
     if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
+    if (selectedRole === 'faculty' && !form.department) errs.department = 'Required'
     if (selectedRole === 'hod' && (!Array.isArray(form.departments) || form.departments.length === 0)) errs.departments = 'Select at least one department'
     if (selectedRole === 'tutor') {
       if (!form.department) errs.department = 'Required'
@@ -465,15 +478,15 @@ function NewUserModal({ isOpen, onClose }) {
       username: form.username.trim(),
       name: form.name.trim(),
       email: form.email.trim().toLowerCase(),
-      password: form.password,
+      password: form.password || (selectedRole === 'faculty' ? form.email.trim().toLowerCase() : form.password),
       role: selectedRole,
     }
 
     if (selectedRole === 'club_coordinator') {
       payload.club_id = form.club_id
     }
-    if (selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') {
-      payload.department = form.department.trim()
+    if (selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor' || selectedRole === 'faculty') {
+      if (form.department?.trim()) payload.department = form.department.trim()
     }
     if (selectedRole === 'hod') {
       payload.departments = (form.departments || []).map((d) => d.trim()).filter(Boolean)
@@ -552,9 +565,9 @@ function NewUserModal({ isOpen, onClose }) {
               {errors.name && <p className="form-error">{errors.name}</p>}
             </div>
             <div>
-              <label className="form-label">Username *</label>
+              <label className="form-label">{selectedRole === 'faculty' ? 'Faculty ID (Username) *' : 'Username *'}</label>
               <input className={`form-input font-mono ${errors.username ? 'form-input-error' : ''}`} value={form.username} onChange={(e) => handleChange('username', e.target.value)} />
-              <p className="mt-0.5 text-xs text-gray-400">Cannot be changed later</p>
+              <p className="mt-0.5 text-xs text-gray-400">{selectedRole === 'faculty' ? 'Faculty ID used for login' : 'Cannot be changed later'}</p>
               {errors.username && <p className="form-error">{errors.username}</p>}
             </div>
           </div>
@@ -565,9 +578,9 @@ function NewUserModal({ isOpen, onClose }) {
               {errors.email && <p className="form-error">{errors.email}</p>}
             </div>
             <div>
-              <label className="form-label">Password *</label>
+              <label className="form-label">{selectedRole === 'faculty' ? 'Password (Default: Email)' : 'Password *'}</label>
               <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} autoComplete="new-password" className={`form-input pr-10 ${errors.password ? 'form-input-error' : ''}`} value={form.password} onChange={(e) => handleChange('password', e.target.value)} />
+                <input type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder={selectedRole === 'faculty' ? 'Leave blank to use email' : ''} className={`form-input pr-10 ${errors.password ? 'form-input-error' : ''}`} value={form.password} onChange={(e) => handleChange('password', e.target.value)} />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">{showPassword ? 'Hide' : 'Show'}</button>
               </div>
               {errors.password && <p className="form-error">{errors.password}</p>}
@@ -585,7 +598,7 @@ function NewUserModal({ isOpen, onClose }) {
               {errors.club_id && <p className="form-error">{errors.club_id}</p>}
             </div>
           )}
-          {(selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor') && (
+          {(selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor' || selectedRole === 'faculty') && (
             <div>
               <label className="form-label">Department (Name or Slug) *</label>
               <select
@@ -1904,6 +1917,122 @@ function TutorBulkImportModal({ isOpen, onClose }) {
   )
 }
 
+function FacultyBulkImportModal({ isOpen, onClose }) {
+  const [file, setFile] = useState(null)
+  const [result, setResult] = useState(null)
+  const importMutation = useBulkImportFaculty()
+  const downloadSample = useDownloadFacultyImportSample()
+
+  const handleClose = () => {
+    setFile(null)
+    setResult(null)
+    onClose()
+  }
+
+  const handleSubmit = () => {
+    if (!file) return
+    const formData = new FormData()
+    formData.append('file', file)
+    importMutation.mutate(formData, {
+      onSuccess: ({ data }) => setResult(data),
+    })
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Bulk Import Faculty" wide>
+      {!result ? (
+        <div className="space-y-5">
+          <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-4">
+            <p className="text-sm font-semibold text-indigo-900 mb-1">Excel File Requirements</p>
+            <p className="text-xs text-indigo-700">
+              Upload a <span className="font-mono font-bold">.xlsx</span> file with these exact column headers
+              (case-insensitive, in any order):
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {['name', 'faculty id', 'email', 'department', 'username (faculty id)', 'password (faculty id)'].map((col) => (
+                <span key={col} className="inline-block rounded bg-indigo-100 px-2 py-0.5 font-mono text-[11px] text-indigo-800 font-semibold">{col}</span>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-indigo-600">
+              Note: Both username and initial password will be set from the file (default: Faculty ID). Department is strictly required. Upon first login, faculty will be prompted to change their password via email OTP.
+            </p>
+            <div className="mt-3">
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                onClick={() => downloadSample.mutate()}
+                disabled={downloadSample.isPending}
+              >
+                {downloadSample.isPending ? 'Downloading sample...' : 'Download Sample Excel'}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="form-label">Select Faculty Excel File (.xlsx)</label>
+            <input
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-gray-500 file:mr-3 file:rounded file:border-0
+                file:bg-navy/10 file:px-3 file:py-1.5 file:text-xs file:font-medium
+                file:text-navy hover:file:bg-navy/20 cursor-pointer"
+            />
+            {file && (
+              <p className="mt-1 text-xs text-gray-500">
+                Selected: <span className="font-medium">{file.name}</span> ({(file.size / 1024).toFixed(1)} KB)
+              </p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            <button className="btn-secondary" onClick={handleClose}>Cancel</button>
+            <button className="btn-primary" onClick={handleSubmit} disabled={!file || importMutation.isPending}>
+              {importMutation.isPending ? 'Importing...' : 'Import Faculty'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg bg-green-50 border border-green-100 p-3 text-center">
+              <p className="text-2xl font-bold text-green-700">{result.created}</p>
+              <p className="text-xs text-green-600 font-medium mt-0.5">Created</p>
+            </div>
+            <div className="rounded-lg bg-yellow-50 border border-yellow-100 p-3 text-center">
+              <p className="text-2xl font-bold text-yellow-700">{result.skipped}</p>
+              <p className="text-xs text-yellow-600 font-medium mt-0.5">Skipped</p>
+            </div>
+            <div className="rounded-lg bg-red-50 border border-red-100 p-3 text-center">
+              <p className="text-2xl font-bold text-red-700">{result.errors.length}</p>
+              <p className="text-xs text-red-600 font-medium mt-0.5">Errors</p>
+            </div>
+          </div>
+
+          {result.errors.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Row Errors</p>
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-red-100 bg-red-50 divide-y divide-red-100">
+                {result.errors.map((e, i) => (
+                  <div key={i} className="flex gap-3 px-3 py-2">
+                    <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-red-700">Row {e.row}</span>
+                    <span className="text-xs text-red-700">{e.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            <button className="btn-secondary" onClick={() => { setFile(null); setResult(null) }}>Import Another File</button>
+            <button className="btn-primary" onClick={handleClose}>Done</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor }) {
   const [fromTutorId, setFromTutorId] = useState('')
   const [toTutorId, setToTutorId] = useState('')
@@ -1983,85 +2112,1045 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor }) {
   )
 }
 
-// ── USERS TAB ─────────────────────────────────────────────────────────────────
-function UsersTab() {
-  const [search, setSearch] = useState('')
-  const [roleFilter, setRoleFilter] = useState('')
-  const debouncedSearch = useDebounce(search)
-  const filters = useMemo(() => {
-    const f = { is_active: true }
-    if (debouncedSearch) f.search = debouncedSearch
-    if (roleFilter) f.role = roleFilter
-    return f
-  }, [debouncedSearch, roleFilter])
-  const { data: users, isLoading } = useUsers(filters)
-  const { data: clubs } = useClubs()
-  const { data: tutors } = useUsers({ role: 'tutor' })
-  const { data: tutorMappingSummary, isLoading: tutorMappingLoading } = useTutorMappingSummary()
-  const deleteUser = useDeleteUser()
-  const bulkDeleteUsers = useBulkDeleteUsers()
-
-  const [showBulkImport, setShowBulkImport] = useState(false)
-  const [showTutorBulkImport, setShowTutorBulkImport] = useState(false)
-  const [showTutorSwitch, setShowTutorSwitch] = useState(false)
-  const [showNew, setShowNew] = useState(false)
-  const [editUser, setEditUser] = useState(null)
-  const [selectedTutorForSwitch, setSelectedTutorForSwitch] = useState(null)
-  const [deletingUserId, setDeletingUserId] = useState(null)
-  const [selectedUserIds, setSelectedUserIds] = useState([])
+// ── TUTOR CLASS SWITCH MODAL ──────────────────────────────────────────────────
+function SwitchTutorClassModal({ isOpen, onClose, tutor, departments }) {
+  const [department, setDepartment] = useState('')
+  const [batch, setBatch] = useState('')
+  const [section, setSection] = useState('')
+  const updateUser = useUpdateUser()
 
   useEffect(() => {
-    const validIds = new Set((users || []).map((u) => u.id))
-    setSelectedUserIds((prev) => prev.filter((id) => validIds.has(id)))
-  }, [users])
+    if (!isOpen || !tutor) return
+    setDepartment(tutor.department || '')
+    setBatch(tutor.batch || '')
+    setSection(tutor.section || '')
+  }, [isOpen, tutor])
 
-  const handleDeleteUser = async (user) => {
-    if (!user?.id) return
-    if (user.role === 'super_admin') return
-
-    const confirmed = window.confirm(`Delete user \"${user.name}\" (${user.username})?`)
-    if (!confirmed) return
-
-    try {
-      setDeletingUserId(user.id)
-      await deleteUser.mutateAsync(user.id)
-    } finally {
-      setDeletingUserId(null)
-    }
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!department || !batch || !section) return
+    updateUser.mutate(
+      {
+        userId: tutor.id,
+        department,
+        batch: batch.trim(),
+        section: section.trim().toUpperCase(),
+      },
+      {
+        onSuccess: () => onClose(),
+      },
+    )
   }
 
-  const selectableUserIds = useMemo(
-    () => (users || []).filter((u) => u.role !== 'super_admin').map((u) => u.id),
-    [users],
+  if (!tutor) return null
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`Switch Class for ${tutor.name}`}>
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <p className="text-sm text-gray-600">
+          Switch class for <span className="font-semibold text-gray-900">{tutor.name}</span> (Faculty ID: {tutor.username}).
+        </p>
+
+        <div>
+          <label className="form-label">Department *</label>
+          <select
+            className="form-input"
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            required
+          >
+            <option value="">Select Department...</option>
+            {(departments || []).map((d) => (
+              <option key={d.id || d.name} value={d.name}>
+                {d.name} {d.slug ? `(${d.slug})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="form-label">Batch (e.g. 2024-2028) *</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="e.g. 2024-2028"
+            value={batch}
+            onChange={(e) => setBatch(e.target.value)}
+            required
+          />
+        </div>
+
+        <div>
+          <label className="form-label">Section (e.g. A, B, C) *</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="e.g. A"
+            value={section}
+            onChange={(e) => setSection(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={!department || !batch || !section || updateUser.isPending}
+          >
+            {updateUser.isPending ? 'Saving...' : 'Switch Class'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
+}
 
-  const allSelected = selectableUserIds.length > 0 && selectableUserIds.every((id) => selectedUserIds.includes(id))
+// ── ADD TUTOR CLASS MODAL ─────────────────────────────────────────────────────
+function AddTutorClassModal({ isOpen, onClose, tutor, departments }) {
+  const [department, setDepartment] = useState('')
+  const [batch, setBatch] = useState('')
+  const [section, setSection] = useState('')
+  const [assignUnassigned, setAssignUnassigned] = useState(true)
+  const addClassMutation = useAddTutorClass()
 
-  const toggleSelectAllUsers = () => {
-    if (allSelected) setSelectedUserIds([])
-    else setSelectedUserIds(selectableUserIds)
+  useEffect(() => {
+    if (!isOpen || !tutor) return
+    setDepartment(tutor.department || '')
+    setBatch(tutor.batch || '')
+    setSection('')
+    setAssignUnassigned(true)
+  }, [isOpen, tutor])
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!department || !batch || !section) return
+    addClassMutation.mutate(
+      {
+        tutorId: tutor.id,
+        department,
+        batch: batch.trim(),
+        section: section.trim().toUpperCase(),
+        assignUnassigned,
+      },
+      {
+        onSuccess: () => onClose(),
+      },
+    )
   }
 
-  const toggleUserSelection = (userId) => {
-    setSelectedUserIds((prev) => (
-      prev.includes(userId)
-        ? prev.filter((id) => id !== userId)
-        : [...prev, userId]
-    ))
+  if (!tutor) return null
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`Add Class for ${tutor.name}`}>
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <p className="text-sm text-gray-600">
+          Assign an additional class to <span className="font-semibold text-gray-900">{tutor.name}</span> (Faculty ID: {tutor.username}).
+        </p>
+
+        <div>
+          <label className="form-label">Department *</label>
+          <select
+            className="form-input"
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            required
+          >
+            <option value="">Select Department...</option>
+            {(departments || []).map((d) => (
+              <option key={d.id || d.name} value={d.name}>
+                {d.name} {d.slug ? `(${d.slug})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="form-label">Batch (e.g. 2024-2028) *</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="e.g. 2024-2028"
+            value={batch}
+            onChange={(e) => setBatch(e.target.value)}
+            required
+          />
+        </div>
+
+        <div>
+          <label className="form-label">Section (e.g. A, B, C) *</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="e.g. B"
+            value={section}
+            onChange={(e) => setSection(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="flex items-center gap-2 pt-1">
+          <input
+            type="checkbox"
+            id="add-class-assign-unassigned"
+            checked={assignUnassigned}
+            onChange={(e) => setAssignUnassigned(e.target.checked)}
+            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          <label htmlFor="add-class-assign-unassigned" className="text-xs text-gray-700 cursor-pointer select-none">
+            Automatically map unassigned students in this class to {tutor.name}
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={!department || !batch || !section || addClassMutation.isPending}
+          >
+            {addClassMutation.isPending ? 'Adding Class...' : 'Add Class'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+// ── MAKE FACULTY TUTOR MODAL ────────────────────────────────────────────────
+function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
+  const [department, setDepartment] = useState('')
+  const [batch, setBatch] = useState('')
+  const [section, setSection] = useState('')
+  const [assignUnassigned, setAssignUnassigned] = useState(true)
+  const makeTutorMutation = useMakeFacultyTutor()
+
+  useEffect(() => {
+    if (!isOpen || !faculty) return
+    setDepartment(faculty.department || '')
+    setBatch(faculty.batch || '')
+    setSection(faculty.section || '')
+    setAssignUnassigned(true)
+  }, [isOpen, faculty])
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!department || !batch || !section) return
+    makeTutorMutation.mutate(
+      {
+        facultyId: faculty.id,
+        department,
+        batch: batch.trim(),
+        section: section.trim().toUpperCase(),
+        assignUnassigned,
+      },
+      {
+        onSuccess: () => onClose(),
+      },
+    )
   }
 
-  const handleBulkDeleteSelected = async () => {
-    if (selectedUserIds.length === 0) return
-    const confirmed = window.confirm(`Delete ${selectedUserIds.length} selected user(s)?`)
-    if (!confirmed) return
+  if (!faculty) return null
 
-    await bulkDeleteUsers.mutateAsync(selectedUserIds)
-    setSelectedUserIds([])
-  }
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`Make as Tutor: ${faculty.name}`}>
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className="rounded-lg bg-indigo-50 p-3 border border-indigo-100 text-xs text-indigo-900 leading-relaxed">
+          <p className="font-semibold mb-1">Assign Class to Faculty</p>
+          <p>
+            Promote <span className="font-bold text-gray-900">{faculty.name}</span> (Faculty ID: <span className="font-mono font-bold text-gray-900">{faculty.username}</span>) as a class Tutor. They will retain full faculty certificate generation privileges and gain class mentoring rights.
+          </p>
+        </div>
+
+        <div>
+          <label className="form-label">Department *</label>
+          <select
+            className="form-input"
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            required
+          >
+            <option value="">Select Department...</option>
+            {(departments || []).map((d) => (
+              <option key={d.id || d.name} value={d.name}>
+                {d.name} {d.slug ? `(${d.slug})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="form-label">Batch (e.g. 2024-2028) *</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="e.g. 2024-2028"
+            value={batch}
+            onChange={(e) => setBatch(e.target.value)}
+            required
+          />
+        </div>
+
+        <div>
+          <label className="form-label">Section (e.g. A, B, C) *</label>
+          <input
+            type="text"
+            className="form-input uppercase"
+            placeholder="e.g. A"
+            maxLength={5}
+            value={section}
+            onChange={(e) => setSection(e.target.value.toUpperCase())}
+            required
+          />
+        </div>
+
+        <div className="flex items-center gap-2 pt-1">
+          <input
+            type="checkbox"
+            id="make-tutor-assign-unassigned"
+            checked={assignUnassigned}
+            onChange={(e) => setAssignUnassigned(e.target.checked)}
+            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          <label htmlFor="make-tutor-assign-unassigned" className="text-xs text-gray-700 cursor-pointer select-none">
+            Automatically map unassigned students of this class to this tutor
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            onClick={onClose}
+            disabled={makeTutorMutation.isPending}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn-primary text-sm bg-indigo-600 hover:bg-indigo-700"
+            disabled={makeTutorMutation.isPending || !department || !batch || !section}
+          >
+            {makeTutorMutation.isPending ? 'Assigning...' : 'Confirm & Make as Tutor'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+// ── STUDENT GROUPED VIEW ──────────────────────────────────────────────────────
+function StudentGroupedView({
+  students,
+  isLoading,
+  tutors,
+  departments,
+  onSwitchTutor,
+  onEditUser,
+  onDeleteUser,
+}) {
+  const [deptFilter, setDeptFilter] = useState('')
+  const [batchFilter, setBatchFilter] = useState('')
+  const [sectionFilter, setSectionFilter] = useState('')
+  const [tutorFilter, setTutorFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search)
+
+  // Options for dropdowns
+  const deptOptions = useMemo(() => {
+    const s = new Set()
+    ;(departments || []).forEach((d) => { if (d.name) s.add(d.name) })
+    ;(students || []).forEach((u) => { if (u.department) s.add(u.department) })
+    return Array.from(s).sort()
+  }, [departments, students])
+
+  const batchOptions = useMemo(() => {
+    const s = new Set()
+    ;(students || []).forEach((u) => { if (u.batch) s.add(u.batch) })
+    return Array.from(s).sort()
+  }, [students])
+
+  const sectionOptions = useMemo(() => {
+    const s = new Set()
+    ;(students || []).forEach((u) => { if (u.section) s.add(u.section) })
+    return Array.from(s).sort()
+  }, [students])
+
+  // Filter students
+  const filteredStudents = useMemo(() => {
+    return (students || []).filter((s) => {
+      if (deptFilter && (s.department || '').toLowerCase() !== deptFilter.toLowerCase()) return false
+      if (batchFilter && (s.batch || '').toLowerCase() !== batchFilter.toLowerCase()) return false
+      if (sectionFilter && (s.section || '').toLowerCase() !== sectionFilter.toLowerCase()) return false
+      if (tutorFilter) {
+        if (tutorFilter === '__unassigned__') {
+          if (s.tutor_id || s.tutor_name) return false
+        } else {
+          if (
+            s.tutor_id !== tutorFilter &&
+            (s.tutor_name || '') !== tutorFilter &&
+            (s.tutor_email || '') !== tutorFilter
+          ) {
+            return false
+          }
+        }
+      }
+      if (debouncedSearch) {
+        const q = debouncedSearch.toLowerCase()
+        const match =
+          (s.name || '').toLowerCase().includes(q) ||
+          (s.email || '').toLowerCase().includes(q) ||
+          (s.registration_number || '').toLowerCase().includes(q) ||
+          (s.username || '').toLowerCase().includes(q)
+        if (!match) return false
+      }
+      return true
+    })
+  }, [students, deptFilter, batchFilter, sectionFilter, tutorFilter, debouncedSearch])
+
+  // Group: Department -> Batch -> Section -> Tutor
+  const groupedData = useMemo(() => {
+    const depts = {}
+    for (const s of filteredStudents) {
+      const dept = (s.department || 'Unassigned Department').trim()
+      const batch = (s.batch || 'Unassigned Batch').trim()
+      const section = (s.section || 'Unassigned Section').trim()
+      const tutorKey = s.tutor_id || (s.tutor_name ? `name:${s.tutor_name}` : '__unassigned__')
+      const tutorLabel = s.tutor_name || 'Unassigned Tutor'
+
+      if (!depts[dept]) depts[dept] = {}
+      if (!depts[dept][batch]) depts[dept][batch] = {}
+      if (!depts[dept][batch][section]) depts[dept][batch][section] = {}
+      if (!depts[dept][batch][section][tutorKey]) {
+        depts[dept][batch][section][tutorKey] = {
+          key: tutorKey,
+          label: tutorLabel,
+          tutorId: s.tutor_id || null,
+          tutorEmail: s.tutor_email || null,
+          tutorUsername: s.tutor_username || null,
+          students: [],
+        }
+      }
+      depts[dept][batch][section][tutorKey].students.push(s)
+    }
+    return depts
+  }, [filteredStudents])
+
+  return (
+    <div className="space-y-5">
+      {/* Filters */}
+      <div className="card p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Filters ({filteredStudents.length} of {students?.length || 0} students)
+          </span>
+          {(deptFilter || batchFilter || sectionFilter || tutorFilter || search) && (
+            <button
+              type="button"
+              onClick={() => {
+                setDeptFilter('')
+                setBatchFilter('')
+                setSectionFilter('')
+                setTutorFilter('')
+                setSearch('')
+              }}
+              className="text-xs font-medium text-indigo-600 hover:text-indigo-800 underline"
+            >
+              Reset Filters
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-5">
+          <div>
+            <label className="form-label text-[11px]">Department</label>
+            <select
+              className="form-input text-xs py-1.5"
+              value={deptFilter}
+              onChange={(e) => setDeptFilter(e.target.value)}
+            >
+              <option value="">All Departments</option>
+              {deptOptions.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label text-[11px]">Batch</label>
+            <select
+              className="form-input text-xs py-1.5"
+              value={batchFilter}
+              onChange={(e) => setBatchFilter(e.target.value)}
+            >
+              <option value="">All Batches</option>
+              {batchOptions.map((b) => (
+                <option key={b} value={b}>Batch {b}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label text-[11px]">Section</label>
+            <select
+              className="form-input text-xs py-1.5"
+              value={sectionFilter}
+              onChange={(e) => setSectionFilter(e.target.value)}
+            >
+              <option value="">All Sections</option>
+              {sectionOptions.map((sec) => (
+                <option key={sec} value={sec}>Section {sec}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label text-[11px]">Tutor</label>
+            <select
+              className="form-input text-xs py-1.5"
+              value={tutorFilter}
+              onChange={(e) => setTutorFilter(e.target.value)}
+            >
+              <option value="">All Tutors</option>
+              {(tutors || []).map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.username})
+                </option>
+              ))}
+              <option value="__unassigned__">Unassigned Tutor</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="form-label text-[11px]">Search</label>
+            <input
+              type="search"
+              placeholder="Name, Reg No, Email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="form-input text-xs py-1.5"
+            />
+          </div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="card p-12 text-center">
+          <LoadingSpinner size="lg" label="Loading students..." />
+        </div>
+      ) : Object.keys(groupedData).length === 0 ? (
+        <div className="card p-12 text-center">
+          <p className="text-gray-500 font-medium">No students found matching your filters.</p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {Object.entries(groupedData).map(([dept, batches]) => {
+            const deptStudentCount = Object.values(batches).reduce(
+              (acc, secs) =>
+                acc +
+                Object.values(secs).reduce(
+                  (a2, tuts) => a2 + Object.values(tuts).reduce((a3, t) => a3 + t.students.length, 0),
+                  0,
+                ),
+              0,
+            )
+
+            return (
+              <div
+                key={dept}
+                className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
+              >
+                {/* 1. Department Heading */}
+                <div className="bg-gradient-to-r from-navy/10 via-indigo-50/50 to-transparent border-b border-gray-200 px-5 py-3.5 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-navy text-white text-xs font-bold shadow-xs">
+                      {dept.slice(0, 3).toUpperCase()}
+                    </span>
+                    <div>
+                      <h2 className="text-base font-bold text-gray-900 tracking-tight">
+                        Department: {dept}
+                      </h2>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-navy/10 px-3 py-1 text-xs font-semibold text-navy">
+                    {deptStudentCount} {deptStudentCount === 1 ? 'Student' : 'Students'}
+                  </span>
+                </div>
+
+                <div className="p-5 space-y-6">
+                  {Object.entries(batches).map(([batch, sections]) => {
+                    return (
+                      <div
+                        key={batch}
+                        className="rounded-xl border border-gray-200/80 bg-gray-50/50 p-4 space-y-4"
+                      >
+                        {/* 2. Batch Heading */}
+                        <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+                          <span className="text-xs font-bold uppercase tracking-wider text-indigo-800 bg-indigo-100/70 border border-indigo-200 px-3 py-1 rounded-md">
+                            Batch {batch}
+                          </span>
+                        </div>
+
+                        <div className="space-y-4">
+                          {Object.entries(sections).map(([section, tutorsMap]) => {
+                            return (
+                              <div
+                                key={section}
+                                className="rounded-lg border border-gray-200 bg-white p-4 shadow-2xs space-y-4"
+                              >
+                                {/* 3. Section Heading */}
+                                <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold text-gray-800">
+                                      Section: {section}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* 4. Tutors under this Section */}
+                                <div className="space-y-4">
+                                  {Object.values(tutorsMap).map((tutorGroup) => {
+                                    const tutorObj =
+                                      (tutors || []).find(
+                                        (t) =>
+                                          t.id === tutorGroup.tutorId ||
+                                          (tutorGroup.tutorEmail && t.email?.toLowerCase() === tutorGroup.tutorEmail.toLowerCase()),
+                                      ) || null
+
+                                    return (
+                                      <div
+                                        key={tutorGroup.key}
+                                        className="rounded-lg border border-indigo-100 bg-indigo-50/20 p-3.5 space-y-3"
+                                      >
+                                        {/* Tutor Heading + Switch Tutor Option */}
+                                        <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-lg border border-gray-200 shadow-2xs">
+                                          <div className="flex items-center gap-2.5">
+                                            <span className="h-2.5 w-2.5 rounded-full bg-indigo-600" />
+                                            <span className="text-sm font-semibold text-gray-900">
+                                              Tutor: {tutorGroup.label}
+                                              {tutorGroup.tutorUsername ? ` (${tutorGroup.tutorUsername})` : ''}
+                                            </span>
+                                            <span className="text-xs text-gray-500 font-medium">
+                                              · {tutorGroup.students.length}{' '}
+                                              {tutorGroup.students.length === 1 ? 'student' : 'students'}
+                                            </span>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => onSwitchTutor(tutorObj)}
+                                            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors border border-indigo-200"
+                                          >
+                                            ⇄ Switch Tutor
+                                          </button>
+                                        </div>
+
+                                        {/* Student List Table */}
+                                        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                                          <table className="min-w-full divide-y divide-gray-200 text-xs">
+                                            <thead className="bg-gray-50 text-gray-600 font-medium">
+                                              <tr>
+                                                <th className="px-3.5 py-2.5 text-left">Student Name</th>
+                                                <th className="px-3.5 py-2.5 text-left">Registration No</th>
+                                                <th className="px-3.5 py-2.5 text-left">Email</th>
+                                                <th className="px-3.5 py-2.5 text-left">Status</th>
+                                                <th className="px-3.5 py-2.5 text-right">Actions</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                              {tutorGroup.students.map((st) => (
+                                                <tr
+                                                  key={st.id}
+                                                  className="hover:bg-gray-50/80 transition-colors"
+                                                >
+                                                  <td className="px-3.5 py-2 font-medium text-gray-900">
+                                                    {st.name}
+                                                  </td>
+                                                  <td className="px-3.5 py-2 font-mono text-gray-600">
+                                                    {st.registration_number || '—'}
+                                                  </td>
+                                                  <td className="px-3.5 py-2 text-gray-500">{st.email}</td>
+                                                  <td className="px-3.5 py-2">
+                                                    <StatusBadge
+                                                      status={st.is_active ? 'active' : 'inactive'}
+                                                    />
+                                                  </td>
+                                                  <td className="px-3.5 py-2 text-right">
+                                                    <div className="inline-flex items-center gap-1.5">
+                                                      <button
+                                                        title="Edit student"
+                                                        onClick={() => onEditUser(st)}
+                                                        className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors"
+                                                      >
+                                                        <svg
+                                                          className="h-3.5 w-3.5"
+                                                          fill="none"
+                                                          viewBox="0 0 24 24"
+                                                          stroke="currentColor"
+                                                          strokeWidth={2}
+                                                        >
+                                                          <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                                          />
+                                                        </svg>
+                                                      </button>
+                                                      <button
+                                                        title="Delete student"
+                                                        onClick={() => onDeleteUser(st)}
+                                                        className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                                                      >
+                                                        <svg
+                                                          className="h-3.5 w-3.5"
+                                                          fill="none"
+                                                          viewBox="0 0 24 24"
+                                                          stroke="currentColor"
+                                                          strokeWidth={2}
+                                                        >
+                                                          <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7"
+                                                          />
+                                                        </svg>
+                                                      </button>
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TUTOR GROUPED VIEW ────────────────────────────────────────────────────────
+function TutorGroupedView({
+  tutors,
+  students,
+  isLoading,
+  tutorMappingSummary,
+  tutorMappingLoading,
+  onAddClass,
+  onSwitchClass,
+  onRemoveClass,
+  onSwitchTutor,
+  onEditUser,
+  onDeleteUser,
+}) {
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search)
+
+  // Filter tutors
+  const filteredTutors = useMemo(() => {
+    return (tutors || []).filter((t) => {
+      if (!debouncedSearch) return true
+      const q = debouncedSearch.toLowerCase()
+      const classText = (t.assigned_classes || [])
+        .map((c) => `${c.department} ${c.batch} ${c.section}`)
+        .join(' ')
+      return (
+        (t.name || '').toLowerCase().includes(q) ||
+        (t.username || '').toLowerCase().includes(q) ||
+        (t.email || '').toLowerCase().includes(q) ||
+        (t.department || '').toLowerCase().includes(q) ||
+        classText.toLowerCase().includes(q)
+      )
+    })
+  }, [tutors, debouncedSearch])
+
+  // Pre-calculate students mapped to each tutor
+  const studentsByTutorId = useMemo(() => {
+    const map = {}
+    ;(tutors || []).forEach((t) => {
+      map[t.id] = []
+    })
+
+    ;(students || []).forEach((st) => {
+      // 1. Direct match by tutor_id or tutor_email
+      let matchedTutor = (tutors || []).find(
+        (t) =>
+          t.id === st.tutor_id ||
+          (st.tutor_email && t.email?.toLowerCase() === st.tutor_email.toLowerCase()),
+      )
+
+      // 2. If no direct match, check classes assigned to tutors
+      if (!matchedTutor && st.department && st.batch && st.section) {
+        matchedTutor = (tutors || []).find((t) => {
+          const classes = t.assigned_classes || []
+          const hasPrimary =
+            (t.department || '').toLowerCase() === st.department.toLowerCase() &&
+            (t.batch || '').toLowerCase() === st.batch.toLowerCase() &&
+            (t.section || '').toLowerCase() === st.section.toLowerCase()
+          const hasAssigned = classes.some(
+            (c) =>
+              (c.department || '').toLowerCase() === st.department.toLowerCase() &&
+              (c.batch || '').toLowerCase() === st.batch.toLowerCase() &&
+              (c.section || '').toLowerCase() === st.section.toLowerCase(),
+          )
+          return hasPrimary || hasAssigned
+        })
+      }
+
+      if (matchedTutor && map[matchedTutor.id]) {
+        map[matchedTutor.id].push(st)
+      }
+    })
+
+    return map
+  }, [tutors, students])
+
+  return (
+    <div className="space-y-5">
+      {/* Top Snapshot Card & Search */}
+      <div className="card p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-semibold text-foreground">Tutor Mapping Snapshot</h2>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="rounded-md bg-indigo-50 border border-indigo-100 px-2.5 py-1 font-semibold text-indigo-700">
+                Tutors: {tutorMappingLoading ? '...' : (tutorMappingSummary?.total_tutors ?? tutors?.length ?? 0)}
+              </span>
+              <span className="rounded-md bg-green-50 border border-green-100 px-2.5 py-1 font-semibold text-green-700">
+                Mapped Students: {tutorMappingLoading ? '...' : (tutorMappingSummary?.total_mapped_students ?? 0)}
+              </span>
+            </div>
+          </div>
+          <input
+            type="search"
+            placeholder="Search tutor name, Faculty ID, dept…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="form-input w-72 text-xs py-1.5"
+          />
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="card p-12 text-center">
+          <LoadingSpinner size="lg" label="Loading tutors..." />
+        </div>
+      ) : filteredTutors.length === 0 ? (
+        <div className="card p-12 text-center">
+          <p className="text-gray-500 font-medium">No tutors found matching your search.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {filteredTutors.map((tutor) => {
+            const mappedStudents = studentsByTutorId[tutor.id] || []
+            const tutorClasses = tutor.assigned_classes && tutor.assigned_classes.length > 0
+              ? tutor.assigned_classes
+              : tutor.department && tutor.batch && tutor.section
+              ? [{ department: tutor.department, batch: tutor.batch, section: tutor.section }]
+              : []
+
+            return (
+              <div
+                key={tutor.id}
+                className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm space-y-4 transition-shadow hover:shadow-md"
+              >
+                {/* Tutor Header */}
+                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-100 pb-4">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <h3 className="text-base font-bold text-gray-900">{tutor.name}</h3>
+                      <span className="inline-flex items-center rounded-md bg-indigo-50 px-2.5 py-0.5 text-xs font-mono font-bold text-indigo-700 border border-indigo-200">
+                        Faculty ID: {tutor.username}
+                      </span>
+                      <StatusBadge status={tutor.is_active ? 'active' : 'inactive'} />
+                    </div>
+                    <p className="text-xs text-gray-500">{tutor.email}</p>
+
+                    {/* Assigned Classes */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-xs font-semibold text-gray-600">Assigned Classes:</span>
+                      {tutorClasses.length > 0 ? (
+                        tutorClasses.map((c, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 border border-blue-200"
+                          >
+                            <span>{c.department} · Batch {c.batch} · Sec {c.section}</span>
+                            {tutorClasses.length > 1 && (
+                              <button
+                                type="button"
+                                title="Remove this class"
+                                onClick={() => onRemoveClass(tutor.id, c)}
+                                className="text-blue-400 hover:text-blue-900 font-bold ml-0.5 text-[11px]"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs italic text-gray-400">No classes assigned</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions near tutor name/id */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onAddClass(tutor)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors"
+                      title="Assign an additional class to this tutor"
+                    >
+                      + Add Class
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSwitchClass(tutor)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
+                      title="Switch tutor's assigned class"
+                    >
+                      ⇄ Switch Class
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSwitchTutor(tutor)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                      title="Switch mapped students to another tutor"
+                    >
+                      ⇄ Switch Students
+                    </button>
+                    <button
+                      title="Edit tutor"
+                      onClick={() => onEditUser(tutor)}
+                      className="rounded p-1.5 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      title="Delete tutor"
+                      onClick={() => onDeleteUser(tutor)}
+                      className="rounded p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Body: Students List */}
+                <div>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-gray-600">
+                      Mapped Students ({mappedStudents.length})
+                    </h4>
+                  </div>
+
+                  {mappedStudents.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/50 p-4 text-center">
+                      <p className="text-xs text-gray-500 italic">No students currently mapped to this tutor.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border border-gray-200">
+                      <table className="min-w-full divide-y divide-gray-200 text-xs">
+                        <thead className="bg-gray-50 text-gray-600 font-medium">
+                          <tr>
+                            <th className="px-3.5 py-2.5 text-left">Student Name</th>
+                            <th className="px-3.5 py-2.5 text-left">Registration No</th>
+                            <th className="px-3.5 py-2.5 text-left">Email</th>
+                            <th className="px-3.5 py-2.5 text-left">Class</th>
+                            <th className="px-3.5 py-2.5 text-left">Status</th>
+                            <th className="px-3.5 py-2.5 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 bg-white">
+                          {mappedStudents.map((st) => (
+                            <tr key={st.id} className="hover:bg-gray-50/80 transition-colors">
+                              <td className="px-3.5 py-2 font-medium text-gray-900">{st.name}</td>
+                              <td className="px-3.5 py-2 font-mono text-gray-600">
+                                {st.registration_number || '—'}
+                              </td>
+                              <td className="px-3.5 py-2 text-gray-500">{st.email}</td>
+                              <td className="px-3.5 py-2 text-gray-600">
+                                {st.department || '—'} · {st.batch || '—'} · Sec {st.section || '—'}
+                              </td>
+                              <td className="px-3.5 py-2">
+                                <StatusBadge status={st.is_active ? 'active' : 'inactive'} />
+                              </td>
+                              <td className="px-3.5 py-2 text-right">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    title="Edit student"
+                                    onClick={() => onEditUser(st)}
+                                    className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors"
+                                  >
+                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    title="Delete student"
+                                    onClick={() => onDeleteUser(st)}
+                                    className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                                  >
+                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── ROLE USERS VIEW (for Faculty, HOD, Coordinators, etc.) ───────────────────
+function RoleUsersView({
+  role,
+  users,
+  isLoading,
+  clubs,
+  onEditUser,
+  onDeleteUser,
+  onBulkDelete,
+  bulkDeleting,
+  onMakeTutor,
+}) {
+  const [search, setSearch] = useState('')
+  const [selectedIds, setSelectedIds] = useState([])
+  const debouncedSearch = useDebounce(search)
 
   const clubMap = useMemo(() => {
     const m = {}
-      ; (clubs || []).forEach((c) => { m[c.id] = c.name })
+    ;(clubs || []).forEach((c) => { m[c.id] = c.name })
     return m
   }, [clubs])
 
@@ -2073,10 +3162,41 @@ function UsersTab() {
     }
     if (u.role === 'club_coordinator') return clubMap[u.club_id] || u.club_id || '—'
     if (u.role === 'dept_coordinator') return u.department || '—'
-    if (u.role === 'tutor') return `${u.department || ''} ${u.batch || ''} ${u.section || ''}`.trim() || '—'
-    if (u.role === 'student') return `${u.batch || ''} ${u.section || ''}`.trim() || '—'
-    if (u.role === 'guest') return `${clubMap[u.club_id] || ''} · 1 event`
-    return '—'
+    if (u.role === 'guest') return clubMap[u.club_id] || '—'
+    return u.department || '—'
+  }
+
+  const filteredUsers = useMemo(() => {
+    return (users || []).filter((u) => {
+      if (!debouncedSearch) return true
+      const q = debouncedSearch.toLowerCase()
+      return (
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.username || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        getScope(u).toLowerCase().includes(q)
+      )
+    })
+  }, [users, debouncedSearch, clubMap])
+
+  useEffect(() => {
+    const validIds = new Set((filteredUsers || []).map((u) => u.id))
+    setSelectedIds((prev) => prev.filter((id) => validIds.has(id)))
+  }, [filteredUsers])
+
+  const selectableIds = useMemo(
+    () => (filteredUsers || []).filter((u) => u.role !== 'super_admin').map((u) => u.id),
+    [filteredUsers],
+  )
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.includes(id))
+
+  const toggleSelectAll = () => {
+    if (allSelected) setSelectedIds([])
+    else setSelectedIds(selectableIds)
+  }
+
+  const toggleSelectOne = (id) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
   const columns = [
@@ -2086,9 +3206,9 @@ function UsersTab() {
         <input
           type="checkbox"
           checked={allSelected}
-          onChange={toggleSelectAllUsers}
+          onChange={toggleSelectAll}
           onClick={(e) => e.stopPropagation()}
-          aria-label="Select all users"
+          aria-label="Select all"
         />
       ),
       searchKey: false,
@@ -2097,145 +3217,341 @@ function UsersTab() {
       render: (_, row) => (
         <input
           type="checkbox"
-          checked={selectedUserIds.includes(row.id)}
+          checked={selectedIds.includes(row.id)}
           disabled={row.role === 'super_admin'}
-          onChange={() => toggleUserSelection(row.id)}
+          onChange={() => toggleSelectOne(row.id)}
           onClick={(e) => e.stopPropagation()}
           aria-label={`Select ${row.username}`}
         />
       ),
     },
     { key: 'name', header: 'Name', sortable: true, searchKey: true },
-    { key: 'email', header: 'Registered Email', sortable: true, searchKey: true, render: (v) => <span className="text-xs text-gray-600">{v || '—'}</span> },
-    { key: 'username', header: 'Username', render: (v) => <span className="font-mono text-xs">{v}</span> },
-    { key: 'role', header: 'Role', render: (v) => <span className={`inline-flex items-center rounded-full ring-1 ring-inset px-2 py-0.5 text-xs font-medium ${roleBadge[v] || 'bg-gray-100 text-gray-600 ring-gray-200'}`}>{roleLabel[v] || v}</span> },
-    { key: '_scope', header: 'Scope', searchKey: false, render: (_, row) => <span className="text-xs text-gray-500">{getScope(row)}</span> },
     {
-      key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+      key: 'email',
+      header: 'Registered Email',
+      sortable: true,
+      searchKey: true,
+      render: (v) => <span className="text-xs text-gray-600">{v || '—'}</span>,
+    },
+    {
+      key: 'username',
+      header: role === 'faculty' ? 'Faculty ID' : 'Username',
+      render: (v) => <span className="font-mono text-xs font-semibold">{v}</span>,
+    },
+    {
+      key: 'role',
+      header: 'Role',
+      render: (v) => (
+        <span
+          className={`inline-flex items-center rounded-full ring-1 ring-inset px-2.5 py-0.5 text-xs font-medium ${
+            roleBadge[v] || 'bg-gray-100 text-gray-600 ring-gray-200'
+          }`}
+        >
+          {roleLabel[v] || v}
+        </span>
+      ),
+    },
+    {
+      key: '_scope',
+      header: 'Scope',
+      searchKey: false,
+      render: (_, row) => <span className="text-xs text-gray-500">{getScope(row)}</span>,
+    },
+    {
+      key: 'is_active',
+      header: 'Status',
+      searchKey: false,
+      render: (v) => <StatusBadge status={v ? 'active' : 'inactive'} />,
+    },
+    {
+      key: '_actions',
+      header: 'Actions',
+      searchKey: false,
+      render: (_, row) => (
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          {row.role === 'tutor' && (
+          {role === 'faculty' && (
             <button
-              title="Switch students to another tutor"
-              onClick={() => {
-                setSelectedTutorForSwitch(row)
-                setShowTutorSwitch(true)
-              }}
-              className="rounded p-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 hover:underline"
+              type="button"
+              onClick={() => onMakeTutor && onMakeTutor(row)}
+              className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 transition-colors border border-indigo-200"
+              title="Assign this faculty as a class tutor"
             >
-              Switch Students
+              <span>👨‍🏫</span> Make as Tutor
             </button>
           )}
-          <button title="Edit" onClick={() => setEditUser(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          <button
+            title="Edit"
+            onClick={() => onEditUser(row)}
+            className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
           </button>
           {row.role !== 'super_admin' && (
             <button
               title="Delete user"
-              onClick={() => handleDeleteUser(row)}
-              disabled={deleteUser.isPending && deletingUserId === row.id}
-              className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              onClick={() => onDeleteUser(row)}
+              className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
             >
-              {deleteUser.isPending && deletingUserId === row.id ? (
-                <span className="text-[10px] font-semibold">...</span>
-              ) : (
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7" />
-                </svg>
-              )}
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7" />
+              </svg>
             </button>
           )}
         </div>
-      )
+      ),
     },
   ]
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Users</h1>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <input
+          type="search"
+          placeholder={`Search ${roleLabel[role] || role}…`}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="form-input w-72 text-xs py-1.5"
+        />
+
+        {selectedIds.length > 0 && (
           <button
-            className="btn-danger"
-            onClick={handleBulkDeleteSelected}
-            disabled={selectedUserIds.length === 0 || bulkDeleteUsers.isPending}
+            className="btn-danger text-xs py-1.5"
+            onClick={() => onBulkDelete(selectedIds, () => setSelectedIds([]))}
+            disabled={bulkDeleting}
           >
-            {bulkDeleteUsers.isPending ? 'Deleting...' : `Delete Selected${selectedUserIds.length ? ` (${selectedUserIds.length})` : ''}`}
+            {bulkDeleting ? 'Deleting...' : `Delete Selected (${selectedIds.length})`}
           </button>
-          <button
-            className="btn-secondary"
-            onClick={() => setShowBulkImport(true)}
-          >
-            ↑ Import Students
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={() => setShowTutorBulkImport(true)}
-          >
-            ↑ Import Tutors
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={() => {
-              setSelectedTutorForSwitch(null)
-              setShowTutorSwitch(true)
-            }}
-          >
-            ⇄ Switch Tutor Mapping
-          </button>
-          <button className="btn-primary" onClick={() => setShowNew(true)}>+ New User</button>
+        )}
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={filteredUsers || []}
+        isLoading={isLoading}
+        emptyMessage={`No ${roleLabel[role] || role} users found.`}
+      />
+    </div>
+  )
+}
+
+// ── ROLE TABS CONFIGURATION ───────────────────────────────────────────────────
+const USER_ROLE_TABS = [
+  { key: 'student', label: 'Students' },
+  { key: 'faculty', label: 'Faculty' },
+  { key: 'tutor', label: 'Tutors' },
+  { key: 'hod', label: 'HODs' },
+  { key: 'dept_coordinator', label: 'Dept Coordinators' },
+  { key: 'club_coordinator', label: 'Club Coordinators' },
+  { key: 'student_affairs', label: 'Student Affairs' },
+  { key: 'principal', label: 'Principals' },
+  { key: 'guest', label: 'Guests' },
+  { key: 'super_admin', label: 'Super Admins' },
+]
+
+// ── USERS TAB ─────────────────────────────────────────────────────────────────
+function UsersTab() {
+  const [activeRoleTab, setActiveRoleTab] = useState('student')
+
+  // Queries
+  const { data: roleUsers, isLoading: roleUsersLoading } = useUsers({ role: activeRoleTab })
+  const { data: tutors } = useUsers({ role: 'tutor' })
+  const { data: students } = useUsers({ role: 'student' })
+  const { data: clubs } = useClubs()
+  const { data: departments } = useDepartments()
+  const { data: tutorMappingSummary, isLoading: tutorMappingLoading } = useTutorMappingSummary()
+
+  // Mutations
+  const deleteUser = useDeleteUser()
+  const bulkDeleteUsers = useBulkDeleteUsers()
+  const removeTutorClassMutation = useRemoveTutorClass()
+
+  // Modals state
+  const [showBulkImport, setShowBulkImport] = useState(false)
+  const [showTutorBulkImport, setShowTutorBulkImport] = useState(false)
+  const [showFacultyBulkImport, setShowFacultyBulkImport] = useState(false)
+  const [showMakeFacultyTutor, setShowMakeFacultyTutor] = useState(false)
+  const [selectedFacultyForTutor, setSelectedFacultyForTutor] = useState(null)
+  const [showTutorSwitch, setShowTutorSwitch] = useState(false)
+  const [showTutorClassSwitch, setShowTutorClassSwitch] = useState(false)
+  const [showAddTutorClass, setShowAddTutorClass] = useState(false)
+  const [showNew, setShowNew] = useState(false)
+  const [editUser, setEditUser] = useState(null)
+  const [selectedTutorForSwitch, setSelectedTutorForSwitch] = useState(null)
+  const [selectedTutorForClass, setSelectedTutorForClass] = useState(null)
+
+  const handleDeleteUser = async (user) => {
+    if (!user?.id) return
+    if (user.role === 'super_admin') return
+
+    const confirmed = window.confirm(`Delete user "${user.name}" (${user.username})?`)
+    if (!confirmed) return
+
+    await deleteUser.mutateAsync(user.id)
+  }
+
+  const handleBulkDelete = async (ids, onClear) => {
+    if (!ids || ids.length === 0) return
+    const confirmed = window.confirm(`Delete ${ids.length} selected user(s)?`)
+    if (!confirmed) return
+
+    await bulkDeleteUsers.mutateAsync(ids)
+    if (onClear) onClear()
+  }
+
+  const handleRemoveTutorClass = (tutorId, c) => {
+    const confirmed = window.confirm(
+      `Remove class ${c.department} - Batch ${c.batch} - Section ${c.section} from this tutor?`,
+    )
+    if (!confirmed) return
+    removeTutorClassMutation.mutate({
+      tutorId,
+      department: c.department,
+      batch: c.batch,
+      section: c.section,
+    })
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Top Header & Global Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Users Management</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Manage and organize platform accounts by user role</p>
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <input type="search" placeholder="Search users…" value={search} onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
-        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="form-input w-44">
-          <option value="">All Roles</option>
-          <option value="principal">Principal</option>
-          <option value="hod">HOD</option>
-          <option value="student_affairs">Student Affairs</option>
-          <option value="club_coordinator">Club Coordinator</option>
-          <option value="dept_coordinator">Dept Coordinator</option>
-          <option value="tutor">Tutor</option>
-          <option value="student">Student</option>
-          <option value="guest">Guest</option>
-        </select>
-      </div>
-
-      <div className="card p-4">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-foreground">Tutor Mapping Snapshot</h2>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="rounded bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">
-                Tutors: {tutorMappingLoading ? '...' : (tutorMappingSummary?.total_tutors ?? 0)}
-              </span>
-              <span className="rounded bg-green-50 px-2 py-1 font-semibold text-green-700">
-                Mapped Students: {tutorMappingLoading ? '...' : (tutorMappingSummary?.total_mapped_students ?? 0)}
-              </span>
-            </div>
-          </div>
-
-          {!tutorMappingLoading && (
-            <div className="flex flex-wrap gap-2">
-              {(tutorMappingSummary?.items || []).slice(0, 12).map((t) => (
-                <span
-                  key={t.id}
-                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
-                  title={`${t.name} (${t.email})`}
-                >
-                  <span className="font-medium">{t.name}</span>
-                  <span className="text-gray-500">x {t.mapped_students}</span>
-                </span>
-              ))}
-              {(tutorMappingSummary?.items || []).length === 0 && (
-                <span className="text-xs text-gray-500">No tutor mappings found.</span>
-              )}
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {activeRoleTab === 'student' && (
+            <button
+              className="btn-secondary text-xs"
+              onClick={() => setShowBulkImport(true)}
+            >
+              ↑ Import Students
+            </button>
           )}
+          {activeRoleTab === 'tutor' && (
+            <button
+              className="btn-secondary text-xs"
+              onClick={() => setShowTutorBulkImport(true)}
+            >
+              ↑ Import Tutors
+            </button>
+          )}
+          {activeRoleTab === 'faculty' && (
+            <button
+              className="btn-secondary text-xs"
+              onClick={() => setShowFacultyBulkImport(true)}
+            >
+              ↑ Import Faculty
+            </button>
+          )}
+          {(activeRoleTab === 'student' || activeRoleTab === 'tutor') && (
+            <button
+              className="btn-secondary text-xs"
+              onClick={() => {
+                setSelectedTutorForSwitch(null)
+                setShowTutorSwitch(true)
+              }}
+            >
+              ⇄ Switch Tutor Mapping
+            </button>
+          )}
+          <button className="btn-primary text-xs" onClick={() => setShowNew(true)}>
+            + New User
+          </button>
         </div>
       </div>
 
-      <DataTable columns={columns} data={users || []} isLoading={isLoading} emptyMessage="No users found matching your filters." />
+      {/* Role Navigation Tabs on Top */}
+      <div className="border-b border-gray-200">
+        <nav className="flex space-x-2 overflow-x-auto pb-px" aria-label="User Roles Tabs">
+          {USER_ROLE_TABS.map((tab) => {
+            const isActive = activeRoleTab === tab.key
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveRoleTab(tab.key)}
+                className={`group inline-flex items-center whitespace-nowrap border-b-2 px-3.5 py-2.5 text-xs font-semibold transition-all ${
+                  isActive
+                    ? 'border-navy text-navy font-bold'
+                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                }`}
+              >
+                <span>{tab.label}</span>
+              </button>
+            )
+          })}
+        </nav>
+      </div>
+
+      {/* Active Tab Content */}
+      {activeRoleTab === 'student' ? (
+        <StudentGroupedView
+          students={roleUsers || []}
+          isLoading={roleUsersLoading}
+          tutors={tutors || []}
+          departments={departments || []}
+          onSwitchTutor={(tutor) => {
+            setSelectedTutorForSwitch(tutor)
+            setShowTutorSwitch(true)
+          }}
+          onEditUser={(u) => setEditUser(u)}
+          onDeleteUser={handleDeleteUser}
+        />
+      ) : activeRoleTab === 'tutor' ? (
+        <TutorGroupedView
+          tutors={roleUsers || []}
+          students={students || []}
+          isLoading={roleUsersLoading}
+          tutorMappingSummary={tutorMappingSummary}
+          tutorMappingLoading={tutorMappingLoading}
+          onAddClass={(tutor) => {
+            setSelectedTutorForClass(tutor)
+            setShowAddTutorClass(true)
+          }}
+          onSwitchClass={(tutor) => {
+            setSelectedTutorForClass(tutor)
+            setShowTutorClassSwitch(true)
+          }}
+          onRemoveClass={handleRemoveTutorClass}
+          onSwitchTutor={(tutor) => {
+            setSelectedTutorForSwitch(tutor)
+            setShowTutorSwitch(true)
+          }}
+          onEditUser={(u) => setEditUser(u)}
+          onDeleteUser={handleDeleteUser}
+        />
+      ) : (
+        <RoleUsersView
+          role={activeRoleTab}
+          users={roleUsers || []}
+          isLoading={roleUsersLoading}
+          clubs={clubs || []}
+          onEditUser={(u) => setEditUser(u)}
+          onDeleteUser={handleDeleteUser}
+          onBulkDelete={handleBulkDelete}
+          bulkDeleting={bulkDeleteUsers.isPending}
+          onMakeTutor={(f) => {
+            setSelectedFacultyForTutor(f)
+            setShowMakeFacultyTutor(true)
+          }}
+        />
+      )}
+
+      {/* Modals */}
       <BulkImportModal isOpen={showBulkImport} onClose={() => setShowBulkImport(false)} />
       <TutorBulkImportModal isOpen={showTutorBulkImport} onClose={() => setShowTutorBulkImport(false)} />
+      <FacultyBulkImportModal isOpen={showFacultyBulkImport} onClose={() => setShowFacultyBulkImport(false)} />
+      <MakeFacultyTutorModal
+        isOpen={showMakeFacultyTutor}
+        onClose={() => {
+          setShowMakeFacultyTutor(false)
+          setSelectedFacultyForTutor(null)
+        }}
+        faculty={selectedFacultyForTutor}
+        departments={departments || []}
+      />
       <TutorSwitchModal
         isOpen={showTutorSwitch}
         onClose={() => {
@@ -2244,6 +3560,24 @@ function UsersTab() {
         }}
         tutors={tutors || []}
         initialTutor={selectedTutorForSwitch}
+      />
+      <SwitchTutorClassModal
+        isOpen={showTutorClassSwitch}
+        onClose={() => {
+          setShowTutorClassSwitch(false)
+          setSelectedTutorForClass(null)
+        }}
+        tutor={selectedTutorForClass}
+        departments={departments || []}
+      />
+      <AddTutorClassModal
+        isOpen={showAddTutorClass}
+        onClose={() => {
+          setShowAddTutorClass(false)
+          setSelectedTutorForClass(null)
+        }}
+        tutor={selectedTutorForClass}
+        departments={departments || []}
       />
       <NewUserModal isOpen={showNew} onClose={() => setShowNew(false)} />
       <EditUserModal isOpen={!!editUser} onClose={() => setEditUser(null)} user={editUser} />

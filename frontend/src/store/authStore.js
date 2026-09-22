@@ -26,12 +26,13 @@ const useAuthStore = create(
       event_id: null,
       department: null,
       requires_profile_setup: false,
+      requires_password_change: false,
       isAuthenticated: false,
 
       /**
        * Populate the store after a successful /auth/login response.
        * @param {{ user: string, role: string, club_id?: string,
-       *            event_id?: string, department?: string }} payload
+       *            event_id?: string, department?: string, requires_password_change?: boolean }} payload
        */
       setAuth: (payload) =>
         set({
@@ -41,6 +42,7 @@ const useAuthStore = create(
           event_id: payload.event_id ?? null,
           department: payload.department ?? null,
           requires_profile_setup: payload.requires_profile_setup ?? false,
+          requires_password_change: payload.requires_password_change ?? false,
           isAuthenticated: true,
         }),
 
@@ -53,11 +55,15 @@ const useAuthStore = create(
           event_id: null,
           department: null,
           requires_profile_setup: false,
+          requires_password_change: false,
           isAuthenticated: false,
         }),
 
       setRequiresProfileSetup: (required) =>
         set({ requires_profile_setup: !!required }),
+
+      setRequiresPasswordChange: (required) =>
+        set({ requires_password_change: !!required }),
     }),
     {
       name: 'psg-auth',

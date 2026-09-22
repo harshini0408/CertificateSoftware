@@ -29,6 +29,8 @@ import {
   useUpdateStudentRegNo,
 } from './api'
 import { useChangePassword } from '../auth/api'
+import { EventHistoryContent } from '../guest/GuestHistory'
+import FacultyCertificateGenerator from '../faculty/FacultyCertificateGenerator'
 
 // ── QR Camera Scanner ─────────────────────────────────────────────────────────
 function AttendanceScannerView({ event, onScanned, onCancel, onError }) {
@@ -1263,6 +1265,27 @@ export default function StudentDashboard() {
                       )
                     })}
                   </div>
+                )}
+              </div>
+            ) : activeTab === 'events_created' ? (
+              <div className="space-y-6">
+                {searchParams.get('mode') === 'new' ? (
+                  <div className="space-y-4">
+                    <button
+                      type="button"
+                      onClick={() => navigate('/student?tab=events_created')}
+                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5"
+                    >
+                      ← Back to Created Events
+                    </button>
+                    <FacultyCertificateGenerator forceNew={true} />
+                  </div>
+                ) : (
+                  <EventHistoryContent
+                    title="Events Created"
+                    description="View and manage certificate generation events you have created. You can edit event names, view generated certificates, or download ZIP files."
+                    onNewSession={() => navigate('/student?tab=events_created&mode=new')}
+                  />
                 )}
               </div>
             ) : activeTab === 'settings' ? (

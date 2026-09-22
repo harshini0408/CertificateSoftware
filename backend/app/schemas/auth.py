@@ -23,6 +23,8 @@ class LoginResponse(BaseModel):
     event_id: Optional[str] = None
     department: Optional[str] = None
     requires_profile_setup: bool = False
+    requires_password_change: bool = False
+    email: Optional[str] = None
 
 
 class MeResponse(BaseModel):
@@ -34,6 +36,15 @@ class MeResponse(BaseModel):
     event_id: Optional[str] = None
     department: Optional[str] = None
     requires_profile_setup: bool = False
+    requires_password_change: bool = False
+    email: Optional[str] = None
+
+
+class FirstLoginPasswordChangeRequest(BaseModel):
+    username_or_email: str
+    otp_code: str = Field(..., min_length=4, max_length=4)
+    current_password: str
+    new_password: str = Field(..., min_length=8)
 
 
 class PasswordChangeRequest(BaseModel):

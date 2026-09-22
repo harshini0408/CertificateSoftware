@@ -25,6 +25,7 @@ from ..schemas.auth import (
     ForgotPasswordResponse,
     VerifyOTPRequest,
     ResetPasswordRequest,
+    FirstLoginPasswordChangeRequest,
 )
 from ..services.email_service import send_otp_email, send_password_change_otp_email, send_department_password_otp_email
 from ..services.auth_service import (
@@ -73,6 +74,31 @@ async def login(body: LoginRequest, response: Response):
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password")
 
+    if user.role in (UserRole.FACULTY, UserRole.TUTOR) and not user.first_login_completed:
+        # Mandatory password change for Faculty & Tutor first-time login
+        if user.email:
+            otp = f"{random.randint(1000, 9999)}"
+            expires_at = datetime.utcnow() + timedelta(minutes=15)
+            await OTPRequest.find({
+                "email": user.email.strip().lower(),
+                "purpose": "first_login_password_change",
+            }).delete()
+            await OTPRequest(
+                email=user.email.strip().lower(),
+                otp_code=otp,
+                purpose="first_login_password_change",
+                expires_at=expires_at,
+            ).insert()
+            await send_password_change_otp_email(user.email.strip().lower(), otp)
+
+        return LoginResponse(
+            role=user.role.value,
+            name=user.name,
+            redirect_to="/login",
+            requires_password_change=True,
+            email=_masked_email(user.email) if user.email else None,
+        )
+
     if user.role == UserRole.CLUB_COORDINATOR and not user.first_login_completed:
         user.first_login_completed = True
         await user.save()
@@ -101,7 +127,71 @@ async def login(body: LoginRequest, response: Response):
         event_id=str(user.event_id) if user.event_id else None,
         department=user.department,
         requires_profile_setup=requires_profile_setup,
+        requires_password_change=False,
+        email=user.email,
     )
+
+
+@router.post("/first-login/change-password", response_model=LoginResponse)
+async def first_login_change_password(body: FirstLoginPasswordChangeRequest, response: Response):
+    user = await authenticate_user(body.username_or_email, body.current_password)
+    if not user:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password")
+
+    email = (user.email or "").strip().lower()
+    now = datetime.utcnow()
+    otp_req = await OTPRequest.find_one({
+        "email": email,
+        "otp_code": body.otp_code.strip(),
+        "purpose": "first_login_password_change",
+        "expires_at": {"$gt": now},
+    })
+    if not otp_req:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired OTP")
+
+    user.password_hash = hash_password(body.new_password)
+    user.first_login_completed = True
+    await user.save()
+    await otp_req.delete()
+
+    access, refresh = build_tokens(user)
+    response.set_cookie("access_token", access, max_age=settings.access_token_expire_minutes * 60, **_COOKIE_DEFAULTS)
+    response.set_cookie("refresh_token", refresh, max_age=settings.refresh_token_expire_days * 86400, **_COOKIE_DEFAULTS)
+
+    return LoginResponse(
+        role=user.role.value,
+        name=user.name,
+        redirect_to=build_redirect(user),
+        requires_password_change=False,
+        email=user.email,
+    )
+
+
+@router.post("/first-login/resend-otp", response_model=TokenResponse)
+async def first_login_resend_otp(body: LoginRequest):
+    user = await authenticate_user(body.username, body.password)
+    if not user:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password")
+    if not user.email:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No registered email found")
+
+    email = user.email.strip().lower()
+    otp = f"{random.randint(1000, 9999)}"
+    expires_at = datetime.utcnow() + timedelta(minutes=15)
+    await OTPRequest.find({
+        "email": email,
+        "purpose": "first_login_password_change",
+    }).delete()
+    await OTPRequest(
+        email=email,
+        otp_code=otp,
+        purpose="first_login_password_change",
+        expires_at=expires_at,
+    ).insert()
+    success = await send_password_change_otp_email(email, otp)
+    if not success:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Failed to send OTP email")
+    return TokenResponse(message=f"OTP sent to {_masked_email(email)}")
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -277,6 +367,8 @@ async def me(current_user: User = Depends(get_current_user)):
             dept_assets and dept_assets.logo_path and dept_assets.signature1_path
         )
 
+    requires_password_change = bool(current_user.role in (UserRole.FACULTY, UserRole.TUTOR) and not current_user.first_login_completed)
+
     return MeResponse(
         role=current_user.role.value,
         name=current_user.name,
@@ -285,6 +377,8 @@ async def me(current_user: User = Depends(get_current_user)):
         event_id=str(current_user.event_id) if current_user.event_id else None,
         department=current_user.department,
         requires_profile_setup=requires_profile_setup,
+        requires_password_change=requires_password_change,
+        email=current_user.email,
     )
 
 

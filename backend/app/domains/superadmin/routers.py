@@ -33,7 +33,7 @@ from ...services.semester_service import get_current_semester, set_current_semes
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
 from ...schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
 from ...schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
-from ...schemas.user import UserCreate, UserUpdate, UserResponse
+from ...schemas.user import UserCreate, UserUpdate, UserResponse, TutorClassRequest
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -121,10 +121,33 @@ async def _find_tutor_by_email(email: str | None) -> User | None:
 
 # ── Helper: Build UserResponse from User document ────────────────────────────
 
+def _tutor_classes(u: User) -> List[dict]:
+    classes = []
+    if u.department and u.batch and u.section:
+        classes.append({"department": u.department, "batch": u.batch, "section": u.section})
+    if getattr(u, "assigned_classes", None):
+        for c in u.assigned_classes:
+            if isinstance(c, dict) and c.get("department") and c.get("batch") and c.get("section"):
+                if not any(
+                    (x.get("department") or "").lower() == (c.get("department") or "").lower() and
+                    (x.get("batch") or "").lower() == (c.get("batch") or "").lower() and
+                    (x.get("section") or "").lower() == (c.get("section") or "").lower()
+                    for x in classes
+                ):
+                    classes.append({
+                        "department": c.get("department"),
+                        "batch": c.get("batch"),
+                        "section": c.get("section"),
+                    })
+    return classes
+
+
 def _user_response(u: User) -> UserResponse:
     user_departments = getattr(u, "departments", None)
     if not user_departments and u.role == UserRole.HOD and u.department:
         user_departments = [u.department]
+
+    assigned_classes = _tutor_classes(u) if u.role == UserRole.TUTOR else None
 
     return UserResponse(
         id=str(u.id),
@@ -141,6 +164,7 @@ def _user_response(u: User) -> UserResponse:
         registration_number=u.registration_number,
         batch=u.batch,
         section=u.section,
+        assigned_classes=assigned_classes,
     )
 
 
@@ -495,10 +519,12 @@ async def create_user(body: UserCreate, _user: User = _admin):
     username = body.username.strip()
     email = body.email.strip().lower()
     name = body.name.strip()
-    password_input = body.password.strip()
-
-    if len(password_input) < 8:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Password must be at least 8 characters")
+    if body.role == "faculty":
+        password_input = (body.password or "").strip() or email
+    else:
+        password_input = (body.password or "").strip()
+        if len(password_input) < 8:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Password must be at least 8 characters")
 
     # Uniqueness checks
     if await User.find_one(User.username == username):
@@ -542,7 +568,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
 
     department_name = None
     department_names = None
-    if body.role in ["dept_coordinator", "hod", "student", "tutor"]:
+    if body.role in ["dept_coordinator", "hod", "student", "tutor", "faculty"]:
         if body.role == "hod":
             raw_departments = list(body.departments or [])
             if body.department:
@@ -598,15 +624,15 @@ async def create_user(body: UserCreate, _user: User = _admin):
         email=email,
         password_hash=hash_password(password_input),
         role=UserRole(body.role),
-        first_login_completed=(body.role != "club_coordinator"),
+        first_login_completed=False if body.role in ("faculty", "tutor", "club_coordinator") else True,
         is_active=body.is_active,
         club_id=club_oid,
         event_id=event_oid,
         department=department_name,
         departments=department_names if body.role == "hod" else None,
-        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor"] else None,
-        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod"] else None,
-        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod"] else None,
+        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor", "faculty"] else None,
+        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod", "faculty"] else None,
+        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod", "faculty"] else None,
     )
     await new_user.insert()
 
@@ -900,13 +926,163 @@ async def bulk_import_tutors(
                 email=email,
                 password_hash=hash_password(password),
                 role=UserRole.TUTOR,
-                first_login_completed=True,
+                first_login_completed=False,
                 is_active=True,
                 department=resolved_dept,
                 batch=batch,
                 section=section,
             )
             await tutor.insert()
+            created += 1
+
+        except ValueError as ve:
+            errors.append({"row": row_idx, "reason": str(ve)})
+        except Exception as exc:
+            errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+@router.get("/users/bulk-import-faculty/sample")
+async def download_faculty_import_sample(_user: User = _admin):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Faculty"
+
+    headers = [
+        "name",
+        "faculty id",
+        "email",
+        "department",
+        "username (faculty id)",
+        "password (faculty id)",
+    ]
+    ws.append(headers)
+    ws.append([
+        "Dr. Jane Doe",
+        "FAC101",
+        "jane.doe@psgitech.ac.in",
+        "Computer Science and Engineering",
+        "FAC101",
+        "FAC101",
+    ])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=faculty_bulk_import_sample.xlsx"},
+    )
+
+
+@router.post("/users/bulk-import-faculty", status_code=200)
+async def bulk_import_faculty(
+    file: UploadFile = File(...),
+    _user: User = _admin,
+):
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only .xlsx files are accepted")
+
+    import openpyxl
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not parse the Excel file. Ensure it is a valid .xlsx.")
+
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel file is empty or has no header row")
+
+    raw_headers = [re.sub(r"\s+", " ", str(h).strip().lower()) if h is not None else "" for h in header_row]
+
+    def find_idx(*aliases: str) -> int:
+        for alias in aliases:
+            cleaned = re.sub(r"\s+", " ", alias.strip().lower())
+            if cleaned in raw_headers:
+                return raw_headers.index(cleaned)
+        return -1
+
+    name_idx = find_idx("name")
+    fac_id_idx = find_idx("faculty id", "faculty_id", "facultyid")
+    email_idx = find_idx("email")
+    dept_idx = find_idx("department", "dept")
+    user_idx = find_idx("username (faculty id)", "username", "username(faculty id)")
+    pass_idx = find_idx("password (faculty id)", "password", "password(faculty id)")
+
+    missing = []
+    if name_idx < 0: missing.append("name")
+    if fac_id_idx < 0: missing.append("faculty id")
+    if email_idx < 0: missing.append("email")
+    if dept_idx < 0: missing.append("department")
+    if user_idx < 0: missing.append("username (faculty id)")
+    if pass_idx < 0: missing.append("password (faculty id)")
+
+    if missing:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Missing required columns: {', '.join(missing)}. Accepted headers only: name, faculty id, email, department, username (faculty id), password (faculty id)",
+        )
+
+    def get_cell(row_vals, idx):
+        if idx >= 0 and idx < len(row_vals):
+            return _excel_cell_text(row_vals[idx])
+        return ""
+
+    created = 0
+    skipped = 0
+    errors = []
+
+    for row_idx, row_vals in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if _excel_row_is_empty(row_vals):
+            continue
+
+        name = get_cell(row_vals, name_idx)
+        faculty_id = get_cell(row_vals, fac_id_idx)
+        email = get_cell(row_vals, email_idx).lower()
+        department = get_cell(row_vals, dept_idx)
+        username = get_cell(row_vals, user_idx) or faculty_id
+        password = get_cell(row_vals, pass_idx) or username or faculty_id
+
+        try:
+            if not name or not faculty_id or not email or not department:
+                raise ValueError("Missing required fields: name, faculty id, email, and department are all required")
+
+            if not email.endswith("@psgitech.ac.in"):
+                raise ValueError(f"Faculty email '{email}' must be a @psgitech.ac.in address")
+
+            resolved_dept = await _resolve_department_name(department)
+            if not resolved_dept:
+                raise ValueError(f"Invalid department '{department}'")
+
+            if await User.find_one(User.username == username):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Faculty ID/Username '{username}' already exists — skipped"})
+                continue
+
+            if await User.find_one(User.email == email):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Email '{email}' already exists — skipped"})
+                continue
+
+            # Default password is set to password (faculty id) with mandatory OTP reset on first login
+            faculty = User(
+                username=username,
+                name=name,
+                email=email,
+                password_hash=hash_password(password),
+                role=UserRole.FACULTY,
+                first_login_completed=False,
+                is_active=True,
+                department=resolved_dept,
+            )
+            await faculty.insert()
             created += 1
 
         except ValueError as ve:
@@ -1067,6 +1243,206 @@ async def reassign_tutor_students(
     }
 
 
+@router.post("/tutors/{tutor_id}/classes", response_model=UserResponse)
+async def add_tutor_class(
+    tutor_id: PydanticObjectId,
+    body: TutorClassRequest,
+    _user: User = _admin,
+):
+    tutor = await User.get(tutor_id)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tutor not found")
+
+    resolved_dept = await _resolve_department_name(body.department)
+    if not resolved_dept:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required")
+
+    batch = body.batch.strip()
+    section = body.section.strip().upper()
+    if not batch or not section:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Batch and Section are required")
+
+    if not tutor.department:
+        tutor.department = resolved_dept
+        tutor.batch = batch
+        tutor.section = section
+
+    assigned = list(tutor.assigned_classes or [])
+    exists = any(
+        (c.get("department") or "").lower() == resolved_dept.lower() and
+        (c.get("batch") or "").lower() == batch.lower() and
+        (c.get("section") or "").lower() == section.lower()
+        for c in assigned
+    ) or (
+        (tutor.department or "").lower() == resolved_dept.lower() and
+        (tutor.batch or "").lower() == batch.lower() and
+        (tutor.section or "").lower() == section.lower()
+    )
+
+    if not exists:
+        assigned.append({
+            "department": resolved_dept,
+            "batch": batch,
+            "section": section,
+        })
+        tutor.assigned_classes = assigned
+
+    await tutor.save()
+
+    if body.assign_unassigned_students:
+        students = await User.find({
+            "role": UserRole.STUDENT,
+            "department": resolved_dept,
+            "batch": batch,
+            "section": section,
+        }).to_list()
+        for st in students:
+            st_email = (st.email or "").strip().lower()
+            if not st_email:
+                continue
+            sc = await StudentCredit.find_one(StudentCredit.student_email == st_email)
+            if not sc:
+                await StudentCredit(
+                    student_email=st_email,
+                    tutor_email=tutor.email,
+                    registration_number=st.registration_number or "",
+                    student_name=st.name,
+                    department=resolved_dept,
+                    batch=batch,
+                    section=section,
+                    total_credits=0,
+                    credit_history=[],
+                    last_updated=datetime.utcnow(),
+                ).insert()
+            elif not sc.tutor_email:
+                await sc.set({"tutor_email": tutor.email, "last_updated": datetime.utcnow()})
+
+    return _user_response(tutor)
+
+
+@router.delete("/tutors/{tutor_id}/classes", response_model=UserResponse)
+async def remove_tutor_class(
+    tutor_id: PydanticObjectId,
+    department: str = Query(...),
+    batch: str = Query(...),
+    section: str = Query(...),
+    _user: User = _admin,
+):
+    tutor = await User.get(tutor_id)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tutor not found")
+
+    assigned = [
+        c for c in (tutor.assigned_classes or [])
+        if not (
+            (c.get("department") or "").lower() == department.strip().lower() and
+            (c.get("batch") or "").lower() == batch.strip().lower() and
+            (c.get("section") or "").lower() == section.strip().lower()
+        )
+    ]
+    tutor.assigned_classes = assigned
+
+    if (
+        (tutor.department or "").lower() == department.strip().lower() and
+        (tutor.batch or "").lower() == batch.strip().lower() and
+        (tutor.section or "").lower() == section.strip().lower()
+    ):
+        if assigned:
+            tutor.department = assigned[0]["department"]
+            tutor.batch = assigned[0]["batch"]
+            tutor.section = assigned[0]["section"]
+        else:
+            tutor.department = None
+            tutor.batch = None
+            tutor.section = None
+
+    await tutor.save()
+    return _user_response(tutor)
+
+
+@router.post("/faculty/{faculty_id}/make-tutor", response_model=UserResponse)
+async def make_faculty_tutor(
+    faculty_id: PydanticObjectId,
+    body: TutorClassRequest,
+    _user: User = _admin,
+):
+    user = await User.get(faculty_id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Faculty user not found")
+    if user.role not in (UserRole.FACULTY, UserRole.TUTOR):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"User with role '{user.role}' cannot be made a tutor")
+
+    resolved_dept = await _resolve_department_name(body.department)
+    if not resolved_dept:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required")
+
+    batch = body.batch.strip()
+    section = body.section.strip().upper()
+    if not batch or not section:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Batch and Section are required")
+
+    # Upgrade/update role to TUTOR
+    user.role = UserRole.TUTOR
+    user.department = resolved_dept
+    user.batch = batch
+    user.section = section
+
+    # Ensure assigned_classes contains this class
+    assigned = list(user.assigned_classes or [])
+    exists = any(
+        (c.get("department") or "").lower() == resolved_dept.lower() and
+        (c.get("batch") or "").lower() == batch.lower() and
+        (c.get("section") or "").lower() == section.lower()
+        for c in assigned
+    )
+    if not exists:
+        assigned.append({
+            "department": resolved_dept,
+            "batch": batch,
+            "section": section,
+        })
+    user.assigned_classes = assigned
+    await user.save()
+
+    # Map unassigned students if requested
+    if body.assign_unassigned_students:
+        students = await User.find({
+            "role": UserRole.STUDENT,
+            "department": resolved_dept,
+            "batch": batch,
+            "section": section,
+        }).to_list()
+        now = datetime.utcnow()
+        for st in students:
+            st_email = (st.email or "").strip().lower()
+            if not st_email:
+                continue
+            sc = await StudentCredit.find_one(StudentCredit.student_email == st_email)
+            if not sc:
+                await StudentCredit(
+                    student_email=st_email,
+                    tutor_email=user.email,
+                    registration_number=st.registration_number or "",
+                    student_name=st.name,
+                    department=resolved_dept,
+                    batch=batch,
+                    section=section,
+                    total_credits=0,
+                    credit_history=[],
+                    last_updated=now,
+                ).insert()
+            elif not sc.tutor_email:
+                await sc.set({
+                    "tutor_email": user.email,
+                    "department": resolved_dept,
+                    "batch": batch,
+                    "section": section,
+                    "last_updated": now,
+                })
+
+    return _user_response(user)
+
+
 @router.get("/users", response_model=List[UserResponse])
 async def list_users(
     role: Optional[str] = None,
@@ -1101,7 +1477,68 @@ async def list_users(
     query = {"$and": filters} if len(filters) > 1 else (filters[0] if filters else {})
 
     users = await User.find(query).to_list()
-    return [_user_response(u) for u in users]
+    responses = [_user_response(u) for u in users]
+
+    has_students = any(u.role == UserRole.STUDENT for u in users)
+    if has_students:
+        tutors = await User.find(User.role == UserRole.TUTOR).to_list()
+        tutor_by_email = {(t.email or "").strip().lower(): t for t in tutors if t.email}
+        tutor_by_class = {}
+        for t in tutors:
+            for c in _tutor_classes(t):
+                key = (
+                    (c.get("department") or "").strip().lower(),
+                    (c.get("batch") or "").strip().lower(),
+                    (c.get("section") or "").strip().lower(),
+                )
+                if key not in tutor_by_class:
+                    tutor_by_class[key] = t
+
+        student_emails = [
+            (u.email or "").strip().lower()
+            for u in users
+            if u.role == UserRole.STUDENT and u.email
+        ]
+        credits = (
+            await StudentCredit.find({"student_email": {"$in": student_emails}}).to_list()
+            if student_emails
+            else []
+        )
+        credit_by_email = {
+            (c.student_email or "").strip().lower(): c
+            for c in credits
+            if c.student_email
+        }
+
+        user_by_id = {str(u.id): u for u in users}
+        for resp in responses:
+            if resp.role != "student":
+                continue
+            u = user_by_id.get(resp.id)
+            if not u:
+                continue
+            sc = credit_by_email.get((u.email or "").strip().lower())
+            tutor = None
+            if sc and sc.tutor_email:
+                tutor = tutor_by_email.get(sc.tutor_email.strip().lower())
+            if not tutor and u.department and u.batch and u.section:
+                key = (
+                    u.department.strip().lower(),
+                    u.batch.strip().lower(),
+                    u.section.strip().lower(),
+                )
+                tutor = tutor_by_class.get(key)
+
+            if tutor:
+                resp.tutor_id = str(tutor.id)
+                resp.tutor_name = tutor.name
+                resp.tutor_email = tutor.email
+                resp.tutor_username = tutor.username
+            elif sc and sc.tutor_email:
+                resp.tutor_email = sc.tutor_email
+                resp.tutor_name = sc.tutor_email
+
+    return responses
 
 
 @router.get("/users/{user_id}/club-memberships")

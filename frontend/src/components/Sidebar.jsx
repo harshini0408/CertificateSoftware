@@ -155,18 +155,27 @@ function useNavItems() {
         { to: '/dept?tab=settings',      icon: icons.settings,  label: 'Settings' },
       ]
 
+    case 'faculty':
+      return [
+        { to: '/faculty',         icon: icons.certificate, label: 'Generate Certificates', end: true },
+        { to: '/faculty/history', icon: icons.calendar,    label: 'Certificate History',   end: false },
+      ]
+
     case 'student':
       return [
-        { to: '/student', icon: icons.certificate, label: 'My Certificates', end: true },
-        { to: '/student?tab=cert_verification', icon: icons.creditCard, label: 'Certificate Verification' },
-        { to: '/student?tab=upcoming', icon: icons.calendar, label: 'Upcoming Events' },
-        { to: '/student?tab=settings', icon: icons.settings, label: 'Settings' },
+        { to: '/student',                       icon: icons.certificate, label: 'My Certificates',         end: true },
+        { to: '/student?tab=events_created',    icon: icons.calendar,    label: 'Events Created',          end: false },
+        { to: '/student?tab=cert_verification', icon: icons.creditCard,  label: 'Certificate Verification', end: false },
+        { to: '/student?tab=upcoming',          icon: icons.calendar,    label: 'Upcoming Events',         end: false },
+        { to: '/student?tab=settings',          icon: icons.settings,    label: 'Settings',                end: false },
       ]
 
     case 'tutor':
       return [
-        { to: '/tutor', icon: icons.student, label: 'Dashboard', end: true },
-        { to: '/tutor?tab=verification', icon: icons.creditCard, label: 'Credit Point Verification' },
+        { to: '/tutor',                          icon: icons.student,     label: 'Dashboard',                 end: true },
+        { to: '/tutor?tab=verification',         icon: icons.creditCard,  label: 'Credit Point Verification',  end: false },
+        { to: '/tutor?mode=faculty',             icon: icons.certificate, label: 'Generate Certificates',     end: false },
+        { to: '/tutor?mode=faculty&tab=history', icon: icons.calendar,    label: 'Certificate History',       end: false },
       ]
 
     case 'student_affairs':

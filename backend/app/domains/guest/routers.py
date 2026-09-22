@@ -37,6 +37,7 @@ from ...config import get_settings
 from ...core.dependencies import require_guest
 from ...models.dept_certificate import DeptCertificate
 from ...models.field_position import FieldPosition
+from ...models.credit_rule import CreditRule
 from ...models.guest_session import GuestSession
 from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.user import User, UserRole
@@ -1284,3 +1285,91 @@ def _build_zip_response(session: GuestSession) -> StreamingResponse:
             "Content-Disposition": f'attachment; filename="{safe_name}_certificates.zip"'
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRESET CREDIT RULES — Available for certificate generation
+# GET /guest/credit-rules
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/credit-rules")
+async def get_guest_credit_rules(
+    current_user: User = Depends(require_guest),
+):
+    """Return all preset credit rules available for credit point allocation."""
+    rules = await CreditRule.find_all().to_list()
+    rules.sort(key=lambda r: r.cert_type.lower())
+    return [
+        {"id": str(r.id), "cert_type": r.cert_type, "points": int(r.points or 0)}
+        for r in rules
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EDIT / DELETE SESSION — Update event name or delete session
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EditSessionRequest(BaseModel):
+    event_name: str
+
+    @field_validator("event_name")
+    @classmethod
+    def validate_event_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Event name must be at least 3 characters")
+        if len(v) > 100:
+            raise ValueError("Event name must be at most 100 characters")
+        return v
+
+
+@router.patch("/sessions/{session_id}")
+async def update_guest_session(
+    session_id: PydanticObjectId,
+    body: EditSessionRequest,
+    current_user: User = Depends(require_guest),
+):
+    """Update event name for a historical guest session."""
+    session = await GuestSession.get(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status.HTTP_410_GONE, "Session has expired")
+
+    await session.set({"event_name": body.event_name})
+    return {
+        "message": "Event updated successfully",
+        "session_id": str(session.id),
+        "event_name": session.event_name,
+    }
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_guest_session(
+    session_id: PydanticObjectId,
+    current_user: User = Depends(require_guest),
+):
+    """Delete a session and its associated files."""
+    session = await GuestSession.get(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+
+    if session.guest_template_path:
+        try:
+            Path(session.guest_template_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    if session.guest_generated_certs:
+        for p in session.guest_generated_certs:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    await session.delete()
+    return {"message": "Event session deleted successfully", "session_id": str(session_id)}

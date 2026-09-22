@@ -324,8 +324,8 @@ function Step2({ initialState, onComplete, onBack }) {
 
             <div>
               <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-                Email column
-                <span className="ml-1.5 text-xs text-gray-400 font-normal">(auto-detected from Excel; you can change it if needed)</span>
+                Email column <span className="text-xs font-normal text-gray-400">(Optional)</span>
+                <span className="ml-1.5 text-xs text-gray-400 font-normal">— leave empty if you only want to download certificates</span>
               </label>
               <select
                 id="guest-email-col-select"
@@ -333,7 +333,7 @@ function Step2({ initialState, onComplete, onBack }) {
                 value={emailCol}
                 onChange={(e) => setEmailCol(e.target.value)}
               >
-                <option value="">— Select email column —</option>
+                <option value="">— No Email Column (Download only) —</option>
                 {headers.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>
             </div>
@@ -711,6 +711,22 @@ function Step4({ rowCount, emailColumn, allocatePoints, pointsPerCert, onAllocat
   const addToast = useToastStore((s) => s.addToast)
   const [generating, setGenerating] = useState(false)
   const [result, setResult]         = useState(null)
+  const [creditRules, setCreditRules] = useState([])
+  const [selectedRuleId, setSelectedRuleId] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+    axiosInstance.get('/guest/credit-rules').then((res) => {
+      if (mounted && Array.isArray(res.data)) {
+        setCreditRules(res.data)
+        if (pointsPerCert > 0) {
+          const match = res.data.find((r) => r.points === pointsPerCert)
+          if (match) setSelectedRuleId(match.id)
+        }
+      }
+    }).catch(() => {})
+    return () => { mounted = false }
+  }, [pointsPerCert])
 
   const generate = async () => {
     setGenerating(true)
@@ -741,39 +757,71 @@ function Step4({ rowCount, emailColumn, allocatePoints, pointsPerCert, onAllocat
         <div className="card p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-foreground">Credit Allocation</p>
-              <p className="text-xs text-gray-500">Optionally assign credit points for each generated certificate. The student email is taken from the uploaded sheet.</p>
+              <p className="text-sm font-semibold text-foreground">Credit Points Inclusion (Optional)</p>
+              <p className="text-xs text-gray-500">Optionally assign credit points for each generated certificate from the preset institutional credit rules.</p>
             </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
               <input
                 type="checkbox"
                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                 checked={!!allocatePoints}
-                onChange={(e) => onAllocatePointsChange(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  onAllocatePointsChange(checked)
+                  if (!checked) {
+                    onPointsChange(0)
+                    setSelectedRuleId('')
+                  } else if (creditRules.length > 0 && !selectedRuleId) {
+                    setSelectedRuleId(creditRules[0].id)
+                    onPointsChange(creditRules[0].points)
+                  }
+                }}
                 disabled={!emailColumn}
               />
-              Allocate points
+              Include credit points
             </label>
           </div>
 
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <label className="text-sm font-medium text-gray-700" htmlFor="guest-points-per-cert">
-              Points per certificate
-            </label>
-            <input
-              id="guest-points-per-cert"
-              type="number"
-              min={0}
-              step={1}
-              value={pointsPerCert}
-              onChange={(e) => onPointsChange(e.target.value)}
-              disabled={!allocatePoints || !emailColumn}
-              className="form-input w-full sm:w-40"
-            />
-            <span className="text-xs text-gray-400">Applies to all rows with a valid student email.</span>
-          </div>
+          {allocatePoints && emailColumn && (
+            <div className="mt-4 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-3">
+              <label className="block text-xs font-semibold text-indigo-900" htmlFor="guest-credit-rule-select">
+                Choose from Preset Credit Point Options:
+              </label>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <select
+                  id="guest-credit-rule-select"
+                  className="form-input flex-1 bg-white border-indigo-200 focus:border-indigo-500"
+                  value={selectedRuleId}
+                  onChange={(e) => {
+                    const id = e.target.value
+                    setSelectedRuleId(id)
+                    const rule = creditRules.find((r) => r.id === id)
+                    if (rule) onPointsChange(rule.points)
+                  }}
+                >
+                  <option value="">— Choose a Credit Point Preset —</option>
+                  {creditRules.map((rule) => (
+                    <option key={rule.id} value={rule.id}>
+                      {rule.cert_type} ({rule.points} {rule.points === 1 ? 'Credit Point' : 'Credit Points'})
+                    </option>
+                  ))}
+                </select>
+                {pointsPerCert > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold shrink-0">
+                    <span>+{pointsPerCert} Points per Cert</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500">
+                Points will be awarded to participants with valid student emails upon certificate dispatch.
+              </p>
+            </div>
+          )}
+
           {!emailColumn && (
-            <p className="mt-2 text-xs text-amber-600">No email column was detected in the uploaded Excel file.</p>
+            <p className="mt-3 text-xs text-amber-700 bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+              ℹ️ No email column detected in the uploaded Excel. Credit points can only be updated for participants with email addresses.
+            </p>
           )}
         </div>
 
@@ -921,73 +969,87 @@ function Step5({
   return (
     <StepCard
       title="Send & Download"
-      subtitle={`${generatedCount} certificate(s) are ready. Send them via email or download as a ZIP file.`}
+      subtitle={
+        emailColumn
+          ? `${generatedCount} certificate(s) are ready. Send them via email or download as a ZIP file.`
+          : `${generatedCount} certificate(s) are ready. No email column was detected in your Excel file, so certificates can be downloaded as a ZIP archive.`
+      }
     >
       <div className="space-y-6">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className={`grid grid-cols-1 gap-4 ${emailColumn ? 'sm:grid-cols-2' : ''}`}>
           <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-2xl p-5 text-center border border-indigo-100">
             <div className="text-4xl font-black text-indigo-700">{generatedCount}</div>
             <p className="text-xs font-semibold text-indigo-500 mt-1">Certificates Generated</p>
           </div>
-          <div className="rounded-2xl p-5 border bg-white border-gray-100">
-            <div className="text-xs font-semibold text-gray-500">Email Delivery</div>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <div>
-                <div className="text-lg font-bold text-green-600">{effectiveEmailStats.sent}</div>
-                <div className="text-[11px] text-gray-400">Sent</div>
-              </div>
-              <div>
-                <div className="text-lg font-bold text-amber-600">{effectiveEmailStats.pending}</div>
-                <div className="text-[11px] text-gray-400">Pending</div>
-              </div>
-              <div>
-                <div className="text-lg font-bold text-red-500">{effectiveEmailStats.failed}</div>
-                <div className="text-[11px] text-gray-400">Failed</div>
+          {emailColumn && (
+            <div className="rounded-2xl p-5 border bg-white border-gray-100">
+              <div className="text-xs font-semibold text-gray-500">Email Delivery</div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="text-lg font-bold text-green-600">{effectiveEmailStats.sent}</div>
+                  <div className="text-[11px] text-gray-400">Sent</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold text-amber-600">{effectiveEmailStats.pending}</div>
+                  <div className="text-[11px] text-gray-400">Pending</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold text-red-500">{effectiveEmailStats.failed}</div>
+                  <div className="text-[11px] text-gray-400">Failed</div>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-4">
-          {/* Send emails card */}
-          <div className="flex-1 bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-sm font-bold text-gray-800">Send via Email</p>
-                <p className="text-xs text-gray-500">Email each certificate to the recipient address read from the Excel upload</p>
-              </div>
-            </div>
-            {emailResult && (
-              <div className={`mb-3 rounded-xl p-3 text-xs ${emailResult.failed > 0 ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-800'}`}>
-                ✅ {emailResult.sent} sent · ❌ {emailResult.failed} failed
-                {emailResult.errors?.length > 0 && (
-                  <div className="mt-1 max-h-20 overflow-y-auto space-y-0.5">
-                    {emailResult.errors.map((e, i) => <p key={i}>{e}</p>)}
-                  </div>
-                )}
-              </div>
-            )}
-            <button
-              id="guest-send-emails-btn"
-              className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              onClick={() => sendEmails()}
-              disabled={sending || !emailColumn || pendingCount === 0}
-            >
-              {sending ? (
-                <><LoadingSpinner size="sm" label="" /> Sending…</>
-              ) : (
-                `✉ Send to Uploaded Emails (${pendingCount})`
-              )}
-            </button>
-            {!emailColumn && (
-              <p className="mt-2 text-xs text-amber-600">No email column detected in the uploaded Excel file.</p>
-            )}
+        {!emailColumn && (
+          <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800">
+            <span className="text-base">ℹ️</span>
+            <span>
+              <strong>Download Only Mode:</strong> No email column was provided in the Excel file. You can download all generated certificates in the ZIP archive below.
+            </span>
           </div>
+        )}
+
+        <div className={`flex flex-col ${emailColumn ? 'sm:flex-row' : ''} gap-4`}>
+          {/* Send emails card - only shown when emailColumn exists */}
+          {emailColumn && (
+            <div className="flex-1 bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-gray-800">Send via Email</p>
+                  <p className="text-xs text-gray-500">Email each certificate to the recipient address read from the Excel upload</p>
+                </div>
+              </div>
+              {emailResult && (
+                <div className={`mb-3 rounded-xl p-3 text-xs ${emailResult.failed > 0 ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-800'}`}>
+                  ✅ {emailResult.sent} sent · ❌ {emailResult.failed} failed
+                  {emailResult.errors?.length > 0 && (
+                    <div className="mt-1 max-h-20 overflow-y-auto space-y-0.5">
+                      {emailResult.errors.map((e, i) => <p key={i}>{e}</p>)}
+                    </div>
+                  )}
+                </div>
+              )}
+              <button
+                id="guest-send-emails-btn"
+                className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                onClick={() => sendEmails()}
+                disabled={sending || pendingCount === 0}
+              >
+                {sending ? (
+                  <><LoadingSpinner size="sm" label="" /> Sending…</>
+                ) : (
+                  `✉ Send to Uploaded Emails (${pendingCount})`
+                )}
+              </button>
+            </div>
+          )}
 
           {/* Download ZIP card */}
           <div className="flex-1 bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
@@ -1013,56 +1075,58 @@ function Step5({
           </div>
         </div>
 
-        <div className="card p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-sm font-semibold text-foreground">Email Delivery Status</p>
-            <span className="text-xs text-gray-500">
-              {emailStats.total} recipient{emailStats.total !== 1 ? 's' : ''}
-            </span>
-          </div>
+        {/* Email Delivery Status Table - only if emailColumn */}
+        {emailColumn && (
+          <div className="card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-semibold text-foreground">Email Delivery Status</p>
+              <span className="text-xs text-gray-500">
+                {emailStats.total} recipient{emailStats.total !== 1 ? 's' : ''}
+              </span>
+            </div>
 
-          <DataTable
-            columns={[
-              { key: 'recipient_name', header: 'Name', searchKey: true },
-              { key: 'recipient_email', header: 'Email', searchKey: true },
-              {
-                key: 'status',
-                header: 'Status',
-                render: (v) => <StatusBadge status={v || 'pending'} size="sm" />,
-              },
-              { key: 'sent_at', header: 'Sent At', render: (v) => formatDateTime(v) },
-              {
-                key: 'error',
-                header: 'Error',
-                render: (v) => (v ? <span className="text-xs text-red-600" title={v}>{v}</span> : '—'),
-              },
-              {
-                key: '_actions',
-                header: 'Action',
-                align: 'center',
-                render: (_, row) => {
-                  if (!emailColumn) return '—'
-                  if (row.status === 'emailed') return '—'
-                  return (
-                    <button
-                      className="rounded bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100"
-                      onClick={() => sendEmails([row.row_index])}
-                      disabled={sending}
-                    >
-                      {row.status === 'failed' ? 'Retry' : 'Send'}
-                    </button>
-                  )
+            <DataTable
+              columns={[
+                { key: 'recipient_name', header: 'Name', searchKey: true },
+                { key: 'recipient_email', header: 'Email', searchKey: true },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  render: (v) => <StatusBadge status={v || 'pending'} size="sm" />,
                 },
-              },
-            ]}
-            data={rows}
-            isLoading={false}
-            emptyMessage="No recipients loaded yet."
-            searchable
-            searchPlaceholder="Search recipients..."
-            rowKey="row_index"
-          />
-        </div>
+                { key: 'sent_at', header: 'Sent At', render: (v) => formatDateTime(v) },
+                {
+                  key: 'error',
+                  header: 'Error',
+                  render: (v) => (v ? <span className="text-xs text-red-600" title={v}>{v}</span> : '—'),
+                },
+                {
+                  key: '_actions',
+                  header: 'Action',
+                  align: 'center',
+                  render: (_, row) => {
+                    if (row.status === 'emailed') return '—'
+                    return (
+                      <button
+                        className="rounded bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                        onClick={() => sendEmails([row.row_index])}
+                        disabled={sending}
+                      >
+                        {row.status === 'failed' ? 'Retry' : 'Send'}
+                      </button>
+                    )
+                  },
+                },
+              ]}
+              data={rows}
+              isLoading={false}
+              emptyMessage="No recipients loaded yet."
+              searchable
+              searchPlaceholder="Search recipients..."
+              rowKey="row_index"
+            />
+          </div>
+        )}
 
         <div className="flex justify-start pt-2">
           <button

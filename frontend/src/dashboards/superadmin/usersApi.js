@@ -288,3 +288,127 @@ export function useReassignTutorStudents() {
   })
 }
 
+export function useAddTutorClass() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ tutorId, department, batch, section, assignUnassigned = true }) =>
+      axiosInstance.post(`/admin/tutors/${tutorId}/classes`, {
+        department,
+        batch,
+        section,
+        assign_unassigned_students: assignUnassigned,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Class added to tutor successfully.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to add class to tutor.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useRemoveTutorClass() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ tutorId, department, batch, section }) =>
+      axiosInstance.delete(`/admin/tutors/${tutorId}/classes`, {
+        params: { department, batch, section },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Class removed from tutor.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to remove class from tutor.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useMakeFacultyTutor() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ facultyId, department, batch, section, assignUnassigned = true }) =>
+      axiosInstance.post(`/admin/faculty/${facultyId}/make-tutor`, {
+        department,
+        batch,
+        section,
+        assign_unassigned_students: assignUnassigned,
+      }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({
+        type: 'success',
+        message: `${data.name || 'Faculty'} is now assigned as Tutor for ${data.department} ${data.batch} ${data.section}!`,
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to assign faculty as tutor.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useBulkImportFaculty() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (formData) =>
+      axiosInstance.post('/admin/users/bulk-import-faculty', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      const createdCount = data?.created ?? 0
+      const skippedCount = data?.skipped ?? 0
+      const errorCount = data?.errors?.length ?? 0
+      addToast({
+        type: errorCount > 0 ? 'warning' : 'success',
+        message: `Import complete: ${createdCount} faculty created, ${skippedCount} skipped, ${errorCount} error(s).`,
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Bulk faculty import failed.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useDownloadFacultyImportSample() {
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await axiosInstance.get('/admin/users/bulk-import-faculty/sample', {
+        responseType: 'blob',
+      })
+      const blob = new Blob([
+        response.data,
+      ], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'faculty_bulk_import_sample.xlsx'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to download sample file.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+
+

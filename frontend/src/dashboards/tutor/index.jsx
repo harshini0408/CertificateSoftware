@@ -23,6 +23,8 @@ import {
   downloadTutorStudentCertificates,
 } from './api'
 import { BACKEND_URL } from '../../utils/axiosInstance'
+import FacultyCertificateGenerator from '../faculty/FacultyCertificateGenerator'
+import { EventHistoryContent } from '../guest/GuestHistory'
 
 function fmtDate(iso) {
   if (!iso) return '—'
@@ -430,6 +432,8 @@ export default function TutorDashboard() {
   const [downloadingStudentEmail, setDownloadingStudentEmail] = useState(null)
   const [isDownloadingAllAssigned, setIsDownloadingAllAssigned] = useState(false)
   const [creditRangeExpression, setCreditRangeExpression] = useState('')
+  const mode = searchParams.get('mode') === 'faculty' ? 'faculty' : 'tutor'
+  const facultyTab = searchParams.get('tab') === 'history' ? 'history' : 'generate'
   const activeTab = searchParams.get('tab') === 'verification' ? 'verification' : 'dashboard'
 
   const totalStudents = students?.length || 0
@@ -518,6 +522,81 @@ export default function TutorDashboard() {
         <Sidebar />
         <main className="flex-1 overflow-y-auto bg-background">
           <div className="page-container space-y-6">
+            {/* Mode Switcher Toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white rounded-2xl border border-gray-200/80 shadow-sm">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Current Portal Mode</p>
+                <p className="text-sm font-bold text-gray-900">
+                  {mode === 'tutor' ? 'Tutor Mode — Class Credit & Student Management' : 'Faculty Mode — Institutional Certificate Generator'}
+                </p>
+              </div>
+              <div className="inline-flex rounded-xl bg-gray-100 p-1 border border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({ mode: 'tutor' }, { replace: true })}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    mode === 'tutor'
+                      ? 'bg-navy text-white shadow-sm'
+                      : 'text-gray-600 hover:text-navy'
+                  }`}
+                >
+                  👨‍🏫 Tutor Mode
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({ mode: 'faculty', tab: 'generate' }, { replace: true })}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    mode === 'faculty'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-indigo-600'
+                  }`}
+                >
+                  🎓 Faculty Mode (Generate Certs)
+                </button>
+              </div>
+            </div>
+
+            {mode === 'faculty' ? (
+              <div className="space-y-6">
+                <div className="border-b border-gray-200">
+                  <nav className="-mb-px flex space-x-6">
+                    <button
+                      type="button"
+                      onClick={() => setSearchParams({ mode: 'faculty', tab: 'generate' }, { replace: true })}
+                      className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                        facultyTab === 'generate'
+                          ? 'border-indigo-600 text-indigo-600 font-semibold'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      🎓 Generate Certificates
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSearchParams({ mode: 'faculty', tab: 'history' }, { replace: true })}
+                      className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                        facultyTab === 'history'
+                          ? 'border-indigo-600 text-indigo-600 font-semibold'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      📜 Certificate History
+                    </button>
+                  </nav>
+                </div>
+
+                {facultyTab === 'generate' ? (
+                  <FacultyCertificateGenerator forceNew={searchParams.get('new') === '1'} />
+                ) : (
+                  <EventHistoryContent
+                    title="Faculty Certificate History"
+                    description="View past certificate generation events, edit event names, download ZIP packages, or send emails."
+                    onNewSession={() => setSearchParams({ mode: 'faculty', tab: 'generate', new: '1' }, { replace: true })}
+                  />
+                )}
+              </div>
+            ) : (
+              <>
             <div>
               <h1 className="text-2xl font-bold text-foreground">
                 {profileLoading ? 'Tutor Dashboard' : `Tutor Dashboard — ${profile?.name || 'Tutor'}`}
@@ -527,26 +606,40 @@ export default function TutorDashboard() {
               </p>
             </div>
 
-            <div className="mb-2 flex gap-1 border-b border-gray-200">
+            <div className="mb-2 flex flex-wrap gap-1 border-b border-gray-200">
               <button
-                onClick={() => setSearchParams({}, { replace: true })}
+                onClick={() => setSearchParams({ mode: 'tutor' }, { replace: true })}
                 className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
                   activeTab === 'dashboard'
-                    ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
+                    ? 'text-navy font-bold after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
                     : 'text-gray-500 hover:text-navy'
                 }`}
               >
                 Dashboard
               </button>
               <button
-                onClick={() => setSearchParams({ tab: 'verification' }, { replace: true })}
+                onClick={() => setSearchParams({ mode: 'tutor', tab: 'verification' }, { replace: true })}
                 className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
                   activeTab === 'verification'
-                    ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
+                    ? 'text-navy font-bold after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
                     : 'text-gray-500 hover:text-navy'
                 }`}
               >
                 Credit Point Verification
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchParams({ mode: 'faculty', tab: 'generate' }, { replace: true })}
+                className="relative px-4 py-2.5 text-sm font-medium text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1.5"
+              >
+                <span>🎓</span> Generate Certificates
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchParams({ mode: 'faculty', tab: 'history' }, { replace: true })}
+                className="relative px-4 py-2.5 text-sm font-medium text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1.5"
+              >
+                <span>📜</span> Certificate History
               </button>
             </div>
 
@@ -554,6 +647,28 @@ export default function TutorDashboard() {
               <VerificationTab />
             ) : (
               <>
+
+            {/* Quick Banner: Faculty Certificate Privileges for Tutors */}
+            <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-blue-50/60 to-white p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="h-11 w-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xl shadow-md shrink-0">
+                  🎓
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Faculty Certificate Generator Access</h3>
+                  <p className="text-xs text-gray-600 mt-0.5 max-w-xl">
+                    As a tutor, you have full faculty access to generate and issue event certificates with custom templates, attendance lists, and optional student credit rules.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSearchParams({ mode: 'faculty', tab: 'generate', new: '1' }, { replace: true })}
+                className="btn-primary text-xs shrink-0 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 shadow-md transition-all font-bold"
+              >
+                Generate Certificates →
+              </button>
+            </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-1">
               <StatCard label="Assigned Students" value={totalStudents} accent="navy" />
@@ -758,6 +873,8 @@ export default function TutorDashboard() {
               />
             </div>
               </>
+            )}
+            </>
             )}
           </div>
         </main>

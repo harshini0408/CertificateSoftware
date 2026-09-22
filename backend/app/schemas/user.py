@@ -23,14 +23,14 @@ class UserCreate(BaseModel):
     )
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
-    password: str = Field(..., min_length=8)
+    password: Optional[str] = None
 
     @field_validator("email")
     @classmethod
     def validate_email_domain(cls, v: EmailStr) -> EmailStr:
         return validate_psgitech_email(v)
     role: Literal[
-        "principal", "hod", "student_affairs", "club_coordinator", "dept_coordinator", "tutor", "student", "guest"
+        "principal", "hod", "student_affairs", "club_coordinator", "dept_coordinator", "tutor", "student", "guest", "faculty"
     ]
     is_active: bool = True
 
@@ -47,7 +47,14 @@ class UserCreate(BaseModel):
     def validate_role_fields(self):
         role = self.role
 
-        if role == "club_coordinator":
+        if role != "faculty" and (not self.password or len(self.password) < 8):
+            raise ValueError("Password must be at least 8 characters")
+
+        if role == "faculty":
+            if not self.department or not str(self.department).strip():
+                raise ValueError("Department is required for faculty role")
+
+        elif role == "club_coordinator":
             if not self.club_id:
                 raise ValueError("club_id is required for club_coordinator role")
 
@@ -105,11 +112,23 @@ class UserUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = None
+    department: Optional[str] = None
+    departments: Optional[List[str]] = None
+    batch: Optional[str] = None
+    section: Optional[str] = None
+    assigned_classes: Optional[List[dict]] = None
 
     @field_validator("email")
     @classmethod
     def validate_email_domain(cls, v: Optional[EmailStr]) -> Optional[EmailStr]:
         return validate_psgitech_email(v)
+
+
+class TutorClassRequest(BaseModel):
+    department: str
+    batch: str
+    section: str
+    assign_unassigned_students: bool = True
 
 
 class UserResponse(BaseModel):
@@ -127,6 +146,12 @@ class UserResponse(BaseModel):
     registration_number: Optional[str] = None
     batch: Optional[str] = None
     section: Optional[str] = None
+    tutor_name: Optional[str] = None
+    tutor_email: Optional[str] = None
+    tutor_id: Optional[str] = None
+    tutor_username: Optional[str] = None
+    assigned_classes: Optional[List[dict]] = None
 
     class Config:
         from_attributes = True
+

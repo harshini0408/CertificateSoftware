@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useLogin, useLogout } from './api'
 import ForgotPasswordModal from './ForgotPasswordModal'
+import FirstLoginPasswordModal from './FirstLoginPasswordModal'
 import { useAuthStore } from '../../store/authStore'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import LoadingSpinner from '../../components/LoadingSpinner'
@@ -59,6 +60,7 @@ function TogglePasswordBtn({ show, onToggle }) {
 export default function Login() {
   const [searchParams] = useSearchParams()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const requiresPasswordChange = useAuthStore((s) => s.requires_password_change)
   const role = useAuthStore((s) => s.role)
   const club_id = useAuthStore((s) => s.club_id)
   const event_id = useAuthStore((s) => s.event_id)
@@ -66,6 +68,8 @@ export default function Login() {
 
   const [showPassword, setShowPassword] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [showFirstLoginModal, setShowFirstLoginModal] = useState(false)
+  const [firstLoginData, setFirstLoginData] = useState(null)
   const [loginMode, setLoginMode] = useState('username')
 
   const loginMutation = useLogin()
@@ -78,8 +82,8 @@ export default function Login() {
     formState: { errors, isSubmitting },
   } = useForm({ defaultValues: { username: '', password: '' } })
 
-  // Already logged in — redirect to own dashboard
-  if (isAuthenticated && !switchMode) {
+  // Already logged in — redirect to own dashboard (unless mandatory password change needed)
+  if (isAuthenticated && !switchMode && !requiresPasswordChange) {
     const redirectMap = {
       super_admin: '/admin',
       principal: '/principal',
@@ -90,6 +94,7 @@ export default function Login() {
       tutor: '/tutor',
       student: '/student',
       guest: '/guest',
+      faculty: '/faculty',
     }
     return <Navigate to={redirectMap[role] ?? '/login'} replace />
   }
@@ -99,7 +104,15 @@ export default function Login() {
       if (isAuthenticated) {
         await logoutMutation.mutateAsync()
       }
-      await loginMutation.mutateAsync(values)
+      const res = await loginMutation.mutateAsync(values)
+      if (res?.data?.requires_password_change) {
+        setFirstLoginData({
+          username: values.username,
+          password: values.password,
+          email: res.data.email,
+        })
+        setShowFirstLoginModal(true)
+      }
     } catch {
       // Mutation handlers surface the error toast.
     }
@@ -296,6 +309,15 @@ export default function Login() {
       <ForgotPasswordModal
         isOpen={showForgotPassword}
         onClose={() => setShowForgotPassword(false)}
+      />
+
+      <FirstLoginPasswordModal
+        isOpen={showFirstLoginModal}
+        loginData={firstLoginData}
+        onClose={() => {
+          setShowFirstLoginModal(false)
+          setFirstLoginData(null)
+        }}
       />
     </div>
   )
