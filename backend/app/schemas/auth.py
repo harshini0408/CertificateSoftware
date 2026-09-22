@@ -23,6 +23,7 @@ class LoginResponse(BaseModel):
     event_id: Optional[str] = None
     department: Optional[str] = None
     requires_profile_setup: bool = False
+    requires_password_change: bool = False
 
 
 class MeResponse(BaseModel):
@@ -34,6 +35,7 @@ class MeResponse(BaseModel):
     event_id: Optional[str] = None
     department: Optional[str] = None
     requires_profile_setup: bool = False
+    requires_password_change: bool = False
 
 
 class PasswordChangeRequest(BaseModel):

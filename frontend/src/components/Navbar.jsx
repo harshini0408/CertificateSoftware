@@ -27,7 +27,7 @@ const roleMeta = {
 }
 
 // ── Change-password popover ───────────────────────────────────────────────────
-function ChangePasswordForm({ onClose }) {
+function ChangePasswordForm({ onClose, onPasswordChanged, isRequired = false }) {
   const requestPasswordOtp = useRequestPasswordOtp()
   const verifyPasswordOtp = useVerifyPasswordOtp()
   const changePassword = useChangePassword()
@@ -77,6 +77,7 @@ function ChangePasswordForm({ onClose }) {
       })
       setOtpRequested(false)
       setOtpVerified(false)
+      onPasswordChanged()
       onClose()
     } catch {
       // Toast handled by hook
@@ -207,9 +208,11 @@ function ChangePasswordForm({ onClose }) {
 
       {!otpRequested && (
         <div className="flex items-center justify-end gap-2 pt-2">
-          <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
-            Cancel
-          </button>
+          {!isRequired && (
+            <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
+              Cancel
+            </button>
+          )}
           <button
             type="submit"
             className="btn-primary text-xs px-3 py-1.5"
@@ -246,9 +249,11 @@ function ChangePasswordForm({ onClose }) {
             ✓ OTP Verified
           </span>
           <div className="flex items-center gap-2">
-            <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
-              Cancel
-            </button>
+            {!isRequired && (
+              <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
+                Cancel
+              </button>
+            )}
             <button type="submit" className="btn-primary text-xs px-3 py-1.5" disabled={changePassword.isPending}>
               {changePassword.isPending ? 'Saving…' : 'Save Password'}
             </button>
@@ -259,10 +264,40 @@ function ChangePasswordForm({ onClose }) {
   )
 }
 
+export function FirstLoginPasswordGate() {
+  const requiresPasswordChange = useAuthStore((state) => state.requires_password_change)
+  const role = useAuthStore((state) => state.role)
+  const setRequiresPasswordChange = useAuthStore((state) => state.setRequiresPasswordChange)
+  const requiredRoles = ['tutor', 'hod', 'principal']
+
+  if (!requiresPasswordChange || !requiredRoles.includes(role)) return null
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-navy/60 px-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+        <h1 className="text-xl font-bold text-navy">Change your password</h1>
+        <p className="mt-2 mb-5 text-sm text-gray-600">
+          You must set a new password before continuing to your dashboard.
+        </p>
+        <ChangePasswordForm
+          isRequired
+          onClose={() => {}}
+          onPasswordChanged={() => setRequiresPasswordChange(false)}
+        />
+      </div>
+    </div>
+  )
+}
+
 // ── Navbar ────────────────────────────────────────────────────────────────────
 export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
   const navigate = useNavigate()
-  const { user, role, clearAuth } = useAuthStore()
+  const {
+    user,
+    role,
+    setRequiresPasswordChange,
+    clearAuth,
+  } = useAuthStore()
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
   const addToast = useToastStore((s) => s.addToast)
 
@@ -384,6 +419,7 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
                   ) : (
                     <ChangePasswordForm
                       onClose={() => setShowChangePw(false)}
+                      onPasswordChanged={() => setRequiresPasswordChange(false)}
                     />
                   )}
                 </div>

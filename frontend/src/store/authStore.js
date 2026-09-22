@@ -26,6 +26,7 @@ const useAuthStore = create(
       event_id: null,
       department: null,
       requires_profile_setup: false,
+      requires_password_change: false,
       isAuthenticated: false,
 
       /**
@@ -41,6 +42,7 @@ const useAuthStore = create(
           event_id: payload.event_id ?? null,
           department: payload.department ?? null,
           requires_profile_setup: payload.requires_profile_setup ?? false,
+          requires_password_change: payload.requires_password_change ?? false,
           isAuthenticated: true,
         }),
 
@@ -53,11 +55,15 @@ const useAuthStore = create(
           event_id: null,
           department: null,
           requires_profile_setup: false,
+          requires_password_change: false,
           isAuthenticated: false,
         }),
 
       setRequiresProfileSetup: (required) =>
         set({ requires_profile_setup: !!required }),
+
+      setRequiresPasswordChange: (required) =>
+        set({ requires_password_change: !!required }),
     }),
     {
       name: 'psg-auth',

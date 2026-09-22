@@ -51,8 +51,8 @@ export default function ProfileCard({
       <style>{`
         .pc-root {
           width: 100%;
-          max-width: 280px;
-          border-radius: 18px;
+          max-width: 320px;
+          border-radius: 10px;
           border: 1px solid #dbe3ef;
           background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
           box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
@@ -68,7 +68,8 @@ export default function ProfileCard({
 
         .pc-head {
           position: relative;
-          height: 96px;
+          aspect-ratio: 1;
+          height: auto;
           background:
             linear-gradient(135deg, rgba(29, 63, 114, 0.95) 0%, rgba(188, 29, 29, 0.78) 100%);
         }
@@ -93,25 +94,20 @@ export default function ProfileCard({
 
         .pc-avatar-wrap {
           position: absolute;
-          left: 50%;
-          transform: translateX(-50%);
-          bottom: -42px;
-          border-radius: 999px;
-          border: 3px solid #ffffff;
-          box-shadow: 0 6px 18px rgba(15, 23, 42, 0.2);
+          inset: 0;
           background: #f1f5f9;
         }
 
         .pc-avatar {
-          width: 84px;
-          height: 84px;
-          border-radius: 999px;
+          width: 100%;
+          height: 100%;
+          border-radius: 0;
           object-fit: cover;
           display: block;
         }
 
         .pc-body {
-          padding: 54px 14px 16px;
+          padding: 18px 14px 18px;
           text-align: center;
         }
 

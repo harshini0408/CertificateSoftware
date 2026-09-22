@@ -38,6 +38,11 @@ from ..config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 settings = get_settings()
+FIRST_LOGIN_PASSWORD_ROLES = {
+    UserRole.TUTOR,
+    UserRole.HOD,
+    UserRole.PRINCIPAL,
+}
 
 _COOKIE_DEFAULTS = dict(
     httponly=True,
@@ -101,6 +106,9 @@ async def login(body: LoginRequest, response: Response):
         event_id=str(user.event_id) if user.event_id else None,
         department=user.department,
         requires_profile_setup=requires_profile_setup,
+        requires_password_change=(
+            user.role in FIRST_LOGIN_PASSWORD_ROLES and not user.first_login_completed
+        ),
     )
 
 
@@ -211,6 +219,7 @@ async def change_password(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
 
     current_user.password_hash = hash_password(body.new_password)
+    current_user.first_login_completed = True
     await current_user.save()
     return TokenResponse(message="Password updated successfully")
 
@@ -252,6 +261,7 @@ async def change_department_password(
         )
 
     current_user.password_hash = hash_password(body.new_password)
+    current_user.first_login_completed = True
     await current_user.save()
     await otp_req.delete()
     return TokenResponse(message="Password updated successfully")
@@ -285,6 +295,10 @@ async def me(current_user: User = Depends(get_current_user)):
         event_id=str(current_user.event_id) if current_user.event_id else None,
         department=current_user.department,
         requires_profile_setup=requires_profile_setup,
+        requires_password_change=(
+            current_user.role in FIRST_LOGIN_PASSWORD_ROLES
+            and not current_user.first_login_completed
+        ),
     )
 
 
@@ -366,6 +380,7 @@ async def reset_password(body: ResetPasswordRequest):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
 
     user.password_hash = hash_password(body.new_password)
+    user.first_login_completed = True
     await user.save()
 
     await otp_req.delete()

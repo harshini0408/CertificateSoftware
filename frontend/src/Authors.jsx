@@ -2,6 +2,9 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import ProfileCard from './components/common/ProfileCard'
+import adhithyaImage from './Images/adhithya.jpeg'
+import harshiniImage from './Images/harshini.jpg'
+import mvvcImage from './Images/mvvc.jpg'
 
 const authors = [
   {
@@ -9,7 +12,7 @@ const authors = [
     title: 'Assistant Professor(Selection Grade), Department of Computer Science and Engineering',
     /*handle: 'Dr.V.C.MahaVishnu',*/
     status: 'SDC Director',
-    avatarUrl: '/images/Authors/mvvc.png',
+    avatarUrl: mvvcImage,
     grainUrl: '/images/Authors/grain.png',
   },
 
@@ -20,7 +23,7 @@ const authors = [
     /*handle: 'Adhithya',*/
     phone: '8807303793',
     /*status: 'Full-Stack Engineer',*/
-    avatarUrl: '/images/Authors/arya.png',
+    avatarUrl: adhithyaImage,
     grainUrl: '/images/Authors/grain.png',
   },
   {
@@ -30,7 +33,7 @@ const authors = [
     /*handle: 'harshini',*/
     phone: '7845990817',
     /*status: 'Full-Stack Developer',*/
-    avatarUrl: '/images/Authors/abi.png',
+    avatarUrl: harshiniImage,
     grainUrl: '/images/Authors/grain.png',
   },
 ]

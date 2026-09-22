@@ -94,6 +94,10 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get(['/favicon.png', `${BASE_PATH}/favicon.png`], (req, res) => {
+  res.sendFile(path.join(CLIENT_DIST, 'favicon.png'));
+});
+
 app.use(BASE_PATH === '/' ? '/' : BASE_PATH, express.static(CLIENT_DIST));
 app.get(/.*/, (req, res) => res.sendFile(INDEX_HTML));
 if (require.main === module) {

@@ -32,6 +32,7 @@ class DeptEvent(Document):
     preview_approved: bool = False
     preview_approved_at: Optional[datetime] = None
     preview_approved_by_user_id: Optional[str] = None
+    active_certificate_batch_id: Optional[str] = None
     participant_count: int = 0
     cert_count: int = 0
     allocate_points: bool = False
