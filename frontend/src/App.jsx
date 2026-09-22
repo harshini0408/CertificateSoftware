@@ -42,7 +42,7 @@ const ROLES = {
 export default function App() {
   const requiresPasswordChange = useAuthStore((state) => state.requires_password_change)
   const role = useAuthStore((state) => state.role)
-  const mustChangePassword = requiresPasswordChange && ['tutor', 'hod', 'principal'].includes(role)
+  const mustChangePassword = requiresPasswordChange && ['faculty', 'tutor', 'hod', 'principal'].includes(role)
 
   return (
     <>

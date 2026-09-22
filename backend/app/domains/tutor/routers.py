@@ -131,6 +131,28 @@ async def _rollup_credit_docs(docs: list[StudentCredit]) -> tuple[int, list[Cred
 
 @router.get("/tutor/me")
 async def get_tutor_profile(current_user: User = Depends(require_role(UserRole.TUTOR))):
+    classes = []
+    if current_user.department and current_user.batch and current_user.section:
+        classes.append({
+            "department": current_user.department,
+            "batch": current_user.batch,
+            "section": current_user.section,
+        })
+    if getattr(current_user, "assigned_classes", None):
+        for c in current_user.assigned_classes:
+            if isinstance(c, dict) and c.get("department") and c.get("batch") and c.get("section"):
+                if not any(
+                    (x.get("department") or "").lower() == (c.get("department") or "").lower() and
+                    (x.get("batch") or "").lower() == (c.get("batch") or "").lower() and
+                    (x.get("section") or "").lower() == (c.get("section") or "").lower()
+                    for x in classes
+                ):
+                    classes.append({
+                        "department": c.get("department"),
+                        "batch": c.get("batch"),
+                        "section": c.get("section"),
+                    })
+
     return {
         "id": str(current_user.id),
         "name": current_user.name,
@@ -139,6 +161,7 @@ async def get_tutor_profile(current_user: User = Depends(require_role(UserRole.T
         "department": current_user.department,
         "batch": current_user.batch,
         "section": current_user.section,
+        "assigned_classes": classes,
     }
 
 

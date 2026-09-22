@@ -434,11 +434,58 @@ export default function TutorDashboard() {
   const [creditRangeExpression, setCreditRangeExpression] = useState('')
   const mode = searchParams.get('mode') === 'faculty' ? 'faculty' : 'tutor'
   const facultyTab = searchParams.get('tab') === 'history' ? 'history' : 'generate'
-  const activeTab = searchParams.get('tab') === 'verification' ? 'verification' : 'dashboard'
+  const [selectedClassKey, setSelectedClassKey] = useState('all')
 
-  const totalStudents = students?.length || 0
+  const tutorClasses = useMemo(() => {
+    const list = []
+    const seen = new Set()
+
+    const addClass = (dept, batch, sec) => {
+      const d = (dept || '').trim()
+      const b = (batch || '').trim()
+      const s = (sec || '').trim()
+      if (!d && !b && !s) return
+      const key = `${d.toLowerCase()}|${b.toLowerCase()}|${s.toLowerCase()}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        list.push({
+          key,
+          department: d,
+          batch: b,
+          section: s,
+          label: `${d || 'Dept'} · Batch ${b || '—'} · Sec ${s || '—'}`,
+        })
+      }
+    }
+
+    if (profile?.department && profile?.batch && profile?.section) {
+      addClass(profile.department, profile.batch, profile.section)
+    }
+    if (profile?.assigned_classes && Array.isArray(profile.assigned_classes)) {
+      profile.assigned_classes.forEach((c) => addClass(c.department, c.batch, c.section))
+    }
+    ;(students || []).forEach((st) => {
+      if (st.department || st.batch || st.section) {
+        addClass(st.department, st.batch, st.section)
+      }
+    })
+
+    return list
+  }, [profile, students])
+
+  const classFilteredStudents = useMemo(() => {
+    if (selectedClassKey === 'all') return students || []
+    return (students || []).filter((st) => {
+      const d = (st.department || '').trim().toLowerCase()
+      const b = (st.batch || '').trim().toLowerCase()
+      const s = (st.section || '').trim().toLowerCase()
+      return `${d}|${b}|${s}` === selectedClassKey
+    })
+  }, [students, selectedClassKey])
+
+  const totalStudents = classFilteredStudents.length
   const creditFilter = buildCreditPredicate(creditRangeExpression)
-  const filteredStudents = (students || []).filter((student) => creditFilter.fn(student.total_credits))
+  const filteredStudents = classFilteredStudents.filter((student) => creditFilter.fn(student.total_credits))
 
   const handleManualSubmit = async (e) => {
     e.preventDefault()
@@ -602,9 +649,74 @@ export default function TutorDashboard() {
                 {profileLoading ? 'Tutor Dashboard' : `Tutor Dashboard — ${profile?.name || 'Tutor'}`}
               </h1>
               <p className="mt-1 text-sm text-gray-500">
-                Class: {(profile?.department || '—')} {(profile?.batch || '')} {(profile?.section || '')}
+                {tutorClasses.length > 1 ? (
+                  <span>
+                    Managing multiple classes:{' '}
+                    <span className="font-semibold text-gray-800">
+                      {tutorClasses.map((c) => `${c.department} · Batch ${c.batch} · Sec ${c.section}`).join('  |  ')}
+                    </span>
+                  </span>
+                ) : (
+                  <span>
+                    Class: {(profile?.department || '—')} {(profile?.batch || '')} {(profile?.section || '')}
+                  </span>
+                )}
               </p>
             </div>
+
+            {/* Class Toggle Switcher for Multiple Classes */}
+            {tutorClasses.length > 1 && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-white rounded-2xl border border-blue-200/80 shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-8 w-8 rounded-lg bg-navy text-white flex items-center justify-center text-sm font-bold shadow-xs">
+                    🏫
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Class Scope</span>
+                    <p className="text-xs font-semibold text-gray-900">
+                      You are assigned to {tutorClasses.length} classes. Switch between them below:
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 bg-white p-1 rounded-xl border border-gray-200 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClassKey('all')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      selectedClassKey === 'all'
+                        ? 'bg-navy text-white shadow-xs'
+                        : 'text-gray-600 hover:text-navy hover:bg-gray-50'
+                    }`}
+                  >
+                    All Classes ({students?.length || 0})
+                  </button>
+                  {tutorClasses.map((cls) => {
+                    const count = (students || []).filter((st) => {
+                      const d = (st.department || '').trim().toLowerCase()
+                      const b = (st.batch || '').trim().toLowerCase()
+                      const s = (st.section || '').trim().toLowerCase()
+                      return `${d}|${b}|${s}` === cls.key
+                    }).length
+                    const isSelected = selectedClassKey === cls.key
+                    return (
+                      <button
+                        key={cls.key}
+                        type="button"
+                        onClick={() => setSelectedClassKey(cls.key)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'text-gray-600 hover:text-indigo-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {cls.department} · Batch {cls.batch} · Sec {cls.section} ({count})
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="mb-2 flex flex-wrap gap-1 border-b border-gray-200">
               <button
@@ -687,7 +799,7 @@ export default function TutorDashboard() {
                     onChange={(e) => setManualEntry((p) => ({ ...p, student_email: e.target.value }))}
                   >
                     <option value="">Select student</option>
-                    {(students || []).map((s) => (
+                    {(classFilteredStudents || []).map((s) => (
                       <option key={s.student_email} value={s.student_email}>
                         {s.student_name} ({s.registration_number || '—'})
                       </option>

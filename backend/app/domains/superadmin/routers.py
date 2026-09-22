@@ -52,6 +52,8 @@ class TutorStudentAssignRequest(BaseModel):
 
 class TutorReassignRequest(BaseModel):
     new_tutor_id: PydanticObjectId
+    student_emails: Optional[List[str]] = None
+    student_ids: Optional[List[str]] = None
 
 
 class CreditResetRequest(BaseModel):
@@ -1224,20 +1226,64 @@ async def reassign_tutor_students(
     if from_tutor.id == to_tutor.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Source and target tutor cannot be the same")
 
-    mapped = await StudentCredit.find(StudentCredit.tutor_email == from_tutor.email).to_list()
+    target_emails = set()
+    if body.student_emails:
+        target_emails.update(e.strip().lower() for e in body.student_emails if e and e.strip())
+    if body.student_ids:
+        st_oids = []
+        for sid in body.student_ids:
+            try:
+                st_oids.append(PydanticObjectId(sid))
+            except Exception:
+                pass
+        if st_oids:
+            st_users = await User.find({"_id": {"$in": st_oids}}).to_list()
+            target_emails.update((u.email or "").strip().lower() for u in st_users if u.email)
+
+    query = {"tutor_email": from_tutor.email}
+    if target_emails:
+        query["student_email"] = {"$in": list(target_emails)}
+
+    mapped = await StudentCredit.find(query).to_list()
     moved = 0
     now = datetime.utcnow()
     for doc in mapped:
-        await doc.set(
-            {
-                "tutor_email": to_tutor.email,
-                "department": to_tutor.department,
-                "batch": to_tutor.batch,
-                "section": to_tutor.section,
-                "last_updated": now,
-            }
-        )
+        updates = {
+            "tutor_email": to_tutor.email,
+            "last_updated": now,
+        }
+        if not doc.department and to_tutor.department:
+            updates["department"] = to_tutor.department
+        if not doc.batch and to_tutor.batch:
+            updates["batch"] = to_tutor.batch
+        if not doc.section and to_tutor.section:
+            updates["section"] = to_tutor.section
+
+        await doc.set(updates)
         moved += 1
+
+    if target_emails:
+        existing_emails = {(d.student_email or "").strip().lower() for d in mapped}
+        missing_emails = target_emails - existing_emails
+        if missing_emails:
+            users_missing = await User.find({
+                "email": {"$in": list(missing_emails)},
+                "role": UserRole.STUDENT,
+            }).to_list()
+            for u in users_missing:
+                await StudentCredit(
+                    student_email=u.email.strip().lower(),
+                    tutor_email=to_tutor.email,
+                    registration_number=u.registration_number or "",
+                    student_name=u.name,
+                    department=u.department or to_tutor.department,
+                    batch=u.batch or to_tutor.batch,
+                    section=u.section or to_tutor.section,
+                    total_credits=0,
+                    credit_history=[],
+                    last_updated=now,
+                ).insert()
+                moved += 1
 
     return {
         "moved": moved,

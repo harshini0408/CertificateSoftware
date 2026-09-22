@@ -272,8 +272,12 @@ export function useReassignTutorStudents() {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: ({ fromTutorId, toTutorId }) =>
-      axiosInstance.post(`/admin/tutors/${fromTutorId}/reassign`, { new_tutor_id: toTutorId }),
+    mutationFn: ({ fromTutorId, toTutorId, studentEmails, studentIds }) =>
+      axiosInstance.post(`/admin/tutors/${fromTutorId}/reassign`, {
+        new_tutor_id: toTutorId,
+        student_emails: studentEmails,
+        student_ids: studentIds,
+      }),
     onSuccess: ({ data }) => {
       qc.invalidateQueries({ queryKey: ['users'] })
       addToast({

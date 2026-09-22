@@ -2033,26 +2033,136 @@ function FacultyBulkImportModal({ isOpen, onClose }) {
   )
 }
 
-function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor }) {
+function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
   const [fromTutorId, setFromTutorId] = useState('')
   const [toTutorId, setToTutorId] = useState('')
+  const [selectedStudentEmails, setSelectedStudentEmails] = useState(new Set())
+  const [search, setSearch] = useState('')
+  const [classFilter, setClassFilter] = useState('all')
   const switchMutation = useReassignTutorStudents()
 
   useEffect(() => {
     if (!isOpen) return
     setFromTutorId(initialTutor?.id || '')
     setToTutorId('')
+    setSearch('')
+    setClassFilter('all')
   }, [isOpen, initialTutor])
 
   const fromTutor = (tutors || []).find((t) => t.id === fromTutorId) || null
   const targetTutorOptions = (tutors || []).filter((t) => t.id !== fromTutorId)
   const toTutor = targetTutorOptions.find((t) => t.id === toTutorId) || null
 
+  const mappedStudents = useMemo(() => {
+    if (!fromTutor) return []
+    const fromEmail = (fromTutor.email || '').toLowerCase()
+    const tutorClasses = fromTutor.assigned_classes && fromTutor.assigned_classes.length > 0
+      ? fromTutor.assigned_classes
+      : (fromTutor.department && fromTutor.batch && fromTutor.section)
+      ? [{ department: fromTutor.department, batch: fromTutor.batch, section: fromTutor.section }]
+      : []
+
+    return (students || []).filter((st) => {
+      if (st.tutor_id === fromTutor.id) return true
+      if (st.tutor_email && fromEmail && st.tutor_email.toLowerCase() === fromEmail) return true
+      if (!st.tutor_id && !st.tutor_email && st.department && st.batch && st.section) {
+        return tutorClasses.some(
+          (c) =>
+            (c.department || '').toLowerCase() === st.department.toLowerCase() &&
+            (c.batch || '').toLowerCase() === st.batch.toLowerCase() &&
+            (c.section || '').toLowerCase() === st.section.toLowerCase(),
+        )
+      }
+      return false
+    })
+  }, [fromTutor, students])
+
+  // Reset selected students to ALL mapped students whenever fromTutor changes (Select All by default)
+  useEffect(() => {
+    if (mappedStudents.length > 0) {
+      const all = new Set(mappedStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean))
+      setSelectedStudentEmails(all)
+    } else {
+      setSelectedStudentEmails(new Set())
+    }
+  }, [mappedStudents])
+
+  // Distinct classes among mapped students
+  const availableClasses = useMemo(() => {
+    const map = new Map()
+    mappedStudents.forEach((st) => {
+      if (st.department || st.batch || st.section) {
+        const key = `${st.department || '—'}|${st.batch || '—'}|${st.section || '—'}`
+        const label = `${st.department || 'Dept'} · Batch ${st.batch || '—'} · Sec ${st.section || '—'}`
+        if (!map.has(key)) map.set(key, { key, label, count: 0 })
+        map.get(key).count++
+      }
+    })
+    return Array.from(map.values())
+  }, [mappedStudents])
+
+  // Filter students by class and search
+  const visibleStudents = useMemo(() => {
+    return mappedStudents.filter((st) => {
+      if (classFilter !== 'all') {
+        const key = `${st.department || '—'}|${st.batch || '—'}|${st.section || '—'}`
+        if (key !== classFilter) return false
+      }
+      if (search) {
+        const q = search.toLowerCase()
+        const match =
+          (st.name || '').toLowerCase().includes(q) ||
+          (st.registration_number || '').toLowerCase().includes(q) ||
+          (st.email || '').toLowerCase().includes(q)
+        if (!match) return false
+      }
+      return true
+    })
+  }, [mappedStudents, classFilter, search])
+
+  const isAllVisibleSelected =
+    visibleStudents.length > 0 &&
+    visibleStudents.every((s) => selectedStudentEmails.has((s.email || '').toLowerCase()))
+
+  const toggleSelectAllVisible = () => {
+    setSelectedStudentEmails((prev) => {
+      const next = new Set(prev)
+      if (isAllVisibleSelected) {
+        visibleStudents.forEach((s) => {
+          if (s.email) next.delete(s.email.toLowerCase())
+        })
+      } else {
+        visibleStudents.forEach((s) => {
+          if (s.email) next.add(s.email.toLowerCase())
+        })
+      }
+      return next
+    })
+  }
+
+  const toggleStudent = (email) => {
+    if (!email) return
+    const lower = email.toLowerCase()
+    setSelectedStudentEmails((prev) => {
+      const next = new Set(prev)
+      if (next.has(lower)) {
+        next.delete(lower)
+      } else {
+        next.add(lower)
+      }
+      return next
+    })
+  }
+
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!fromTutorId || !toTutorId) return
+    if (!fromTutorId || !toTutorId || selectedStudentEmails.size === 0) return
     switchMutation.mutate(
-      { fromTutorId, toTutorId },
+      {
+        fromTutorId,
+        toTutorId,
+        studentEmails: Array.from(selectedStudentEmails),
+      },
       {
         onSuccess: () => onClose(),
       },
@@ -2063,7 +2173,7 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor }) {
     <Modal isOpen={isOpen} onClose={onClose} title="Switch Tutor For Students" wide>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <p className="text-sm text-gray-600">
-          Select the current tutor and target tutor. All students currently mapped to the selected tutor will be reassigned.
+          Select current and target tutor. By default all mapped students are selected; you can customize the selection below to switch specific students (e.g. roll numbers 1–33).
         </p>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -2088,23 +2198,174 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor }) {
           </div>
         </div>
 
-        {fromTutor && (
-          <div className="rounded border border-gray-200 p-3 text-xs text-gray-600">
-            <p><span className="font-semibold text-gray-800">Current tutor:</span> {fromTutor.name} ({fromTutor.email})</p>
-            <p><span className="font-semibold text-gray-800">Scope:</span> {fromTutor.department || '—'} / {fromTutor.batch || '—'} / {fromTutor.section || '—'}</p>
+        {fromTutor && toTutor && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 text-gray-600">
+              <p><span className="font-semibold text-gray-800">Source Tutor:</span> {fromTutor.name}</p>
+              <p className="text-[11px] text-gray-500">{fromTutor.email} · {fromTutor.department || '—'}</p>
+            </div>
+            <div className="rounded-lg border border-green-200 bg-green-50/70 p-3 text-green-800">
+              <p><span className="font-semibold text-green-900">Target Tutor:</span> {toTutor.name}</p>
+              <p className="text-[11px] text-green-700">{toTutor.email} · {toTutor.department || '—'}</p>
+            </div>
           </div>
         )}
-        {toTutor && (
-          <div className="rounded border border-green-200 bg-green-50 p-3 text-xs text-green-700">
-            <p><span className="font-semibold">Target tutor:</span> {toTutor.name} ({toTutor.email})</p>
-            <p><span className="font-semibold">Scope:</span> {toTutor.department || '—'} / {toTutor.batch || '—'} / {toTutor.section || '—'}</p>
+
+        {/* Student Selection Section */}
+        {fromTutor && (
+          <div className="rounded-xl border border-gray-200 bg-gray-50/40 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200/80 pb-3">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700">
+                  Select Students to Reassign
+                </h4>
+                <p className="text-[11px] text-gray-500">
+                  Check or uncheck students to reassign only specific individuals.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-xs font-bold text-indigo-700">
+                  Selected: {selectedStudentEmails.size} / {mappedStudents.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedStudentEmails(new Set(mappedStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean)))}
+                  className="text-[11px] font-semibold text-indigo-600 hover:underline"
+                >
+                  Select All
+                </button>
+                <span className="text-gray-300">|</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedStudentEmails(new Set())}
+                  className="text-[11px] font-semibold text-gray-500 hover:underline"
+                >
+                  Deselect All
+                </button>
+              </div>
+            </div>
+
+            {/* Filter toolbar: Class chips + Search box */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {availableClasses.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-semibold text-gray-500">Filter Class:</span>
+                  <button
+                    type="button"
+                    onClick={() => setClassFilter('all')}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      classFilter === 'all'
+                        ? 'bg-navy text-white shadow-2xs'
+                        : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    All ({mappedStudents.length})
+                  </button>
+                  {availableClasses.map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => setClassFilter(c.key)}
+                      className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                        classFilter === c.key
+                          ? 'bg-navy text-white shadow-2xs'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      {c.label} ({c.count})
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="w-full sm:w-64 ml-auto">
+                <input
+                  type="search"
+                  placeholder="Search student name, reg no…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="form-input text-xs py-1"
+                />
+              </div>
+            </div>
+
+            {/* Scrollable Students Table */}
+            {mappedStudents.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center text-xs text-gray-500">
+                No students currently mapped to this tutor.
+              </div>
+            ) : visibleStudents.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center text-xs text-gray-500">
+                No students matching search filter.
+              </div>
+            ) : (
+              <div className="max-h-60 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-2xs">
+                <table className="min-w-full divide-y divide-gray-200 text-xs">
+                  <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
+                    <tr>
+                      <th className="w-10 px-3 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isAllVisibleSelected}
+                          onChange={toggleSelectAllVisible}
+                          className="h-3.5 w-3.5 rounded border-gray-300 text-navy focus:ring-navy cursor-pointer"
+                          title="Select / Deselect all visible students"
+                        />
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">Student Name</th>
+                      <th className="px-3 py-2 text-left font-semibold">Reg Number</th>
+                      <th className="px-3 py-2 text-left font-semibold">Class / Section</th>
+                      <th className="px-3 py-2 text-left font-semibold">Email</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {visibleStudents.map((st) => {
+                      const isSelected = selectedStudentEmails.has((st.email || '').toLowerCase())
+                      return (
+                        <tr
+                          key={st.id || st.email}
+                          onClick={() => toggleStudent(st.email)}
+                          className={`cursor-pointer transition-colors ${
+                            isSelected ? 'bg-indigo-50/50 hover:bg-indigo-50' : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleStudent(st.email)}
+                              className="h-3.5 w-3.5 rounded border-gray-300 text-navy focus:ring-navy cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-3 py-2 font-medium text-gray-900">{st.name}</td>
+                          <td className="px-3 py-2 font-mono text-gray-600 font-semibold">
+                            {st.registration_number || '—'}
+                          </td>
+                          <td className="px-3 py-2 text-gray-600">
+                            {st.department || '—'} · {st.batch || '—'} · Sec {st.section || '—'}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 font-mono text-[11px]">{st.email}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
         <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={!fromTutorId || !toTutorId || switchMutation.isPending}>
-            {switchMutation.isPending ? 'Switching...' : 'Switch Students'}
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={!fromTutorId || !toTutorId || selectedStudentEmails.size === 0 || switchMutation.isPending}
+          >
+            {switchMutation.isPending
+              ? 'Switching...'
+              : selectedStudentEmails.size === mappedStudents.length && mappedStudents.length > 0
+              ? 'Switch All Students'
+              : `Switch Selected (${selectedStudentEmails.size}) Students`}
           </button>
         </div>
       </form>
@@ -3560,6 +3821,7 @@ function UsersTab() {
         }}
         tutors={tutors || []}
         initialTutor={selectedTutorForSwitch}
+        students={students || []}
       />
       <SwitchTutorClassModal
         isOpen={showTutorClassSwitch}
