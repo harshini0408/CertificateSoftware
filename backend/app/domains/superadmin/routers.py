@@ -1002,33 +1002,36 @@ async def bulk_import_faculty(
 
     raw_headers = [re.sub(r"\s+", " ", str(h).strip().lower()) if h is not None else "" for h in header_row]
 
-    def find_idx(*aliases: str) -> int:
-        for alias in aliases:
-            cleaned = re.sub(r"\s+", " ", alias.strip().lower())
-            if cleaned in raw_headers:
-                return raw_headers.index(cleaned)
-        return -1
+    exact_required_headers = [
+        "name",
+        "faculty id",
+        "email",
+        "department",
+        "username (faculty id)",
+        "password (faculty id)",
+    ]
 
-    name_idx = find_idx("name")
-    fac_id_idx = find_idx("faculty id", "faculty_id", "facultyid")
-    email_idx = find_idx("email")
-    dept_idx = find_idx("department", "dept")
-    user_idx = find_idx("username (faculty id)", "username", "username(faculty id)")
-    pass_idx = find_idx("password (faculty id)", "password", "password(faculty id)")
+    non_empty_headers = [h for h in raw_headers if h]
+    missing = [h for h in exact_required_headers if h not in non_empty_headers]
+    unexpected = [h for h in non_empty_headers if h not in exact_required_headers]
 
-    missing = []
-    if name_idx < 0: missing.append("name")
-    if fac_id_idx < 0: missing.append("faculty id")
-    if email_idx < 0: missing.append("email")
-    if dept_idx < 0: missing.append("department")
-    if user_idx < 0: missing.append("username (faculty id)")
-    if pass_idx < 0: missing.append("password (faculty id)")
-
-    if missing:
+    if missing or unexpected:
+        error_parts = []
+        if missing:
+            error_parts.append(f"Missing required header(s): {', '.join(missing)}")
+        if unexpected:
+            error_parts.append(f"Unexpected header(s): {', '.join(unexpected)}")
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Missing required columns: {', '.join(missing)}. Accepted headers only: name, faculty id, email, department, username (faculty id), password (faculty id)",
+            f"{'; '.join(error_parts)}. The following excel headers only should be accepted: {', '.join(exact_required_headers)}",
         )
+
+    name_idx = raw_headers.index("name")
+    fac_id_idx = raw_headers.index("faculty id")
+    email_idx = raw_headers.index("email")
+    dept_idx = raw_headers.index("department")
+    user_idx = raw_headers.index("username (faculty id)")
+    pass_idx = raw_headers.index("password (faculty id)")
 
     def get_cell(row_vals, idx):
         if idx >= 0 and idx < len(row_vals):
