@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useMutation } from '@tanstack/react-query'
+import { Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useUiStore } from '../store/uiStore'
 import { useToastStore } from '../store/uiStore'
@@ -27,12 +28,13 @@ const roleMeta = {
 }
 
 // ── Change-password popover ───────────────────────────────────────────────────
-function ChangePasswordForm({ onClose }) {
+function ChangePasswordForm({ onClose, onPasswordChanged, isRequired = false }) {
   const requestPasswordOtp = useRequestPasswordOtp()
   const verifyPasswordOtp = useVerifyPasswordOtp()
   const changePassword = useChangePassword()
   const [otpRequested, setOtpRequested] = useState(false)
   const [otpVerified, setOtpVerified] = useState(false)
+  const [visiblePasswords, setVisiblePasswords] = useState({})
   const {
     register,
     handleSubmit,
@@ -76,6 +78,7 @@ function ChangePasswordForm({ onClose }) {
       })
       setOtpRequested(false)
       setOtpVerified(false)
+      onPasswordChanged()
       onClose()
     } catch {
       // Toast handled by hook
@@ -93,6 +96,13 @@ function ChangePasswordForm({ onClose }) {
     }
   }
 
+  const togglePasswordVisibility = (field) => {
+    setVisiblePasswords((current) => ({
+      ...current,
+      [field]: !current[field],
+    }))
+  }
+
   return (
     <form
       onSubmit={handleFormSubmit}
@@ -100,12 +110,23 @@ function ChangePasswordForm({ onClose }) {
     >
       <div>
         <label className="form-label text-xs">Current password</label>
-        <input
-          type="password"
-          autoComplete="current-password"
-          className={`form-input text-sm py-1.5 ${errors.current_password ? 'form-input-error' : ''}`}
-          {...register('current_password', { required: 'Required' })}
-        />
+        <div className="relative">
+          <input
+            type={visiblePasswords.current_password ? 'text' : 'password'}
+            autoComplete="current-password"
+            className={`form-input text-sm py-1.5 pr-9 ${errors.current_password ? 'form-input-error' : ''}`}
+            {...register('current_password', { required: 'Required' })}
+          />
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            onClick={() => togglePasswordVisibility('current_password')}
+            aria-label={visiblePasswords.current_password ? 'Hide current password' : 'Show current password'}
+            title={visiblePasswords.current_password ? 'Hide current password' : 'Show current password'}
+          >
+            {visiblePasswords.current_password ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {errors.current_password && (
           <p className="form-error text-xs">{errors.current_password.message}</p>
         )}
@@ -113,15 +134,26 @@ function ChangePasswordForm({ onClose }) {
 
       <div>
         <label className="form-label text-xs">New password</label>
-        <input
-          type="password"
-          autoComplete="new-password"
-          className={`form-input text-sm py-1.5 ${errors.new_password ? 'form-input-error' : ''}`}
-          {...register('new_password', {
-            required: 'Required',
-            minLength: { value: 8, message: 'Min 8 characters' },
-          })}
-        />
+        <div className="relative">
+          <input
+            type={visiblePasswords.new_password ? 'text' : 'password'}
+            autoComplete="new-password"
+            className={`form-input text-sm py-1.5 pr-9 ${errors.new_password ? 'form-input-error' : ''}`}
+            {...register('new_password', {
+              required: 'Required',
+              minLength: { value: 8, message: 'Min 8 characters' },
+            })}
+          />
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            onClick={() => togglePasswordVisibility('new_password')}
+            aria-label={visiblePasswords.new_password ? 'Hide new password' : 'Show new password'}
+            title={visiblePasswords.new_password ? 'Hide new password' : 'Show new password'}
+          >
+            {visiblePasswords.new_password ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {errors.new_password && (
           <p className="form-error text-xs">{errors.new_password.message}</p>
         )}
@@ -129,15 +161,26 @@ function ChangePasswordForm({ onClose }) {
 
       <div>
         <label className="form-label text-xs">Confirm new password</label>
-        <input
-          type="password"
-          autoComplete="new-password"
-          className={`form-input text-sm py-1.5 ${errors.confirm ? 'form-input-error' : ''}`}
-          {...register('confirm', {
-            required: 'Required',
-            validate: (v) => v === watch('new_password') || 'Passwords do not match',
-          })}
-        />
+        <div className="relative">
+          <input
+            type={visiblePasswords.confirm ? 'text' : 'password'}
+            autoComplete="new-password"
+            className={`form-input text-sm py-1.5 pr-9 ${errors.confirm ? 'form-input-error' : ''}`}
+            {...register('confirm', {
+              required: 'Required',
+              validate: (v) => v === watch('new_password') || 'Passwords do not match',
+            })}
+          />
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            onClick={() => togglePasswordVisibility('confirm')}
+            aria-label={visiblePasswords.confirm ? 'Hide password confirmation' : 'Show password confirmation'}
+            title={visiblePasswords.confirm ? 'Hide password confirmation' : 'Show password confirmation'}
+          >
+            {visiblePasswords.confirm ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {errors.confirm && (
           <p className="form-error text-xs">{errors.confirm.message}</p>
         )}
@@ -166,9 +209,11 @@ function ChangePasswordForm({ onClose }) {
 
       {!otpRequested && (
         <div className="flex items-center justify-end gap-2 pt-2">
-          <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
-            Cancel
-          </button>
+          {!isRequired && (
+            <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
+              Cancel
+            </button>
+          )}
           <button
             type="submit"
             className="btn-primary text-xs px-3 py-1.5"
@@ -205,9 +250,11 @@ function ChangePasswordForm({ onClose }) {
             ✓ OTP Verified
           </span>
           <div className="flex items-center gap-2">
-            <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
-              Cancel
-            </button>
+            {!isRequired && (
+              <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
+                Cancel
+              </button>
+            )}
             <button type="submit" className="btn-primary text-xs px-3 py-1.5" disabled={changePassword.isPending}>
               {changePassword.isPending ? 'Saving…' : 'Save Password'}
             </button>
@@ -218,10 +265,40 @@ function ChangePasswordForm({ onClose }) {
   )
 }
 
+export function FirstLoginPasswordGate() {
+  const requiresPasswordChange = useAuthStore((state) => state.requires_password_change)
+  const role = useAuthStore((state) => state.role)
+  const setRequiresPasswordChange = useAuthStore((state) => state.setRequiresPasswordChange)
+  const requiredRoles = ['tutor', 'hod', 'principal']
+
+  if (!requiresPasswordChange || !requiredRoles.includes(role)) return null
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-navy/60 px-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+        <h1 className="text-xl font-bold text-navy">Change your password</h1>
+        <p className="mt-2 mb-5 text-sm text-gray-600">
+          You must set a new password before continuing to your dashboard.
+        </p>
+        <ChangePasswordForm
+          isRequired
+          onClose={() => {}}
+          onPasswordChanged={() => setRequiresPasswordChange(false)}
+        />
+      </div>
+    </div>
+  )
+}
+
 // ── Navbar ────────────────────────────────────────────────────────────────────
 export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
   const navigate = useNavigate()
-  const { user, role, clearAuth } = useAuthStore()
+  const {
+    user,
+    role,
+    setRequiresPasswordChange,
+    clearAuth,
+  } = useAuthStore()
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
   const addToast = useToastStore((s) => s.addToast)
 
@@ -343,6 +420,7 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
                   ) : (
                     <ChangePasswordForm
                       onClose={() => setShowChangePw(false)}
+                      onPasswordChanged={() => setRequiresPasswordChange(false)}
                     />
                   )}
                 </div>

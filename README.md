@@ -30,7 +30,7 @@ The app is prepared for deployment under a subpath:
 
 ```bash
 cd backend
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 2849
 ```
 
 ### Frontend

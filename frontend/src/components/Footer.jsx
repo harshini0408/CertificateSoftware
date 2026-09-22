@@ -111,7 +111,7 @@ export default function Footer() {
 
                 <div className="container mx-auto px-4">
                   <div className="footer-bottom-only flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-xs text-gray-500">
-                    <span>© {year}. 2026 PSG Institute of Technology and Applied Research. All rights reserved.</span>
+                    <span>© 2026 PSG Institute of Technology and Applied Research. All rights reserved.</span>
                     <span className="hidden sm:inline text-gray-300 font-light">•</span>
 
                     <button

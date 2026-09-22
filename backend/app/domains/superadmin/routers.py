@@ -624,7 +624,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
         email=email,
         password_hash=hash_password(password_input),
         role=UserRole(body.role),
-        first_login_completed=False if body.role in ("faculty", "tutor", "club_coordinator") else True,
+        first_login_completed=(body.role not in {"faculty", "tutor", "hod", "principal", "club_coordinator"}),
         is_active=body.is_active,
         club_id=club_oid,
         event_id=event_oid,
@@ -1778,6 +1778,8 @@ async def reset_user_password(user_id: PydanticObjectId, _user: User = _admin):
 
     tmp_pw = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
     target.password_hash = hash_password(tmp_pw)
+    if target.role in {UserRole.TUTOR, UserRole.HOD, UserRole.PRINCIPAL}:
+        target.first_login_completed = False
     await target.save()
 
     return {"message": "Password reset successfully", "temp_password": tmp_pw}

@@ -29,7 +29,7 @@ copy .env.example .env        # Windows
 python download_fonts.py
 
 # 5. Start the server
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 2849
 ```
 
 ### First Run
@@ -45,8 +45,8 @@ Login at `POST /auth/login` with:
 ```
 
 ### API Documentation
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: http://localhost:2849/docs
+- ReDoc: http://localhost:2849/redoc
 
 ## Architecture
 

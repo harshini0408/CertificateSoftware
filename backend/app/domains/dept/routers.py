@@ -1164,16 +1164,9 @@ async def generate_dept_event_certificates(
     cert_numbers: list[str] = []
     skipped_emails: list[str] = []
     participant_keys: set[str] = set()
+    batch_id = uuid4().hex
 
-    existing_certs = await DeptCertificate.find(
-        DeptCertificate.department == department,
-        DeptCertificate.event_id == str(evt.id),
-    ).to_list()
-    existing_emails = {
-        str(c.participant_email).strip().lower()
-        for c in existing_certs
-        if c.participant_email and str(c.participant_email).strip()
-    }
+    existing_emails: set[str] = set()
     seen_upload_emails: set[str] = set()
 
     def _normalize_email(value: Optional[str]) -> str:
@@ -1181,36 +1174,32 @@ async def generate_dept_event_certificates(
 
     for idx, row in enumerate(rows, start=1):
         participant_email = _normalize_email(_pick_email_from_row(row))
-        if not participant_email:
-            skipped += 1
-            skipped_emails.append("<missing-email>")
-            continue
+        if participant_email:
+            if not participant_email.endswith("@psgitech.ac.in"):
+                skipped += 1
+                skipped_emails.append(f"{participant_email} (non-@psgitech.ac.in)")
+                continue
 
-        if not participant_email.endswith("@psgitech.ac.in"):
-            skipped += 1
-            skipped_emails.append(f"{participant_email} (non-@psgitech.ac.in)")
-            continue
+            if participant_email in existing_emails or participant_email in seen_upload_emails:
+                skipped += 1
+                skipped_emails.append(participant_email)
+                continue
 
-        if participant_email in existing_emails or participant_email in seen_upload_emails:
-            skipped += 1
-            skipped_emails.append(participant_email)
-            continue
+            existing_for_email = await DeptCertificate.find_one({
+                "department": department,
+                "event_id": str(evt.id),
+                "participant_email": {
+                    "$regex": f"^{re.escape(participant_email)}$",
+                    "$options": "i",
+                },
+            })
+            if existing_for_email:
+                skipped += 1
+                skipped_emails.append(participant_email)
+                existing_emails.add(participant_email)
+                continue
 
-        existing_for_email = await DeptCertificate.find_one({
-            "department": department,
-            "event_id": str(evt.id),
-            "participant_email": {
-                "$regex": f"^{re.escape(participant_email)}$",
-                "$options": "i",
-            },
-        })
-        if existing_for_email:
-            skipped += 1
-            skipped_emails.append(participant_email)
-            existing_emails.add(participant_email)
-            continue
-
-        seen_upload_emails.add(participant_email)
+            seen_upload_emails.add(participant_email)
 
         cert_number = f"DPT-{dept_slug[:4].upper()}-{timestamp}-{idx:03d}"
         png_bytes = _render_dept_certificate_dynamic(
@@ -1234,6 +1223,7 @@ async def generate_dept_event_certificates(
             department=department,
             coordinator_user_id=str(current_user.id),
             event_id=str(evt.id),
+            batch_id=batch_id,
             name=name,
             class_name=class_name,
             contribution=contribution,
@@ -1245,13 +1235,15 @@ async def generate_dept_event_certificates(
 
         # Removed: award credits only after email sending
 
-        existing_emails.add(participant_email)
+        if participant_email:
+            existing_emails.add(participant_email)
 
         participant_keys.add(f"{name.lower()}|{class_name.lower()}")
         generated += 1
         cert_numbers.append(cert_number)
 
     await evt.set({
+        "active_certificate_batch_id": batch_id,
         "participant_count": len(participant_keys),
         "cert_count": generated,
         "status": DeptEventStatus.ACTIVE,
@@ -1261,7 +1253,7 @@ async def generate_dept_event_certificates(
         "generated": generated,
         "skipped": skipped,
         "total_rows": len(rows),
-        "message": f"Generated {generated} certificate(s) for event; skipped {skipped} duplicate email row(s).",
+        "message": f"Generated {generated} certificate(s) for event; skipped {skipped} duplicate or invalid email row(s).",
         "cert_numbers": cert_numbers,
         "skipped_emails": skipped_emails,
     }
@@ -1275,10 +1267,13 @@ async def list_dept_event_certificates(
     department = _normalize_department(current_user.department)
     evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
-    certs = await DeptCertificate.find(
-        DeptCertificate.department == department,
-        DeptCertificate.event_id == str(evt.id),
-    ).sort(-DeptCertificate.created_at).to_list()
+    cert_query = {
+        "department": department,
+        "event_id": str(evt.id),
+    }
+    if evt.active_certificate_batch_id:
+        cert_query["batch_id"] = evt.active_certificate_batch_id
+    certs = await DeptCertificate.find(cert_query).sort(-DeptCertificate.created_at).to_list()
 
     return [
         {
@@ -1306,10 +1301,13 @@ async def send_dept_event_certificates(
     department = _normalize_department(current_user.department)
     evt = await _get_dept_event_or_404(event_id, department, str(current_user.id))
 
-    certs = await DeptCertificate.find(
-        DeptCertificate.department == department,
-        DeptCertificate.event_id == str(evt.id),
-    ).to_list()
+    cert_query = {
+        "department": department,
+        "event_id": str(evt.id),
+    }
+    if evt.active_certificate_batch_id:
+        cert_query["batch_id"] = evt.active_certificate_batch_id
+    certs = await DeptCertificate.find(cert_query).to_list()
 
     sendable = [c for c in certs if not c.emailed_at and c.participant_email and c.png_url]
     if not sendable:

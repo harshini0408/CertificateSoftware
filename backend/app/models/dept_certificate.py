@@ -10,6 +10,7 @@ class DeptCertificate(Document):
     department: str
     coordinator_user_id: str
     event_id: Optional[str] = None
+    batch_id: Optional[str] = None
 
     # Reference to DeptAsset used for this certificate (optional for backward compatibility)
     dept_asset_id: Optional[PydanticObjectId] = None

@@ -39,6 +39,12 @@ from ..config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 settings = get_settings()
+FIRST_LOGIN_PASSWORD_ROLES = {
+    UserRole.FACULTY,
+    UserRole.TUTOR,
+    UserRole.HOD,
+    UserRole.PRINCIPAL,
+}
 
 _COOKIE_DEFAULTS = dict(
     httponly=True,
@@ -74,8 +80,8 @@ async def login(body: LoginRequest, response: Response):
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password")
 
-    if user.role in (UserRole.FACULTY, UserRole.TUTOR) and not user.first_login_completed:
-        # Mandatory password change for Faculty & Tutor first-time login
+    if user.role in FIRST_LOGIN_PASSWORD_ROLES and not user.first_login_completed:
+        # Mandatory password change for Faculty, Tutor, HOD, Principal first-time login
         if user.email:
             otp = f"{random.randint(1000, 9999)}"
             expires_at = datetime.utcnow() + timedelta(minutes=15)
@@ -301,6 +307,7 @@ async def change_password(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
 
     current_user.password_hash = hash_password(body.new_password)
+    current_user.first_login_completed = True
     await current_user.save()
     return TokenResponse(message="Password updated successfully")
 
@@ -342,6 +349,7 @@ async def change_department_password(
         )
 
     current_user.password_hash = hash_password(body.new_password)
+    current_user.first_login_completed = True
     await current_user.save()
     await otp_req.delete()
     return TokenResponse(message="Password updated successfully")
@@ -367,7 +375,10 @@ async def me(current_user: User = Depends(get_current_user)):
             dept_assets and dept_assets.logo_path and dept_assets.signature1_path
         )
 
-    requires_password_change = bool(current_user.role in (UserRole.FACULTY, UserRole.TUTOR) and not current_user.first_login_completed)
+    requires_password_change = bool(
+        current_user.role in FIRST_LOGIN_PASSWORD_ROLES
+        and not current_user.first_login_completed
+    )
 
     return MeResponse(
         role=current_user.role.value,
@@ -460,6 +471,7 @@ async def reset_password(body: ResetPasswordRequest):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
 
     user.password_hash = hash_password(body.new_password)
+    user.first_login_completed = True
     await user.save()
 
     await otp_req.delete()

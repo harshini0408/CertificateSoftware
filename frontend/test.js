@@ -32358,7 +32358,7 @@
 
   // src/utils/axiosInstance.js
   var import_meta4 = {};
-  var BACKEND_URL = import_meta4.env.VITE_API_URL || "http://localhost:8000";
+  var BACKEND_URL = import_meta4.env.VITE_API_URL || "http://localhost:2849";
   var axiosInstance = axios_default.create({
     baseURL: BACKEND_URL,
     withCredentials: true,

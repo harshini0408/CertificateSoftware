@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     frontend_url: str = ""
     allowed_origins: str = ""
-    base_url: str = "http://backend:8000"
+    base_url: str = "http://backend:2849"
 
     # ── MongoDB ──────────────────────────────────────────────────────────
     mongodb_url: str = "mongodb://mongodb:27017"
@@ -95,11 +95,8 @@ class Settings(BaseSettings):
 
         if self.app_env == "development":
             explicit.extend([
-                "http://localhost:5173",
-                "http://localhost:5174",
-                "http://localhost:3000",
-                "http://127.0.0.1:5173",
-                "http://127.0.0.1:5174",
+                "http://localhost:2848",
+                "http://127.0.0.1:2848",
             ])
 
         # Preserve order while removing duplicates.
