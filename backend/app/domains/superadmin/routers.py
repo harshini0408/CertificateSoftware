@@ -1240,34 +1240,36 @@ async def reassign_tutor_students(
             st_users = await User.find({"_id": {"$in": st_oids}}).to_list()
             target_emails.update((u.email or "").strip().lower() for u in st_users if u.email)
 
-    query = {"tutor_email": from_tutor.email}
-    if target_emails:
-        query["student_email"] = {"$in": list(target_emails)}
-
-    mapped = await StudentCredit.find(query).to_list()
-    moved = 0
+    import re
     now = datetime.utcnow()
-    for doc in mapped:
-        updates = {
-            "tutor_email": to_tutor.email,
-            "last_updated": now,
-        }
-        if not doc.department and to_tutor.department:
-            updates["department"] = to_tutor.department
-        if not doc.batch and to_tutor.batch:
-            updates["batch"] = to_tutor.batch
-        if not doc.section and to_tutor.section:
-            updates["section"] = to_tutor.section
-
-        await doc.set(updates)
-        moved += 1
+    moved = 0
 
     if target_emails:
-        existing_emails = {(d.student_email or "").strip().lower() for d in mapped}
-        missing_emails = target_emails - existing_emails
+        email_patterns = [re.compile(f"^{re.escape(e)}$", re.IGNORECASE) for e in target_emails]
+        existing_docs = await StudentCredit.find({"student_email": {"$in": email_patterns}}).to_list()
+        updated_emails = set()
+        for doc in existing_docs:
+            updates = {
+                "tutor_email": to_tutor.email,
+                "last_updated": now,
+            }
+            if not doc.department and to_tutor.department:
+                updates["department"] = to_tutor.department
+            if not doc.batch and to_tutor.batch:
+                updates["batch"] = to_tutor.batch
+            if not doc.section and to_tutor.section:
+                updates["section"] = to_tutor.section
+
+            await doc.set(updates)
+            if doc.student_email:
+                updated_emails.add(doc.student_email.strip().lower())
+            moved += 1
+
+        missing_emails = target_emails - updated_emails
         if missing_emails:
+            missing_patterns = [re.compile(f"^{re.escape(e)}$", re.IGNORECASE) for e in missing_emails]
             users_missing = await User.find({
-                "email": {"$in": list(missing_emails)},
+                "email": {"$in": missing_patterns},
                 "role": UserRole.STUDENT,
             }).to_list()
             for u in users_missing:
@@ -1284,6 +1286,23 @@ async def reassign_tutor_students(
                     last_updated=now,
                 ).insert()
                 moved += 1
+    else:
+        tutor_pattern = re.compile(f"^{re.escape(from_tutor.email.strip())}$", re.IGNORECASE)
+        mapped = await StudentCredit.find({"tutor_email": tutor_pattern}).to_list()
+        for doc in mapped:
+            updates = {
+                "tutor_email": to_tutor.email,
+                "last_updated": now,
+            }
+            if not doc.department and to_tutor.department:
+                updates["department"] = to_tutor.department
+            if not doc.batch and to_tutor.batch:
+                updates["batch"] = to_tutor.batch
+            if not doc.section and to_tutor.section:
+                updates["section"] = to_tutor.section
+
+            await doc.set(updates)
+            moved += 1
 
     return {
         "moved": moved,

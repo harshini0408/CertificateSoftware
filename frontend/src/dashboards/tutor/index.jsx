@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import Navbar from '../../components/Navbar'
@@ -374,7 +374,15 @@ function VerificationTab() {
           {
             key: 'certificate_image_url',
             header: 'Certificate',
-            render: (v) => (v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View</a> : '—'),
+            render: (v) => {
+              if (!v) return '—'
+              const href = String(v).startsWith('http') ? v : `${BACKEND_URL}${v}`
+              return (
+                <a href={href} target="_blank" rel="noreferrer" className="text-navy hover:underline font-medium">
+                  View
+                </a>
+              )
+            },
           },
           { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
           { key: 'submitted_at', header: 'Submitted', render: (v) => fmtDate(v) },
@@ -434,6 +442,7 @@ export default function TutorDashboard() {
   const [creditRangeExpression, setCreditRangeExpression] = useState('')
   const mode = searchParams.get('mode') === 'faculty' ? 'faculty' : 'tutor'
   const facultyTab = searchParams.get('tab') === 'history' ? 'history' : 'generate'
+  const activeTab = searchParams.get('tab') === 'verification' ? 'verification' : 'dashboard'
   const [selectedClassKey, setSelectedClassKey] = useState('all')
 
   const tutorClasses = useMemo(() => {

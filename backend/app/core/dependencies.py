@@ -41,9 +41,14 @@ async def get_current_user(
 # ── Role gate ────────────────────────────────────────────────────────────
 
 def require_role(*roles: UserRole):
-    """Dependency factory: 403 if authenticated user's role is not in *roles*."""
+    """Dependency factory: 403 if authenticated user's role is not in *roles*.
+    All tutors are faculty by default, so UserRole.TUTOR automatically satisfies UserRole.FACULTY.
+    """
     async def _checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in roles:
+        effective_roles = {current_user.role}
+        if current_user.role == UserRole.TUTOR:
+            effective_roles.add(UserRole.FACULTY)
+        if not any(r in roles for r in effective_roles):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
         return current_user
     return _checker

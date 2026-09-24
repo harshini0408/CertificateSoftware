@@ -2033,21 +2033,13 @@ function FacultyBulkImportModal({ isOpen, onClose }) {
   )
 }
 
-function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
+function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, initialClass, students }) {
   const [fromTutorId, setFromTutorId] = useState('')
   const [toTutorId, setToTutorId] = useState('')
   const [selectedStudentEmails, setSelectedStudentEmails] = useState(new Set())
   const [search, setSearch] = useState('')
   const [classFilter, setClassFilter] = useState('all')
   const switchMutation = useReassignTutorStudents()
-
-  useEffect(() => {
-    if (!isOpen) return
-    setFromTutorId(initialTutor?.id || '')
-    setToTutorId('')
-    setSearch('')
-    setClassFilter('all')
-  }, [isOpen, initialTutor])
 
   const fromTutor = (tutors || []).find((t) => t.id === fromTutorId) || null
   const targetTutorOptions = (tutors || []).filter((t) => t.id !== fromTutorId)
@@ -2077,16 +2069,6 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
     })
   }, [fromTutor, students])
 
-  // Reset selected students to ALL mapped students whenever fromTutor changes (Select All by default)
-  useEffect(() => {
-    if (mappedStudents.length > 0) {
-      const all = new Set(mappedStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean))
-      setSelectedStudentEmails(all)
-    } else {
-      setSelectedStudentEmails(new Set())
-    }
-  }, [mappedStudents])
-
   // Distinct classes among mapped students
   const availableClasses = useMemo(() => {
     const map = new Map()
@@ -2094,12 +2076,70 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
       if (st.department || st.batch || st.section) {
         const key = `${st.department || '—'}|${st.batch || '—'}|${st.section || '—'}`
         const label = `${st.department || 'Dept'} · Batch ${st.batch || '—'} · Sec ${st.section || '—'}`
-        if (!map.has(key)) map.set(key, { key, label, count: 0 })
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            label,
+            department: st.department,
+            batch: st.batch,
+            section: st.section,
+            count: 0,
+          })
+        }
         map.get(key).count++
       }
     })
     return Array.from(map.values())
   }, [mappedStudents])
+
+  // Initialize tutor and classFilter when modal opens
+  useEffect(() => {
+    if (!isOpen) return
+    setFromTutorId(initialTutor?.id || '')
+    setToTutorId('')
+    setSearch('')
+    if (initialClass && (initialClass.department || initialClass.batch || initialClass.section)) {
+      const initKey = `${initialClass.department || '—'}|${initialClass.batch || '—'}|${initialClass.section || '—'}`
+      setClassFilter(initKey)
+    } else {
+      setClassFilter('all')
+    }
+  }, [isOpen, initialTutor, initialClass])
+
+  // Keep selectedStudentEmails synchronized with the active classFilter
+  useEffect(() => {
+    if (mappedStudents.length === 0) {
+      setSelectedStudentEmails(new Set())
+      return
+    }
+    if (classFilter === 'all') {
+      const all = new Set(mappedStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean))
+      setSelectedStudentEmails(all)
+    } else {
+      const groupStudents = mappedStudents.filter((st) => {
+        const k = `${st.department || '—'}|${st.batch || '—'}|${st.section || '—'}`
+        return k === classFilter
+      })
+      const groupEmails = new Set(groupStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean))
+      setSelectedStudentEmails(groupEmails)
+    }
+  }, [mappedStudents, classFilter])
+
+  // Handler when user clicks a class filter chip: immediately switch active filter and select that group
+  const handleSelectClassFilter = (targetKey) => {
+    setClassFilter(targetKey)
+    if (targetKey === 'all') {
+      const all = new Set(mappedStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean))
+      setSelectedStudentEmails(all)
+    } else {
+      const groupStudents = mappedStudents.filter((st) => {
+        const k = `${st.department || '—'}|${st.batch || '—'}|${st.section || '—'}`
+        return k === targetKey
+      })
+      const groupEmails = new Set(groupStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean))
+      setSelectedStudentEmails(groupEmails)
+    }
+  }
 
   // Filter students by class and search
   const visibleStudents = useMemo(() => {
@@ -2119,6 +2159,13 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
       return true
     })
   }, [mappedStudents, classFilter, search])
+
+  // Only visible students that are checked are considered selected for transfer
+  const studentsToSwitch = useMemo(() => {
+    return visibleStudents.filter((st) =>
+      selectedStudentEmails.has((st.email || '').toLowerCase()),
+    )
+  }, [visibleStudents, selectedStudentEmails])
 
   const isAllVisibleSelected =
     visibleStudents.length > 0 &&
@@ -2154,14 +2201,16 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
     })
   }
 
+  const activeClassObj = availableClasses.find((c) => c.key === classFilter)
+
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!fromTutorId || !toTutorId || selectedStudentEmails.size === 0) return
+    if (!fromTutorId || !toTutorId || studentsToSwitch.length === 0) return
     switchMutation.mutate(
       {
         fromTutorId,
         toTutorId,
-        studentEmails: Array.from(selectedStudentEmails),
+        studentEmails: studentsToSwitch.map((s) => s.email),
       },
       {
         onSuccess: () => onClose(),
@@ -2173,7 +2222,7 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
     <Modal isOpen={isOpen} onClose={onClose} title="Switch Tutor For Students" wide>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <p className="text-sm text-gray-600">
-          Select current and target tutor. By default all mapped students are selected; you can customize the selection below to switch specific students (e.g. roll numbers 1–33).
+          Select current and target tutor. Use the class filter chips below to switch an entire section group (e.g. Sec A or Sec B) or customize individual student checkboxes.
         </p>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -2220,16 +2269,22 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
                   Select Students to Reassign
                 </h4>
                 <p className="text-[11px] text-gray-500">
-                  Check or uncheck students to reassign only specific individuals.
+                  {classFilter !== 'all' && activeClassObj ? (
+                    <span>
+                      Filtered to <span className="font-semibold text-indigo-700">{activeClassObj.label}</span>. Only students selected in this group will be switched.
+                    </span>
+                  ) : (
+                    <span>Showing all classes mapped to this tutor. Click a class filter chip below to switch a specific class group.</span>
+                  )}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-xs font-bold text-indigo-700">
-                  Selected: {selectedStudentEmails.size} / {mappedStudents.length}
+                  Selected: {studentsToSwitch.length} / {visibleStudents.length}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setSelectedStudentEmails(new Set(mappedStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean)))}
+                  onClick={() => setSelectedStudentEmails(new Set(visibleStudents.map((s) => (s.email || '').toLowerCase()).filter(Boolean)))}
                   className="text-[11px] font-semibold text-indigo-600 hover:underline"
                 >
                   Select All
@@ -2237,7 +2292,15 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
                 <span className="text-gray-300">|</span>
                 <button
                   type="button"
-                  onClick={() => setSelectedStudentEmails(new Set())}
+                  onClick={() => {
+                    setSelectedStudentEmails((prev) => {
+                      const next = new Set(prev)
+                      visibleStudents.forEach((s) => {
+                        if (s.email) next.delete(s.email.toLowerCase())
+                      })
+                      return next
+                    })
+                  }}
                   className="text-[11px] font-semibold text-gray-500 hover:underline"
                 >
                   Deselect All
@@ -2252,10 +2315,10 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
                   <span className="text-[11px] font-semibold text-gray-500">Filter Class:</span>
                   <button
                     type="button"
-                    onClick={() => setClassFilter('all')}
+                    onClick={() => handleSelectClassFilter('all')}
                     className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                       classFilter === 'all'
-                        ? 'bg-navy text-white shadow-2xs'
+                        ? 'bg-navy text-white shadow-2xs font-bold'
                         : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
                     }`}
                   >
@@ -2265,12 +2328,13 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
                     <button
                       key={c.key}
                       type="button"
-                      onClick={() => setClassFilter(c.key)}
+                      onClick={() => handleSelectClassFilter(c.key)}
                       className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                         classFilter === c.key
-                          ? 'bg-navy text-white shadow-2xs'
+                          ? 'bg-indigo-600 text-white shadow-2xs font-bold'
                           : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
                       }`}
+                      title={`Filter and switch only ${c.label}`}
                     >
                       {c.label} ({c.count})
                     </button>
@@ -2359,13 +2423,13 @@ function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, students }) {
           <button
             type="submit"
             className="btn-primary"
-            disabled={!fromTutorId || !toTutorId || selectedStudentEmails.size === 0 || switchMutation.isPending}
+            disabled={!fromTutorId || !toTutorId || studentsToSwitch.length === 0 || switchMutation.isPending}
           >
             {switchMutation.isPending
               ? 'Switching...'
-              : selectedStudentEmails.size === mappedStudents.length && mappedStudents.length > 0
-              ? 'Switch All Students'
-              : `Switch Selected (${selectedStudentEmails.size}) Students`}
+              : classFilter !== 'all' && activeClassObj
+              ? `Switch ${studentsToSwitch.length} Student${studentsToSwitch.length !== 1 ? 's' : ''} in Sec ${activeClassObj.section || ''}`
+              : `Switch ${studentsToSwitch.length} Student${studentsToSwitch.length !== 1 ? 's' : ''}`}
           </button>
         </div>
       </form>
@@ -2999,7 +3063,7 @@ function StudentGroupedView({
                                           </div>
                                           <button
                                             type="button"
-                                            onClick={() => onSwitchTutor(tutorObj)}
+                                            onClick={() => onSwitchTutor(tutorObj, { department: dept, batch, section })}
                                             className="inline-flex items-center gap-1.5 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors border border-indigo-200"
                                           >
                                             ⇄ Switch Tutor
@@ -3640,6 +3704,7 @@ function UsersTab() {
   const [showNew, setShowNew] = useState(false)
   const [editUser, setEditUser] = useState(null)
   const [selectedTutorForSwitch, setSelectedTutorForSwitch] = useState(null)
+  const [selectedClassForSwitch, setSelectedClassForSwitch] = useState(null)
   const [selectedTutorForClass, setSelectedTutorForClass] = useState(null)
 
   const handleDeleteUser = async (user) => {
@@ -3712,6 +3777,7 @@ function UsersTab() {
               className="btn-secondary text-xs"
               onClick={() => {
                 setSelectedTutorForSwitch(null)
+                setSelectedClassForSwitch(null)
                 setShowTutorSwitch(true)
               }}
             >
@@ -3753,8 +3819,9 @@ function UsersTab() {
           isLoading={roleUsersLoading}
           tutors={tutors || []}
           departments={departments || []}
-          onSwitchTutor={(tutor) => {
+          onSwitchTutor={(tutor, classContext) => {
             setSelectedTutorForSwitch(tutor)
+            setSelectedClassForSwitch(classContext || null)
             setShowTutorSwitch(true)
           }}
           onEditUser={(u) => setEditUser(u)}
@@ -3778,6 +3845,7 @@ function UsersTab() {
           onRemoveClass={handleRemoveTutorClass}
           onSwitchTutor={(tutor) => {
             setSelectedTutorForSwitch(tutor)
+            setSelectedClassForSwitch(null)
             setShowTutorSwitch(true)
           }}
           onEditUser={(u) => setEditUser(u)}
@@ -3818,9 +3886,11 @@ function UsersTab() {
         onClose={() => {
           setShowTutorSwitch(false)
           setSelectedTutorForSwitch(null)
+          setSelectedClassForSwitch(null)
         }}
         tutors={tutors || []}
         initialTutor={selectedTutorForSwitch}
+        initialClass={selectedClassForSwitch}
         students={students || []}
       />
       <SwitchTutorClassModal
