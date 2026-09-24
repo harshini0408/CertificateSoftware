@@ -5,7 +5,7 @@ import axiosInstance from '../../utils/axiosInstance'
 import GuestWizard from '../../components/GuestWizard'
 import LoadingSpinner from '../../components/LoadingSpinner'
 
-export default function FacultyCertificateGenerator({ forceNew = false, onCompleteSession }) {
+export default function FacultyCertificateGenerator({ forceNew = false, onCompleteSession, onViewHistory }) {
   const user = useAuthStore((s) => s.user)
   const addToast = useToastStore((s) => s.addToast)
 
@@ -93,13 +93,24 @@ export default function FacultyCertificateGenerator({ forceNew = false, onComple
               Upload certificate template, match student fields from Excel, allocate credit points, and generate certificates.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleResetSession}
-            className="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 shrink-0"
-          >
-            + Start Another Event
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {onViewHistory && (
+              <button
+                type="button"
+                onClick={onViewHistory}
+                className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5"
+              >
+                <span>📅</span> Event History
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleResetSession}
+              className="px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              + Start Another Event
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
@@ -148,6 +159,21 @@ export default function FacultyCertificateGenerator({ forceNew = false, onComple
           {isSubmitting ? 'Initializing…' : 'Start Certificate Flow →'}
         </button>
       </form>
+
+      {onViewHistory && (
+        <div className="mt-6 pt-5 border-t border-gray-100 text-center">
+          <p className="text-xs text-gray-500">
+            Looking for past events?
+            <button
+              type="button"
+              onClick={onViewHistory}
+              className="ml-1.5 text-indigo-600 font-semibold hover:underline"
+            >
+              View Event History →
+            </button>
+          </p>
+        </div>
+      )}
     </div>
   )
 }

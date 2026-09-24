@@ -52,17 +52,17 @@ export default function FacultyDashboard() {
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  📜 Certificate History
+                  📅 Event History
                 </button>
               </nav>
             </div>
 
             {/* Tab content */}
             {activeTab === 'generate' ? (
-              <FacultyCertificateGenerator forceNew={forceNew} />
+              <FacultyCertificateGenerator forceNew={forceNew} onViewHistory={() => handleTabChange('history')} />
             ) : (
               <EventHistoryContent
-                title="Faculty Certificate History"
+                title="Faculty Event History"
                 description="View past certificate generation events, edit event names, download ZIP packages, or send emails."
                 onNewSession={() => navigate('/faculty?tab=generate&new=1')}
               />

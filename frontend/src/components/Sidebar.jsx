@@ -159,7 +159,7 @@ function useNavItems() {
     case 'faculty':
       return [
         { to: '/faculty',         icon: icons.certificate, label: 'Generate Certificates', end: true },
-        { to: '/faculty/history', icon: icons.calendar,    label: 'Certificate History',   end: false },
+        { to: '/faculty/history', icon: icons.calendar,    label: 'Event History',         end: false },
       ]
 
     case 'student':
@@ -176,7 +176,7 @@ function useNavItems() {
       if (isFacultyMode) {
         return [
           { to: '/tutor?mode=faculty',             icon: icons.certificate, label: 'Generate Certificates',     end: false },
-          { to: '/tutor?mode=faculty&tab=history', icon: icons.calendar,    label: 'Certificate History',       end: false },
+          { to: '/tutor?mode=faculty&tab=history', icon: icons.calendar,    label: 'Event History',             end: false },
           { to: '/tutor',                          icon: icons.student,     label: '← Back to Tutor Mode',      end: true },
         ]
       }
