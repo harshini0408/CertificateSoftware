@@ -748,49 +748,12 @@ export default function TutorDashboard() {
               >
                 Credit Point Verification
               </button>
-              <button
-                type="button"
-                onClick={() => setSearchParams({ mode: 'faculty', tab: 'generate' }, { replace: true })}
-                className="relative px-4 py-2.5 text-sm font-medium text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1.5"
-              >
-                <span>🎓</span> Generate Certificates
-              </button>
-              <button
-                type="button"
-                onClick={() => setSearchParams({ mode: 'faculty', tab: 'history' }, { replace: true })}
-                className="relative px-4 py-2.5 text-sm font-medium text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1.5"
-              >
-                <span>📜</span> Certificate History
-              </button>
             </div>
 
             {activeTab === 'verification' ? (
               <VerificationTab />
             ) : (
               <>
-
-            {/* Quick Banner: Faculty Certificate Privileges for Tutors */}
-            <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/90 via-blue-50/60 to-white p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="h-11 w-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xl shadow-md shrink-0">
-                  🎓
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-gray-900">Faculty Certificate Generator Access</h3>
-                  <p className="text-xs text-gray-600 mt-0.5 max-w-xl">
-                    As a tutor, you have full faculty access to generate and issue event certificates with custom templates, attendance lists, and optional student credit rules.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSearchParams({ mode: 'faculty', tab: 'generate', new: '1' }, { replace: true })}
-                className="btn-primary text-xs shrink-0 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 shadow-md transition-all font-bold"
-              >
-                Generate Certificates →
-              </button>
-            </div>
-
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-1">
               <StatCard label="Assigned Students" value={totalStudents} accent="navy" />
             </div>

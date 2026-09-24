@@ -106,6 +106,7 @@ function NavItem({ to, icon, label, end = false, sidebarOpen }) {
 function useNavItems() {
   const { role, club_id } = useAuthStore()
   const params = useParams()
+  const location = useLocation()
   const effectiveClubId = club_id ?? params.club_id
 
   switch (role) {
@@ -170,13 +171,20 @@ function useNavItems() {
         { to: '/student?tab=settings',          icon: icons.settings,    label: 'Settings',                end: false },
       ]
 
-    case 'tutor':
+    case 'tutor': {
+      const isFacultyMode = location.search.includes('mode=faculty') || location.pathname.startsWith('/faculty')
+      if (isFacultyMode) {
+        return [
+          { to: '/tutor?mode=faculty',             icon: icons.certificate, label: 'Generate Certificates',     end: false },
+          { to: '/tutor?mode=faculty&tab=history', icon: icons.calendar,    label: 'Certificate History',       end: false },
+          { to: '/tutor',                          icon: icons.student,     label: '← Back to Tutor Mode',      end: true },
+        ]
+      }
       return [
         { to: '/tutor',                          icon: icons.student,     label: 'Dashboard',                 end: true },
         { to: '/tutor?tab=verification',         icon: icons.creditCard,  label: 'Credit Point Verification',  end: false },
-        { to: '/tutor?mode=faculty',             icon: icons.certificate, label: 'Generate Certificates',     end: false },
-        { to: '/tutor?mode=faculty&tab=history', icon: icons.calendar,    label: 'Certificate History',       end: false },
       ]
+    }
 
     case 'student_affairs':
       return [
