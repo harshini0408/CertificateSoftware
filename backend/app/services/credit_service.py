@@ -28,6 +28,8 @@ async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
         spaced,
         display,
     ]
+    if normalized in {"volunteer", "student_volunteer"}:
+        candidates.extend(["student_volunteer", "Student Volunteer", "student volunteer", "volunteer", "Volunteer"])
     seen = set()
     for candidate in candidates:
         key = (candidate or "").strip().lower()

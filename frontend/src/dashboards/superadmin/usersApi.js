@@ -62,6 +62,17 @@ export function useStudentCertificateSearch(query) {
   })
 }
 
+export function useStudentClubMemberships(userId) {
+  return useQuery({
+    queryKey: ['admin', 'student-club-memberships', userId],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/admin/users/${userId}/club-memberships`)
+      return data
+    },
+    enabled: !!userId,
+  })
+}
+
 export function useTutorMappingSummary() {
   return useQuery({
     queryKey: userKeys.tutorMappingSummary(),
@@ -139,18 +150,25 @@ export function useBulkDeleteUsers() {
   return useMutation({
     mutationFn: async (userIds) => {
       const ids = Array.isArray(userIds) ? userIds : []
-      const results = await Promise.allSettled(
-        ids.map((id) => axiosInstance.delete(`/admin/users/${id}`)),
-      )
-
-      const success = results.filter((r) => r.status === 'fulfilled').length
-      const failed = results.length - success
-      return { success, failed }
+      if (ids.length === 0) return { success: 0, failed: 0 }
+      try {
+        const { data } = await axiosInstance.post('/admin/users/bulk-delete', { user_ids: ids })
+        const count = data?.deleted_count ?? ids.length
+        return { success: count, failed: 0 }
+      } catch (err) {
+        // Fallback to sequential deletion if endpoint encounters an error
+        const results = await Promise.allSettled(
+          ids.map((id) => axiosInstance.delete(`/admin/users/${id}`)),
+        )
+        const success = results.filter((r) => r.status === 'fulfilled').length
+        const failed = results.length - success
+        return { success, failed }
+      }
     },
     onSuccess: ({ success, failed }) => {
       qc.invalidateQueries({ queryKey: ['users'] })
       if (failed === 0) {
-        addToast({ type: 'success', message: `${success} user${success !== 1 ? 's' : ''} deleted successfully.` })
+        addToast({ type: 'success', message: `${success} student${success !== 1 ? 's' : ''} deleted successfully.` })
       } else {
         addToast({ type: 'error', message: `${success} deleted, ${failed} failed. Please retry failed items.` })
       }
@@ -261,8 +279,12 @@ export function useReassignTutorStudents() {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: ({ fromTutorId, toTutorId }) =>
-      axiosInstance.post(`/admin/tutors/${fromTutorId}/reassign`, { new_tutor_id: toTutorId }),
+    mutationFn: ({ fromTutorId, toTutorId, studentEmails, studentIds }) =>
+      axiosInstance.post(`/admin/tutors/${fromTutorId}/reassign`, {
+        new_tutor_id: toTutorId,
+        student_emails: studentEmails,
+        student_ids: studentIds,
+      }),
     onSuccess: ({ data }) => {
       qc.invalidateQueries({ queryKey: ['users'] })
       addToast({
@@ -276,4 +298,155 @@ export function useReassignTutorStudents() {
     },
   })
 }
+
+export function useAssignUnassignedStudentsTutor() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ tutorId, studentIds }) =>
+      axiosInstance.post('/admin/students/assign-tutor', {
+        new_tutor_id: tutorId,
+        student_ids: studentIds,
+      }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({
+        type: 'success',
+        message: `${data.assigned} student${data.assigned !== 1 ? 's' : ''} assigned to ${data.tutor}.`,
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to assign tutor.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useAddTutorClass() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ tutorId, department, batch, section, assignUnassigned = true }) =>
+      axiosInstance.post(`/admin/tutors/${tutorId}/classes`, {
+        department,
+        batch,
+        section,
+        assign_unassigned_students: assignUnassigned,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Class added to tutor successfully.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to add class to tutor.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useRemoveTutorClass() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ tutorId, department, batch, section }) =>
+      axiosInstance.delete(`/admin/tutors/${tutorId}/classes`, {
+        params: { department, batch, section },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Class removed from tutor.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to remove class from tutor.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useMakeFacultyTutor() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ facultyId, role = 'tutor', department, batch, section, assignUnassigned = true, replaceExistingHod = false }) =>
+      axiosInstance.post(`/admin/faculty/${facultyId}/make-role`, {
+        role,
+        department,
+        batch,
+        section,
+        assign_unassigned_students: assignUnassigned,
+        replace_existing_hod: replaceExistingHod,
+      }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({
+        type: 'success',
+        message: data.role === 'hod'
+          ? `${data.name || 'Faculty'} is now the HOD for ${data.department}!`
+          : `${data.name || 'Faculty'} is now assigned as Tutor for ${data.department} ${data.batch} ${data.section}!`,
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to assign faculty as tutor.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useBulkImportFaculty() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (formData) =>
+      axiosInstance.post('/admin/users/bulk-import-faculty', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      const createdCount = data?.created ?? 0
+      const skippedCount = data?.skipped ?? 0
+      const errorCount = data?.errors?.length ?? 0
+      addToast({
+        type: errorCount > 0 ? 'warning' : 'success',
+        message: `Import complete: ${createdCount} faculty created, ${skippedCount} skipped, ${errorCount} error(s).`,
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Bulk faculty import failed.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useDownloadFacultyImportSample() {
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await axiosInstance.get('/admin/users/bulk-import-faculty/sample', {
+        responseType: 'blob',
+      })
+      const blob = new Blob([
+        response.data,
+      ], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'faculty_bulk_import_sample.xlsx'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to download sample file.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
 

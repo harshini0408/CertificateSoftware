@@ -23,6 +23,10 @@ from .guest_session import GuestSession
 from .role_template_preset import RoleTemplatePreset
 from .user_otp import OTPRequest
 from .manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
+from .student_club_membership import StudentClubMembership, MembershipStatus
+from .event_registration import EventRegistration
+from .attendance import Attendance
+from .attendance_session import AttendanceSession
 from ..certificate_config.model import CertificateTemplateConfig
 
 ALL_MODELS = [
@@ -51,6 +55,10 @@ ALL_MODELS = [
     RoleTemplatePreset,
     OTPRequest,
     ManualCreditSubmission,
+    StudentClubMembership,
+    EventRegistration,
+    Attendance,
+    AttendanceSession,
     CertificateTemplateConfig,
 ]
 
@@ -77,5 +85,8 @@ __all__ = [
     "RoleTemplatePreset",
     "OTPRequest",
     "ManualCreditSubmission", "ManualSubmissionStatus",
+    "StudentClubMembership", "MembershipStatus",
+    "Attendance",
+    "AttendanceSession",
     "ALL_MODELS",
 ]

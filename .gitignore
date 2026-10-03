@@ -70,7 +70,7 @@ mongodb_data/
 *.sqlite
 
 # Application Files
-
+storage/
 *.pdf
 *.xlsx
 *.xls

@@ -18,6 +18,7 @@ from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.dept_certificate import DeptCertificate
 from ...models.user import User, UserRole
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
 
@@ -28,6 +29,10 @@ class TutorManualCertificateRequest(BaseModel):
     student_email: str
     cert_type: str
     cert_number: str | None = None
+
+
+class TutorUpdateRegNoRequest(BaseModel):
+    registration_number: str
 
 
 class SubmissionReviewRequest(BaseModel):
@@ -126,6 +131,28 @@ async def _rollup_credit_docs(docs: list[StudentCredit]) -> tuple[int, list[Cred
 
 @router.get("/tutor/me")
 async def get_tutor_profile(current_user: User = Depends(require_role(UserRole.TUTOR))):
+    classes = []
+    if current_user.department and current_user.batch and current_user.section:
+        classes.append({
+            "department": current_user.department,
+            "batch": current_user.batch,
+            "section": current_user.section,
+        })
+    if getattr(current_user, "assigned_classes", None):
+        for c in current_user.assigned_classes:
+            if isinstance(c, dict) and c.get("department") and c.get("batch") and c.get("section"):
+                if not any(
+                    (x.get("department") or "").lower() == (c.get("department") or "").lower() and
+                    (x.get("batch") or "").lower() == (c.get("batch") or "").lower() and
+                    (x.get("section") or "").lower() == (c.get("section") or "").lower()
+                    for x in classes
+                ):
+                    classes.append({
+                        "department": c.get("department"),
+                        "batch": c.get("batch"),
+                        "section": c.get("section"),
+                    })
+
     return {
         "id": str(current_user.id),
         "name": current_user.name,
@@ -134,6 +161,7 @@ async def get_tutor_profile(current_user: User = Depends(require_role(UserRole.T
         "department": current_user.department,
         "batch": current_user.batch,
         "section": current_user.section,
+        "assigned_classes": classes,
     }
 
 
@@ -170,6 +198,50 @@ async def list_tutor_students(current_user: User = Depends(require_role(UserRole
             }
         )
 
+    # Bulk-fetch approved club memberships and user edit tracking
+    student_emails_lower = [_norm_email(r.get("student_email")) for r in rows if r.get("student_email")]
+    if student_emails_lower:
+        users = await User.find({
+            "email": {"$in": student_emails_lower},
+            "role": UserRole.STUDENT,
+        }).to_list()
+        user_by_email = {_norm_email(u.email): u for u in users}
+
+        approved_memberships = await StudentClubMembership.find({
+            "student_email": {"$in": student_emails_lower},
+            "status": MembershipStatus.APPROVED.value,
+        }).to_list()
+        clubs_by_email: dict = {}
+        office_bearer_by_email: dict = {}
+        for m in approved_memberships:
+            email_key = _norm_email(m.student_email)
+            clubs_by_email.setdefault(email_key, []).append(m.club_name or "")
+            if m.office_bearer_role:
+                office_bearer_by_email[email_key] = f"{m.office_bearer_role} ({m.club_name or 'Club'})"
+        for row in rows:
+            email_key = _norm_email(row.get("student_email", ""))
+            row["clubs"] = clubs_by_email.get(email_key, [])
+            row["office_bearer"] = office_bearer_by_email.get(email_key, None)
+            u = user_by_email.get(email_key)
+            if u:
+                if u.registration_number:
+                    row["registration_number"] = u.registration_number
+                edits = getattr(u, "tutor_reg_no_change_count", 0) or 0
+                row["tutor_reg_no_change_count"] = edits
+                row["can_tutor_edit_reg_no"] = edits < 2
+                row["edits_remaining"] = max(0, 2 - edits)
+            else:
+                row["tutor_reg_no_change_count"] = 0
+                row["can_tutor_edit_reg_no"] = True
+                row["edits_remaining"] = 2
+    else:
+        for row in rows:
+            row["clubs"] = []
+            row["office_bearer"] = None
+            row["tutor_reg_no_change_count"] = 0
+            row["can_tutor_edit_reg_no"] = True
+            row["edits_remaining"] = 2
+
     rows.sort(key=lambda d: (d.get("student_name") or "").lower())
     return rows
 
@@ -188,6 +260,14 @@ async def get_tutor_student_detail(
     })
     if not doc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found for this tutor")
+
+    student_user = await User.find_one({
+        "email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"},
+        "role": UserRole.STUDENT,
+    })
+    tutor_edits = getattr(student_user, "tutor_reg_no_change_count", 0) or 0 if student_user else 0
+    can_tutor_edit = tutor_edits < 2
+    reg_no = student_user.registration_number if (student_user and student_user.registration_number) else doc.registration_number
 
     linked_docs = await _linked_credit_docs_for_tutor(doc, tutor_email)
     total_credits, rolled_history, semester_totals, current_semester = await _rollup_credit_docs(linked_docs)
@@ -210,12 +290,10 @@ async def get_tutor_student_detail(
         try:
             event_ids.append(PydanticObjectId(str(c.event_id)))
         except Exception:
-            continue
-    event_ids = list({eid for eid in event_ids})
-    event_by_id: Dict[str, Event] = {}
-    if event_ids:
-        events = await Event.find({"_id": {"$in": event_ids}}).to_list()
-        event_by_id = {str(e.id): e for e in events}
+            pass
+
+    events = await Event.find({"_id": {"$in": event_ids}}).to_list() if event_ids else []
+    event_by_id = {str(e.id): e for e in events}
 
     # Fetch relevant DeptCertificates to handle images for department events
     dept_certs = await DeptCertificate.find({
@@ -226,16 +304,12 @@ async def get_tutor_student_detail(
     event_details = []
     for entry in rolled_history:
         cert = cert_by_number.get(entry.cert_number) or dept_cert_by_number.get(entry.cert_number)
-        event_date = None
+        event = event_by_id.get(str(cert.event_id)) if cert and isinstance(cert, Certificate) and cert.event_id else None
+        event_date = event.event_date if event else None
         
-        # If it's a club certificate, get date from event
-        if cert and isinstance(cert, Certificate) and cert.event_id:
-            event = event_by_id.get(str(cert.event_id))
-            if event:
-                event_date = event.event_date
         # If it's a dept certificate, it might not have a direct event link in the same way, 
         # or it might have a created_at we can use as fallback
-        elif cert and isinstance(cert, DeptCertificate):
+        if cert and isinstance(cert, DeptCertificate):
             dc = cert
             event_details.append(
                 {
@@ -269,17 +343,100 @@ async def get_tutor_student_detail(
     return {
         "student_name": doc.student_name,
         "student_email": doc.student_email,
-        "registration_number": doc.registration_number,
+        "registration_number": reg_no,
         "department": doc.department,
         "batch": doc.batch,
         "section": doc.section,
         "total_credits": current_total,
         "current_semester": current_semester,
+        "tutor_reg_no_change_count": tutor_edits,
+        "can_tutor_edit_reg_no": can_tutor_edit,
+        "edits_remaining": max(0, 2 - tutor_edits),
         "semester_totals": [
             {"semester": sem, "total_credits": total}
             for sem, total in sorted(semester_totals.items())
         ],
         "event_details": event_details,
+    }
+
+
+@router.post("/tutor/students/{student_email}/update-registration-number")
+async def tutor_update_student_registration_number(
+    student_email: str,
+    body: TutorUpdateRegNoRequest,
+    current_user: User = Depends(require_role(UserRole.TUTOR)),
+):
+    tutor_email = _norm_email(current_user.email)
+    student_email_norm = _norm_email(student_email)
+
+    # Verify that this student is mapped to the current tutor
+    doc = await StudentCredit.find_one({
+        "student_email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"},
+        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+    })
+    if not doc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You are not the assigned tutor for this student.",
+        )
+
+    student_user = await User.find_one({
+        "email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"},
+        "role": UserRole.STUDENT,
+    })
+    if not student_user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Student user account not found.")
+
+    current_edits = getattr(student_user, "tutor_reg_no_change_count", 0) or 0
+    if current_edits >= 2:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration number can only be changed a maximum of 2 times by the tutor.",
+        )
+
+    new_reg = body.registration_number.strip()
+    if not re.fullmatch(r"^\d{12}$", new_reg):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration number must be a valid 12-digit number (e.g. 715522104001).",
+        )
+
+    # Check for uniqueness against other users
+    existing_user = await User.find_one({
+        "_id": {"$ne": student_user.id},
+        "$or": [
+            {"registration_number": {"$regex": f"^{re.escape(new_reg)}$", "$options": "i"}},
+            {"username": {"$regex": f"^{re.escape(new_reg)}$", "$options": "i"}},
+        ]
+    })
+    if existing_user:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This registration number is already registered to another student.",
+        )
+
+    old_reg = student_user.registration_number
+    student_user.registration_number = new_reg
+    # If the student's username was their old register number, sync username
+    if student_user.username == old_reg or not bool(re.fullmatch(r"^\d{12}$", student_user.username or "")):
+        student_user.username = new_reg
+    student_user.tutor_reg_no_change_count = current_edits + 1
+    await student_user.save()
+
+    # Sync all StudentCredit docs for this student
+    credit_docs = await StudentCredit.find({
+        "student_email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"}
+    }).to_list()
+    for cd in credit_docs:
+        cd.registration_number = new_reg
+        await cd.save()
+
+    return {
+        "message": "Registration number updated successfully",
+        "registration_number": new_reg,
+        "tutor_reg_no_change_count": student_user.tutor_reg_no_change_count,
+        "can_tutor_edit_reg_no": student_user.tutor_reg_no_change_count < 2,
+        "edits_remaining": max(0, 2 - student_user.tutor_reg_no_change_count),
     }
 
 
@@ -532,12 +689,58 @@ async def list_tutor_credit_rules(current_user: User = Depends(require_role(User
 @router.get("/tutor/credit-point-verifications")
 async def list_credit_point_verifications(current_user: User = Depends(require_role(UserRole.TUTOR))):
     tutor_email = _norm_email(current_user.email)
-    submissions = await ManualCreditSubmission.find({
-        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"}
-    }).sort("-submitted_at").to_list()
 
-    return [
-        {
+    # 1. Submissions explicitly addressed to this tutor
+    # 2. Submissions belonging to any student currently mapped to this tutor
+    my_credits = await StudentCredit.find({
+        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"}
+    }).to_list()
+    my_student_emails = [
+        re.compile(f"^{re.escape(c.student_email.strip())}$", re.IGNORECASE)
+        for c in my_credits
+        if c.student_email
+    ]
+
+    query = {
+        "$or": [
+            {"tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"}}
+        ]
+    }
+    if my_student_emails:
+        query["$or"].append({"student_email": {"$in": my_student_emails}})
+
+    submissions = await ManualCreditSubmission.find(query).sort("-submitted_at").to_list()
+
+    # Pre-resolve reviewer names for historical or reviewed submissions
+    tutor_emails = list({s.tutor_email for s in submissions if s.tutor_email})
+    reviewer_ids = list({s.reviewed_by for s in submissions if s.reviewed_by})
+    users_by_email = {}
+    users_by_id = {}
+    if tutor_emails:
+        t_users = await User.find({"email": {"$in": tutor_emails}}).to_list()
+        for u in t_users:
+            users_by_email[u.email.lower()] = u.name
+    if reviewer_ids:
+        r_oids = []
+        for rid in reviewer_ids:
+            try:
+                r_oids.append(PydanticObjectId(rid))
+            except Exception:
+                pass
+        if r_oids:
+            r_users = await User.find({"_id": {"$in": r_oids}}).to_list()
+            for u in r_users:
+                users_by_id[str(u.id)] = u.name
+
+    result = []
+    for s in submissions:
+        reviewer_name = s.reviewed_by_name
+        if not reviewer_name and s.reviewed_by and str(s.reviewed_by) in users_by_id:
+            reviewer_name = users_by_id[str(s.reviewed_by)]
+        if not reviewer_name and s.status in [ManualSubmissionStatus.VERIFIED, ManualSubmissionStatus.REJECTED] and s.tutor_email:
+            reviewer_name = users_by_email.get(s.tutor_email.lower()) or s.tutor_email
+
+        result.append({
             "id": str(s.id),
             "student_name": s.student_name,
             "student_email": s.student_email,
@@ -549,10 +752,10 @@ async def list_credit_point_verifications(current_user: User = Depends(require_r
             "points_awarded": int(s.points_awarded or 0),
             "review_comment": s.review_comment,
             "reviewed_at": s.reviewed_at,
+            "reviewed_by_name": reviewer_name,
             "submitted_at": s.submitted_at,
-        }
-        for s in submissions
-    ]
+        })
+    return result
 
 
 @router.post("/tutor/credit-point-verifications/{submission_id}/verify")
@@ -564,7 +767,26 @@ async def verify_credit_point_submission(
     submission = await ManualCreditSubmission.get(submission_id)
     if not submission:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
-    if _norm_email(submission.tutor_email) != tutor_email:
+
+    is_assigned = _norm_email(submission.tutor_email) == tutor_email
+    student_doc = None
+    if not is_assigned:
+        # Check if the student is currently mapped to this tutor in StudentCredit
+        student_doc = await StudentCredit.find_one({
+            "student_email": {"$regex": f"^{re.escape(_norm_email(submission.student_email))}$", "$options": "i"},
+            "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+        })
+        if not student_doc and submission.registration_number:
+            student_doc = await StudentCredit.find_one({
+                "registration_number": submission.registration_number,
+                "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+            })
+        if student_doc:
+            is_assigned = True
+            submission.tutor_email = tutor_email
+            await submission.save()
+
+    if not is_assigned:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This submission is not assigned to you")
     if submission.status != ManualSubmissionStatus.PENDING:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Submission is already reviewed")
@@ -573,15 +795,16 @@ async def verify_credit_point_submission(
     if not rule:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No credit rule configured for selected role")
 
-    student_doc = await StudentCredit.find_one({
-        "student_email": {"$regex": f"^{re.escape(_norm_email(submission.student_email))}$", "$options": "i"},
-        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
-    })
-    if not student_doc and submission.registration_number:
+    if not student_doc:
         student_doc = await StudentCredit.find_one({
-            "registration_number": submission.registration_number,
+            "student_email": {"$regex": f"^{re.escape(_norm_email(submission.student_email))}$", "$options": "i"},
             "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
         })
+        if not student_doc and submission.registration_number:
+            student_doc = await StudentCredit.find_one({
+                "registration_number": submission.registration_number,
+                "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+            })
 
     if not student_doc:
         student_doc = await StudentCredit(
@@ -614,6 +837,8 @@ async def verify_credit_point_submission(
     submission.points_awarded = int(rule.points or 0)
     submission.reviewed_at = datetime.utcnow()
     submission.reviewed_by = str(current_user.id)
+    submission.reviewed_by_name = current_user.name
+    submission.reviewed_by_email = current_user.email
     submission.review_comment = None
     await submission.save()
 
@@ -635,7 +860,24 @@ async def reject_credit_point_submission(
     submission = await ManualCreditSubmission.get(submission_id)
     if not submission:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
-    if _norm_email(submission.tutor_email) != tutor_email:
+
+    is_assigned = _norm_email(submission.tutor_email) == tutor_email
+    if not is_assigned:
+        mapped_credit = await StudentCredit.find_one({
+            "student_email": {"$regex": f"^{re.escape(_norm_email(submission.student_email))}$", "$options": "i"},
+            "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+        })
+        if not mapped_credit and submission.registration_number:
+            mapped_credit = await StudentCredit.find_one({
+                "registration_number": submission.registration_number,
+                "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+            })
+        if mapped_credit:
+            is_assigned = True
+            submission.tutor_email = tutor_email
+            await submission.save()
+
+    if not is_assigned:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This submission is not assigned to you")
     if submission.status != ManualSubmissionStatus.PENDING:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Submission is already reviewed")
@@ -644,6 +886,8 @@ async def reject_credit_point_submission(
     submission.points_awarded = 0
     submission.reviewed_at = datetime.utcnow()
     submission.reviewed_by = str(current_user.id)
+    submission.reviewed_by_name = current_user.name
+    submission.reviewed_by_email = current_user.email
     submission.review_comment = (body.reason or "").strip() or "Rejected by tutor"
     await submission.save()
 

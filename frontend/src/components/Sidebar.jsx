@@ -61,6 +61,11 @@ const icons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
     </svg>
   ),
+  performance: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+  ),
 }
 
 // ── Nav item component ────────────────────────────────────────────────────────
@@ -80,10 +85,10 @@ function NavItem({ to, icon, label, end = false, sidebarOpen }) {
       end={end}
       title={label}
       className={() =>
-        `flex items-center rounded-lg py-2.5 text-sm font-medium transition-colors duration-150 ${
+        `flex items-center rounded-lg py-2.5 text-sm font-medium transition-all duration-150 ${
           sidebarOpen
             ? 'justify-start gap-3 px-3'
-            : 'justify-center px-0 lg:justify-start lg:gap-3 lg:px-3'
+            : 'justify-center px-2'
         } ${
           isActive
             ? 'bg-navy text-white shadow-sm'
@@ -91,8 +96,8 @@ function NavItem({ to, icon, label, end = false, sidebarOpen }) {
         }`
       }
     >
-      {icon}
-      <span className={`truncate ${sidebarOpen ? 'block' : 'hidden lg:block'}`}>{label}</span>
+      <span className="shrink-0 flex items-center justify-center">{icon}</span>
+      {sidebarOpen && <span className="truncate">{label}</span>}
     </NavLink>
   )
 }
@@ -101,6 +106,7 @@ function NavItem({ to, icon, label, end = false, sidebarOpen }) {
 function useNavItems() {
   const { role, club_id } = useAuthStore()
   const params = useParams()
+  const location = useLocation()
   const effectiveClubId = club_id ?? params.club_id
 
   switch (role) {
@@ -119,17 +125,24 @@ function useNavItems() {
     case 'principal':
       return [
         { to: '/principal', icon: icons.dashboard, label: 'Dashboard', end: true },
-        { to: '/principal?view=student-search', icon: icons.student, label: 'Student Search' },
+        { to: '/principal?tab=recent-events', icon: icons.calendar, label: 'Recent Events' },
+        { to: '/principal?tab=clubs', icon: icons.clubs, label: 'Clubs' },
+        { to: '/principal?tab=departments', icon: icons.departments, label: 'Departments' },
+        { to: '/principal?tab=student-search', icon: icons.student, label: 'Student Search' },
       ]
 
     case 'hod':
       return [
         { to: '/hod', icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: '/hod?tab=performance', icon: icons.performance, label: 'Performance' },
+        { to: '/faculty', icon: icons.certificate, label: 'Generate Certificates' },
+        { to: '/faculty/history', icon: icons.calendar, label: 'Event History' },
       ]
 
     case 'club_coordinator':
       return [
         { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: `/club/${effectiveClubId}?tab=active_members`,   icon: icons.users,     label: 'Active Members' },
         { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
       ]
 
@@ -145,15 +158,42 @@ function useNavItems() {
         { to: '/dept?tab=settings',      icon: icons.settings,  label: 'Settings' },
       ]
 
-    case 'student':
+    case 'faculty':
       return [
-        { to: '/student', icon: icons.certificate, label: 'My Certificates', end: true },
+        { to: '/faculty',         icon: icons.certificate, label: 'Generate Certificates', end: true },
+        { to: '/faculty/history', icon: icons.calendar,    label: 'Event History',         end: false },
       ]
 
-    case 'tutor':
+    case 'student':
       return [
-        { to: '/tutor', icon: icons.student, label: 'Dashboard', end: true },
-        { to: '/tutor?tab=verification', icon: icons.creditCard, label: 'Credit Point Verification' },
+        { to: '/student',                       icon: icons.certificate, label: 'My Certificates',         end: true },
+        { to: '/student?tab=cert_verification', icon: icons.creditCard,  label: 'Certificate Verification', end: false },
+        { to: '/student?tab=upcoming',          icon: icons.calendar,    label: 'Upcoming Events',         end: false },
+        { to: '/student?tab=settings',          icon: icons.settings,    label: 'Settings',                end: false },
+      ]
+
+    case 'tutor': {
+      const isFacultyMode = location.search.includes('mode=faculty') || location.pathname.startsWith('/faculty')
+      if (isFacultyMode) {
+        return [
+          { to: '/tutor?mode=faculty',             icon: icons.certificate, label: 'Generate Certificates',     end: false },
+          { to: '/tutor?mode=faculty&tab=history', icon: icons.calendar,    label: 'Event History',             end: false },
+          { to: '/tutor',                          icon: icons.student,     label: '← Back to Tutor Mode',      end: true },
+        ]
+      }
+      return [
+        { to: '/tutor',                          icon: icons.student,     label: 'Dashboard',                 end: true },
+        { to: '/tutor?tab=verification',         icon: icons.creditCard,  label: 'Credit Point Verification',  end: false },
+      ]
+    }
+
+    case 'student_affairs':
+      return [
+        { to: '/student-affairs', icon: icons.dashboard, label: 'Overview', end: true },
+        { to: '/student-affairs?tab=club_events', icon: icons.calendar, label: 'Club Events' },
+        { to: '/student-affairs?tab=dept_events', icon: icons.departments, label: 'Dept Events' },
+        { to: '/student-affairs?tab=upcoming', icon: icons.calendar, label: 'Upcoming' },
+        { to: '/student-affairs?tab=clubs', icon: icons.clubs, label: 'Clubs' },
       ]
 
     default:
@@ -183,13 +223,12 @@ export default function Sidebar() {
           fixed top-14 left-0 z-20 flex h-[calc(100dvh-3.5rem)] flex-col
           border-gray-200 bg-white shadow-card
           transition-all duration-300 ease-in-out
-          lg:sticky lg:shadow-none min-h-0
-          ${sidebarOpen ? 'w-60 translate-x-0 border-r' : 'w-0 -translate-x-full border-none px-0'}
-          lg:translate-x-0 lg:border-r lg:w-60
+          lg:sticky lg:top-14 lg:self-start lg:shrink-0 lg:shadow-none min-h-0 border-r
+          ${sidebarOpen ? 'w-60 translate-x-0' : 'w-16 translate-x-0'}
         `}
       >
         {/* Nav links */}
-        <nav className={`flex-1 overflow-y-auto py-4 space-y-1 scrollbar-hide ${sidebarOpen ? 'px-3' : 'px-2 lg:px-3'}`}>
+        <nav className={`flex-1 overflow-y-auto py-4 space-y-1 scrollbar-hide ${sidebarOpen ? 'px-3' : 'px-2'}`}>
           {navItems.map((item) => (
             <NavItem
               key={item.to}
@@ -203,13 +242,19 @@ export default function Sidebar() {
         </nav>
 
         {/* Footer brand */}
-        <div className={`border-t border-gray-100 px-4 py-3 ${sidebarOpen ? 'block' : 'hidden lg:block'}`}>
-          <p className="text-xs text-gray-400 leading-tight">
-            PSG iTech
-            <br />
-            <span className="font-medium text-navy/60">Certificate Platform</span>
-          </p>
-        </div>
+        {sidebarOpen ? (
+          <div className="border-t border-gray-100 px-4 py-3">
+            <p className="text-xs text-gray-400 leading-tight">
+              PSG iTech
+              <br />
+              <span className="font-medium text-navy/60">Students Activity Management Software</span>
+            </p>
+          </div>
+        ) : (
+          <div className="border-t border-gray-100 py-3 flex justify-center" title="PSG iTech Students Activity Management Software">
+            <span className="text-[10px] font-bold text-navy/60">SDC</span>
+          </div>
+        )}
       </aside>
     </>
   )

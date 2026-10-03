@@ -89,7 +89,7 @@ export default function DeptCertificateIssue({ event }) {
   const approvePreviewMutation = useApproveDeptEventCertificatePreview(event?.id)
   const generateMutation = useGenerateDeptEventCertificates(event?.id)
 
-  const pendingEmailCount = (certs ?? []).filter((c) => c.status === 'generated').length
+  const pendingEmailCount = (certs ?? []).filter((c) => c.status === 'generated' && c.participant_email).length
 
   const hasParticipants = (eventState?.source_rows_count ?? 0) > 0 || (certs?.length ?? 0) > 0
   const requiresLogo = !!mapping?.field_positions?._logo

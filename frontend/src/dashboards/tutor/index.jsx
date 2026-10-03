@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import Navbar from '../../components/Navbar'
@@ -18,10 +18,13 @@ import {
   useTutorStudentDetail,
   useTutorStudents,
   useTutorVerifyCreditPoint,
+  useTutorUpdateStudentRegNo,
   downloadTutorAllAssignedCertificates,
   downloadTutorStudentCertificates,
 } from './api'
 import { BACKEND_URL } from '../../utils/axiosInstance'
+import FacultyCertificateGenerator from '../faculty/FacultyCertificateGenerator'
+import { EventHistoryContent } from '../guest/GuestHistory'
 
 function fmtDate(iso) {
   if (!iso) return '—'
@@ -87,6 +90,100 @@ function renderCreditAgainstTarget(points) {
   )
 }
 
+function EditRegNoModal({ student, onClose }) {
+  const updateRegNo = useTutorUpdateStudentRegNo()
+  const [regNo, setRegNo] = useState(student?.registration_number || '')
+  const [error, setError] = useState('')
+
+  const editsRemaining = student?.edits_remaining !== undefined
+    ? student.edits_remaining
+    : Math.max(0, 2 - (student?.tutor_reg_no_change_count || 0))
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const clean = regNo.trim()
+    if (!clean) {
+      setError('Please enter a 12-digit registration number.')
+      return
+    }
+    if (!/^\d{12}$/.test(clean)) {
+      setError('Registration number must be exactly 12 numeric digits (e.g. 715522104001).')
+      return
+    }
+    setError('')
+    updateRegNo.mutate(
+      {
+        studentEmail: student.student_email,
+        registration_number: clean,
+      },
+      {
+        onSuccess: () => {
+          onClose()
+        },
+      }
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-gray-100 pb-3">
+          <div>
+            <h3 className="text-base font-bold text-navy">Edit Registration Number</h3>
+            <p className="text-xs text-gray-500 mt-0.5">{student.student_name} ({student.student_email})</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
+        </div>
+
+        <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800 space-y-1">
+          <p className="font-semibold">Tutor Edit Policy:</p>
+          <p>
+            You can change this student's register number a maximum of <strong>2 times</strong>.
+          </p>
+          <p className="font-medium text-blue-900">
+            Edits remaining: <span className="font-bold underline">{editsRemaining} of 2</span>
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="form-label" htmlFor="tutor-reg-input">
+              Registration Number (12 Digits) *
+            </label>
+            <input
+              id="tutor-reg-input"
+              type="text"
+              maxLength={12}
+              value={regNo}
+              onChange={(e) => {
+                setRegNo(e.target.value.replace(/\D/g, ''))
+                setError('')
+              }}
+              placeholder="e.g. 715522104001"
+              className={`form-input font-mono text-sm ${error ? 'border-red-500' : ''}`}
+              autoFocus
+            />
+            {error && <p className="form-error mt-1">{error}</p>}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <button type="button" onClick={onClose} className="btn-secondary text-xs">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={updateRegNo.isPending || editsRemaining <= 0 || !regNo || regNo.length !== 12}
+              className="btn-primary text-xs"
+            >
+              {updateRegNo.isPending ? 'Saving…' : 'Save Register Number'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 function DetailModal({ email, onClose }) {
   const { data, isLoading } = useTutorStudentDetail(email, !!email)
   const semesterTotals = data?.semester_totals || []
@@ -113,6 +210,8 @@ function DetailModal({ email, onClose }) {
     (item) => (item?.semester || 'Unknown') === selectedSemester,
   )?.total_credits ?? 0
 
+  const [editingStudent, setEditingStudent] = useState(null)
+
   if (!email) return null
 
   return (
@@ -132,10 +231,31 @@ function DetailModal({ email, onClose }) {
           <div className="space-y-4">
             <div className="rounded-lg border border-gray-200 p-3 text-sm">
               <div><span className="text-gray-500">Name:</span> <span className="font-semibold">{data?.student_name || '—'}</span></div>
-              <div><span className="text-gray-500">Reg No:</span> <span className="font-semibold">{data?.registration_number || '—'}</span></div>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">Reg No:</span>
+                <span className="font-mono font-semibold">{data?.registration_number || '—'}</span>
+                {data?.can_tutor_edit_reg_no ? (
+                  <button
+                    onClick={() => setEditingStudent({
+                      student_name: data.student_name,
+                      student_email: data.student_email,
+                      registration_number: data.registration_number,
+                      edits_remaining: data.edits_remaining,
+                      tutor_reg_no_change_count: data.tutor_reg_no_change_count,
+                    })}
+                    className="ml-1 inline-flex items-center gap-1 text-xs text-navy hover:underline font-medium"
+                    title={`Edit register number (${data?.edits_remaining}/2 edits left)`}
+                  >
+                    ✏️ Edit ({data?.edits_remaining}/2 left)
+                  </button>
+                ) : (
+                  <span className="ml-1 text-[11px] text-gray-400 italic">(Max 2 edits reached)</span>
+                )}
+              </div>
               <div><span className="text-gray-500">Email:</span> <span className="font-semibold">{data?.student_email || '—'}</span></div>
               <div><span className="text-gray-500">Current Semester Credits:</span> {renderCreditAgainstTarget(data?.total_credits)}</div>
             </div>
+            {editingStudent && <EditRegNoModal student={editingStudent} onClose={() => setEditingStudent(null)} />}
             <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-foreground">Semester Totals</h3>
@@ -254,9 +374,19 @@ function VerificationTab() {
           {
             key: 'certificate_image_url',
             header: 'Certificate',
-            render: (v) => (v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View</a> : '—'),
+            render: (v) => {
+              if (!v) return '—'
+              const href = String(v).startsWith('http') ? v : `${BACKEND_URL}${v}`
+              return (
+                <a href={href} target="_blank" rel="noreferrer" className="text-navy hover:underline font-medium">
+                  View
+                </a>
+              )
+            },
           },
           { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+          { key: 'points_awarded', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
+          { key: 'reviewed_by_name', header: 'Verified/Reviewed By', render: (v, row) => v ? v : (row.status === 'pending' ? '—' : 'Tutor') },
           { key: 'submitted_at', header: 'Submitted', render: (v) => fmtDate(v) },
           {
             key: 'id',
@@ -307,15 +437,66 @@ export default function TutorDashboard() {
   const { data: creditRules, isLoading: rulesLoading } = useTutorCreditRules()
   const manualCertMutation = useTutorManualCertificate()
   const [selectedStudentEmail, setSelectedStudentEmail] = useState(null)
+  const [editingStudent, setEditingStudent] = useState(null)
   const [manualEntry, setManualEntry] = useState({ student_email: '', cert_type: '', cert_number: '' })
   const [downloadingStudentEmail, setDownloadingStudentEmail] = useState(null)
   const [isDownloadingAllAssigned, setIsDownloadingAllAssigned] = useState(false)
   const [creditRangeExpression, setCreditRangeExpression] = useState('')
+  const mode = searchParams.get('mode') === 'faculty' ? 'faculty' : 'tutor'
+  const facultyTab = searchParams.get('tab') === 'history' ? 'history' : 'generate'
   const activeTab = searchParams.get('tab') === 'verification' ? 'verification' : 'dashboard'
+  const [selectedClassKey, setSelectedClassKey] = useState('all')
 
-  const totalStudents = students?.length || 0
+  const tutorClasses = useMemo(() => {
+    const list = []
+    const seen = new Set()
+
+    const addClass = (dept, batch, sec) => {
+      const d = (dept || '').trim()
+      const b = (batch || '').trim()
+      const s = (sec || '').trim()
+      if (!d && !b && !s) return
+      const key = `${d.toLowerCase()}|${b.toLowerCase()}|${s.toLowerCase()}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        list.push({
+          key,
+          department: d,
+          batch: b,
+          section: s,
+          label: `${d || 'Dept'} · Batch ${b || '—'} · Sec ${s || '—'}`,
+        })
+      }
+    }
+
+    if (profile?.department && profile?.batch && profile?.section) {
+      addClass(profile.department, profile.batch, profile.section)
+    }
+    if (profile?.assigned_classes && Array.isArray(profile.assigned_classes)) {
+      profile.assigned_classes.forEach((c) => addClass(c.department, c.batch, c.section))
+    }
+    ;(students || []).forEach((st) => {
+      if (st.department || st.batch || st.section) {
+        addClass(st.department, st.batch, st.section)
+      }
+    })
+
+    return list
+  }, [profile, students])
+
+  const classFilteredStudents = useMemo(() => {
+    if (selectedClassKey === 'all') return students || []
+    return (students || []).filter((st) => {
+      const d = (st.department || '').trim().toLowerCase()
+      const b = (st.batch || '').trim().toLowerCase()
+      const s = (st.section || '').trim().toLowerCase()
+      return `${d}|${b}|${s}` === selectedClassKey
+    })
+  }, [students, selectedClassKey])
+
+  const totalStudents = classFilteredStudents.length
   const creditFilter = buildCreditPredicate(creditRangeExpression)
-  const filteredStudents = (students || []).filter((student) => creditFilter.fn(student.total_credits))
+  const filteredStudents = classFilteredStudents.filter((student) => creditFilter.fn(student.total_credits))
 
   const handleManualSubmit = async (e) => {
     e.preventDefault()
@@ -399,31 +580,174 @@ export default function TutorDashboard() {
         <Sidebar />
         <main className="flex-1 overflow-y-auto bg-background">
           <div className="page-container space-y-6">
+            {/* Mode Switcher Toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white rounded-2xl border border-gray-200/80 shadow-sm">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Current Portal Mode</p>
+                <p className="text-sm font-bold text-gray-900">
+                  {mode === 'tutor' ? 'Tutor Mode — Class Credit & Student Management' : 'Faculty Mode — Institutional Certificate Generator'}
+                </p>
+              </div>
+              <div className="inline-flex rounded-xl bg-gray-100 p-1 border border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({ mode: 'tutor' }, { replace: true })}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    mode === 'tutor'
+                      ? 'bg-navy text-white shadow-sm'
+                      : 'text-gray-600 hover:text-navy'
+                  }`}
+                >
+                  👨‍🏫 Tutor Mode
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({ mode: 'faculty', tab: 'generate' }, { replace: true })}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    mode === 'faculty'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-indigo-600'
+                  }`}
+                >
+                  🎓 Faculty Mode (Generate Certs)
+                </button>
+              </div>
+            </div>
+
+            {mode === 'faculty' ? (
+              <div className="space-y-6">
+                <div className="border-b border-gray-200">
+                  <nav className="-mb-px flex space-x-6">
+                    <button
+                      type="button"
+                      onClick={() => setSearchParams({ mode: 'faculty', tab: 'generate' }, { replace: true })}
+                      className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                        facultyTab === 'generate'
+                          ? 'border-indigo-600 text-indigo-600 font-semibold'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      🎓 Generate Certificates
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSearchParams({ mode: 'faculty', tab: 'history' }, { replace: true })}
+                      className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                        facultyTab === 'history'
+                          ? 'border-indigo-600 text-indigo-600 font-semibold'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      📅 Event History
+                    </button>
+                  </nav>
+                </div>
+
+                {facultyTab === 'generate' ? (
+                  <FacultyCertificateGenerator
+                    forceNew={searchParams.get('new') === '1'}
+                    onViewHistory={() => setSearchParams({ mode: 'faculty', tab: 'history' }, { replace: true })}
+                  />
+                ) : (
+                  <EventHistoryContent
+                    title="Faculty Event History"
+                    description="View past certificate generation events, edit event names, download ZIP packages, or send emails."
+                    onNewSession={() => setSearchParams({ mode: 'faculty', tab: 'generate', new: '1' }, { replace: true })}
+                  />
+                )}
+              </div>
+            ) : (
+              <>
             <div>
               <h1 className="text-2xl font-bold text-foreground">
                 {profileLoading ? 'Tutor Dashboard' : `Tutor Dashboard — ${profile?.name || 'Tutor'}`}
               </h1>
               <p className="mt-1 text-sm text-gray-500">
-                Class: {(profile?.department || '—')} {(profile?.batch || '')} {(profile?.section || '')}
+                {tutorClasses.length > 1 ? (
+                  <span>
+                    Managing multiple classes:{' '}
+                    <span className="font-semibold text-gray-800">
+                      {tutorClasses.map((c) => `${c.department} · Batch ${c.batch} · Sec ${c.section}`).join('  |  ')}
+                    </span>
+                  </span>
+                ) : (
+                  <span>
+                    Class: {(profile?.department || '—')} {(profile?.batch || '')} {(profile?.section || '')}
+                  </span>
+                )}
               </p>
             </div>
 
-            <div className="mb-2 flex gap-1 border-b border-gray-200">
+            {/* Class Toggle Switcher for Multiple Classes */}
+            {tutorClasses.length > 1 && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-white rounded-2xl border border-blue-200/80 shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-8 w-8 rounded-lg bg-navy text-white flex items-center justify-center text-sm font-bold shadow-xs">
+                    🏫
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Class Scope</span>
+                    <p className="text-xs font-semibold text-gray-900">
+                      You are assigned to {tutorClasses.length} classes. Switch between them below:
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 bg-white p-1 rounded-xl border border-gray-200 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClassKey('all')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      selectedClassKey === 'all'
+                        ? 'bg-navy text-white shadow-xs'
+                        : 'text-gray-600 hover:text-navy hover:bg-gray-50'
+                    }`}
+                  >
+                    All Classes ({students?.length || 0})
+                  </button>
+                  {tutorClasses.map((cls) => {
+                    const count = (students || []).filter((st) => {
+                      const d = (st.department || '').trim().toLowerCase()
+                      const b = (st.batch || '').trim().toLowerCase()
+                      const s = (st.section || '').trim().toLowerCase()
+                      return `${d}|${b}|${s}` === cls.key
+                    }).length
+                    const isSelected = selectedClassKey === cls.key
+                    return (
+                      <button
+                        key={cls.key}
+                        type="button"
+                        onClick={() => setSelectedClassKey(cls.key)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'text-gray-600 hover:text-indigo-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {cls.department} · Batch {cls.batch} · Sec {cls.section} ({count})
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="mb-2 flex flex-wrap gap-1 border-b border-gray-200">
               <button
-                onClick={() => setSearchParams({}, { replace: true })}
+                onClick={() => setSearchParams({ mode: 'tutor' }, { replace: true })}
                 className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
                   activeTab === 'dashboard'
-                    ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
+                    ? 'text-navy font-bold after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
                     : 'text-gray-500 hover:text-navy'
                 }`}
               >
                 Dashboard
               </button>
               <button
-                onClick={() => setSearchParams({ tab: 'verification' }, { replace: true })}
+                onClick={() => setSearchParams({ mode: 'tutor', tab: 'verification' }, { replace: true })}
                 className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
                   activeTab === 'verification'
-                    ? 'text-navy after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
+                    ? 'text-navy font-bold after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-navy after:rounded-t-full'
                     : 'text-gray-500 hover:text-navy'
                 }`}
               >
@@ -435,7 +759,6 @@ export default function TutorDashboard() {
               <VerificationTab />
             ) : (
               <>
-
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-1">
               <StatCard label="Assigned Students" value={totalStudents} accent="navy" />
             </div>
@@ -453,7 +776,7 @@ export default function TutorDashboard() {
                     onChange={(e) => setManualEntry((p) => ({ ...p, student_email: e.target.value }))}
                   >
                     <option value="">Select student</option>
-                    {(students || []).map((s) => (
+                    {(classFilteredStudents || []).map((s) => (
                       <option key={s.student_email} value={s.student_email}>
                         {s.student_name} ({s.registration_number || '—'})
                       </option>
@@ -535,9 +858,69 @@ export default function TutorDashboard() {
                       </button>
                     ),
                   },
-                  { key: 'registration_number', header: 'Reg Number', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
+                  {
+                    key: 'registration_number',
+                    header: 'Reg Number',
+                    render: (v, row) => {
+                      const editsRem = row.edits_remaining !== undefined
+                        ? row.edits_remaining
+                        : Math.max(0, 2 - (row.tutor_reg_no_change_count || 0))
+                      const canEdit = editsRem > 0
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs font-semibold">{v || '—'}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setEditingStudent(row)
+                            }}
+                            disabled={!canEdit}
+                            className={`p-1 rounded transition-colors ${
+                              canEdit
+                                ? 'text-navy hover:bg-navy/10'
+                                : 'text-gray-300 cursor-not-allowed opacity-40'
+                            }`}
+                            title={canEdit ? `Edit register number (${editsRem}/2 edits left)` : 'Maximum 2 edits limit reached for this student'}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                        </div>
+                      )
+                    },
+                  },
                   { key: 'student_email', header: 'Email', searchKey: true },
                   { key: 'total_credits', header: 'Credit Points', align: 'right', render: (v) => renderCreditAgainstTarget(v) },
+                  {
+                    key: 'clubs',
+                    header: 'Club Memberships',
+                    render: (v) => {
+                      const clubs = Array.isArray(v) ? v : []
+                      if (!clubs.length) return <span className="text-xs text-gray-400">—</span>
+                      return (
+                        <div className="flex flex-wrap gap-1">
+                          {clubs.map((c) => (
+                            <span key={c} className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-200">{c}</span>
+                          ))}
+                        </div>
+                      )
+                    },
+                  },
+                  {
+                    key: 'office_bearer',
+                    header: 'Office Bearer',
+                    render: (v) => {
+                      if (!v) return <span className="text-xs text-gray-400">—</span>
+                      return (
+                        <span className="inline-flex rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-semibold text-purple-700 ring-1 ring-purple-200">
+                          {v}
+                        </span>
+                      )
+                    },
+                  },
+
                   {
                     key: '_actions',
                     header: 'Actions',
@@ -580,11 +963,14 @@ export default function TutorDashboard() {
             </div>
               </>
             )}
+            </>
+            )}
           </div>
         </main>
       </div>
 
       <DetailModal email={selectedStudentEmail} onClose={() => setSelectedStudentEmail(null)} />
+      {editingStudent && <EditRegNoModal student={editingStudent} onClose={() => setEditingStudent(null)} />}
     </div>
   )
 }

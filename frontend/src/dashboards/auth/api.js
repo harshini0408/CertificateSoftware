@@ -25,6 +25,8 @@ const roleRedirect = (data) => {
       return '/student'
     case 'guest':
       return '/guest'
+    case 'faculty':
+      return '/faculty'
     default:
       return '/login'
   }
@@ -33,7 +35,7 @@ const roleRedirect = (data) => {
 // ── useLogin ─────────────────────────────────────────────────────────────────
 /**
  * POST /auth/login
- * On success: populates authStore + navigates to role dashboard.
+ * On success: populates authStore + navigates to role dashboard (if password change not required).
  */
 export function useLogin() {
   const setAuth = useAuthStore((s) => s.setAuth)
@@ -49,7 +51,9 @@ export function useLogin() {
 
     onSuccess: ({ data }) => {
       setAuth(data)
-      navigate(roleRedirect(data), { replace: true })
+      if (!data.requires_password_change) {
+        navigate(roleRedirect(data), { replace: true })
+      }
     },
 
     onError: (err) => {
@@ -87,29 +91,6 @@ export function useLogout() {
   })
 }
 
-// ── useChangePassword ─────────────────────────────────────────────────────────
-/**
- * PATCH /auth/password
- * { current_password, new_password }
- */
-export function useChangePassword() {
-  const addToast = useToastStore((s) => s.addToast)
-
-  return useMutation({
-    mutationFn: ({ current_password, new_password }) =>
-      axiosInstance.patch('/auth/password', { current_password, new_password }),
-
-    onSuccess: () => {
-      addToast({ type: 'success', message: 'Password changed successfully.' })
-    },
-
-    onError: (err) => {
-      const msg =
-        err?.response?.data?.detail || 'Failed to change password. Please try again.'
-      addToast({ type: 'error', message: msg })
-    },
-  })
-}
 
 // ── useRefreshToken ───────────────────────────────────────────────────────────
 /**
@@ -205,11 +186,11 @@ export function useResetPassword() {
   })
 }
 
-export function useRequestDeptPasswordOtp() {
+export function useRequestPasswordOtp() {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: () => axiosInstance.post('/auth/department-password/send-otp'),
+    mutationFn: () => axiosInstance.post('/auth/password/send-otp'),
     onSuccess: (res) => {
       addToast({ type: 'info', message: res.data.message })
     },
@@ -222,12 +203,12 @@ export function useRequestDeptPasswordOtp() {
   })
 }
 
-export function useVerifyDeptPasswordOtp() {
+export function useVerifyPasswordOtp() {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
     mutationFn: ({ otp_code }) =>
-      axiosInstance.post('/auth/department-password/verify-otp', { otp_code }),
+      axiosInstance.post('/auth/password/verify-otp', { otp_code }),
     onSuccess: (res) => {
       addToast({ type: 'success', message: res.data.message })
     },
@@ -240,12 +221,12 @@ export function useVerifyDeptPasswordOtp() {
   })
 }
 
-export function useChangeDeptPassword() {
+export function useChangePassword() {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
     mutationFn: ({ current_password, new_password, otp_code }) =>
-      axiosInstance.patch('/auth/department-password', {
+      axiosInstance.patch('/auth/password', {
         current_password,
         new_password,
         otp_code,
@@ -261,3 +242,54 @@ export function useChangeDeptPassword() {
     },
   })
 }
+
+export function useRequestDeptPasswordOtp() {
+  return useRequestPasswordOtp()
+}
+
+export function useVerifyDeptPasswordOtp() {
+  return useVerifyPasswordOtp()
+}
+
+export function useChangeDeptPassword() {
+  return useChangePassword()
+}
+
+export function useFirstLoginChangePassword() {
+  const setAuth = useAuthStore((s) => s.setAuth)
+  const navigate = useNavigate()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (payload) => axiosInstance.post('/auth/first-login/change-password', payload),
+    onSuccess: ({ data }) => {
+      setAuth(data)
+      addToast({ type: 'success', message: 'Password changed successfully! Welcome to your dashboard.' })
+      navigate(roleRedirect(data), { replace: true })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to update password. Please check your OTP.',
+      })
+    },
+  })
+}
+
+export function useFirstLoginResendOtp() {
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (payload) => axiosInstance.post('/auth/first-login/resend-otp', payload),
+    onSuccess: ({ data }) => {
+      addToast({ type: 'success', message: data?.message || 'OTP resent to your registered email.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to resend OTP.',
+      })
+    },
+  })
+}
+

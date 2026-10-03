@@ -1,7 +1,6 @@
 import sys
 import asyncio
 from datetime import datetime
-
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -93,6 +92,8 @@ async def _seed_credit_rules() -> None:
     targets = [
         ("Technical Talk", 2),
         ("Workshop", 3),
+        ("Student Volunteer", 2),
+        ("Volunteer", 2),
     ]
 
     for target_cert_type, target_points in targets:
@@ -142,7 +143,7 @@ async def _seed_credit_rules() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────
-    print("[START] Starting PSG iTech Certificate Platform...")
+    print("[START] Starting PSG iTech Students Activity Management Software...")
     settings.ensure_storage_dirs()
     await connect_db()
 
@@ -168,8 +169,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="PSG iTech Certificate Platform",
-    description="Self-hosted certificate generation and verification platform",
+    title="PSG iTech Students Activity Management Software",
+    description="Students Activity Management and Certificate Cerification Platform",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -179,14 +180,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ─────────────────────────────────────────────────────────────────
-_ALLOWED_ORIGINS = list({
-    settings.frontend_url,       # from .env / config
-    "http://localhost:5173",      # Vite default
-    "http://localhost:5174",      # Alternative Vite port
-    "http://localhost:3000",      # CRA fallback
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-})
+_ALLOWED_ORIGINS = settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
@@ -200,7 +194,7 @@ app.add_middleware(
 async def _global_exception_handler(request: Request, exc: Exception):
     """Return a JSON 500 with CORS headers so the browser isn't blocked."""
     origin = request.headers.get("origin", "")
-    cors_origin = origin if origin in _ALLOWED_ORIGINS else _ALLOWED_ORIGINS[0]
+    cors_origin = origin if origin in _ALLOWED_ORIGINS else (_ALLOWED_ORIGINS[0] if _ALLOWED_ORIGINS else "*")
     return JSONResponse(
         status_code=500,
         content={"detail": f"Internal server error: {exc}"},
@@ -212,6 +206,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
 
 # ── Routers ──────────────────────────────────────────────────────────────
 from .routers import auth, events, participants, templates, certificates, verify, image_templates
+from .routers.attendance import club_attendance_router, student_attendance_router
 from .routers.role_presets import router as role_presets_router
 from .domains.student.routers import router as student_router
 from .domains.tutor.routers import router as tutor_router
@@ -221,6 +216,7 @@ from .domains.principal.routers import router as principal_router
 from .domains.hod.routers import router as hod_router
 from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
 from .domains.superadmin.routers import router as superadmin_router
+from .domains.student_affairs.routers import router as student_affairs_router
 from .certificate_config.routes import router as cert_config_router
 
 app.include_router(auth.router)
@@ -241,6 +237,9 @@ app.include_router(hod_router)
 app.include_router(image_templates.router)
 app.include_router(guest_router)
 app.include_router(role_presets_router)
+app.include_router(student_affairs_router)
+app.include_router(club_attendance_router)
+app.include_router(student_attendance_router)
 
 # ── Static files (PNG templates, fonts, etc.) ────────────────────────────────
 from pathlib import Path
@@ -259,7 +258,7 @@ async def health_check():
 @app.get("/")
 async def root():
     return {
-        "message": "PSG iTech Certificate Platform API",
+        "message": "PSG iTech Students Activity Management Software API",
         "version": "1.0.0",
         "docs": "/docs",
     }

@@ -12,6 +12,7 @@ from ...models.manual_credit_submission import ManualCreditSubmission
 from ...models.student_credit import StudentCredit
 from ...services.semester_service import get_current_semester
 from ...models.user import User, UserRole
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 
 router = APIRouter(prefix="/hod", tags=["HOD"])
 
@@ -56,7 +57,7 @@ def _build_hod_scope(current_user: User) -> dict:
     return scope
 
 
-def _student_summary(user: User, total_credits: int) -> dict:
+def _student_summary(user: User, total_credits: int, clubs: list | None = None, office_bearer: str | None = None) -> dict:
     return {
         "id": str(user.id),
         "name": user.name,
@@ -66,6 +67,8 @@ def _student_summary(user: User, total_credits: int) -> dict:
         "batch": user.batch,
         "section": user.section,
         "total_credits": int(total_credits or 0),
+        "clubs": clubs or [],
+        "office_bearer": office_bearer,
     }
 
 
@@ -151,12 +154,31 @@ async def list_hod_students(
         if doc.registration_number
     }
 
+    student_ids = [s.id for s in students]
+    approved_memberships = await StudentClubMembership.find({
+        "student_id": {"$in": student_ids},
+        "status": MembershipStatus.APPROVED.value,
+    }).to_list() if student_ids else []
+
+    clubs_by_student: dict = {}
+    office_bearer_by_student: dict = {}
+    for m in approved_memberships:
+        clubs_by_student.setdefault(str(m.student_id), []).append(m.club_name or "")
+        if m.office_bearer_role:
+            office_bearer_by_student[str(m.student_id)] = f"{m.office_bearer_role} ({m.club_name or 'Club'})"
+
     items = []
     for student in students:
         email_key = (student.email or "").strip().lower()
         reg_key = (student.registration_number or "").strip()
         total_credits = credits_by_email.get(email_key, credits_by_reg.get(reg_key, 0))
-        items.append(_student_summary(student, total_credits))
+        items.append(_student_summary(
+            student,
+            total_credits,
+            clubs=clubs_by_student.get(str(student.id), []),
+            office_bearer=office_bearer_by_student.get(str(student.id)),
+        ))
+
 
     return {
         "count": len(items),
@@ -308,3 +330,192 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
         "count": len(certificates),
         "certificates": certificates,
     }
+
+
+@router.get("/performance")
+async def get_hod_performance_analytics(
+    batch: Optional[str] = None,
+    current_user: User = _hod,
+):
+    scope = _build_hod_scope(current_user)
+
+    query: dict = {
+        "role": UserRole.STUDENT,
+        "is_active": True,
+        "department": {"$in": scope["departments"]},
+    }
+
+    mapped_batch = scope.get("batch")
+    mapped_section = scope.get("section")
+    requested_batch = _normalize_optional(batch)
+
+    if mapped_batch:
+        if requested_batch and requested_batch != mapped_batch:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to the requested batch")
+        query["batch"] = mapped_batch
+    elif requested_batch:
+        query["batch"] = requested_batch
+
+    if mapped_section:
+        query["section"] = mapped_section
+
+    students = await User.find(query).sort("name").to_list()
+
+    emails = [(s.email or "").strip().lower() for s in students if s.email]
+    reg_numbers = [(s.registration_number or "").strip() for s in students if s.registration_number]
+
+    credit_query = {}
+    clauses = []
+    if emails:
+        clauses.append({"student_email": {"$in": emails}})
+    if reg_numbers:
+        clauses.append({"registration_number": {"$in": reg_numbers}})
+    if clauses:
+        credit_query["$or"] = clauses
+
+    credits_docs = await StudentCredit.find(credit_query).to_list() if credit_query else []
+    credits_by_email = {
+        (doc.student_email or "").strip().lower(): int(doc.total_credits or 0)
+        for doc in credits_docs
+        if doc.student_email
+    }
+    credits_by_reg = {
+        (doc.registration_number or "").strip(): int(doc.total_credits or 0)
+        for doc in credits_docs
+        if doc.registration_number
+    }
+
+    # Group students by (batch, section)
+    classes_dict: dict[tuple[str, str], list[dict]] = {}
+    all_batches_set: set[str] = set()
+
+    for s in students:
+        s_batch = (s.batch or "Unknown").strip()
+        s_sec = (s.section or "A").strip()
+        if s.batch:
+            all_batches_set.add(s.batch.strip())
+
+        email_key = (s.email or "").strip().lower()
+        reg_key = (s.registration_number or "").strip()
+        credits_val = credits_by_email.get(email_key, credits_by_reg.get(reg_key, 0))
+
+        key = (s_batch, s_sec)
+        if key not in classes_dict:
+            classes_dict[key] = []
+
+        classes_dict[key].append({
+            "id": str(s.id),
+            "name": s.name,
+            "registration_number": s.registration_number or "—",
+            "email": s.email or "—",
+            "department": s.department or "",
+            "batch": s_batch,
+            "section": s_sec,
+            "total_credits": int(credits_val),
+        })
+
+    class_stats = []
+    all_credits_list: list[int] = []
+
+    for (c_batch, c_sec), s_list in classes_dict.items():
+        total_students = len(s_list)
+        if total_students == 0:
+            continue
+
+        s_list_sorted = sorted(s_list, key=lambda x: x["total_credits"], reverse=True)
+        credits_list = [st["total_credits"] for st in s_list_sorted]
+        all_credits_list.extend(credits_list)
+
+        # 1. Average credits
+        avg_credits = round(sum(credits_list) / total_students, 2)
+
+        # 2. Median credits
+        sorted_asc = sorted(credits_list)
+        if total_students % 2 == 1:
+            median_credits = float(sorted_asc[total_students // 2])
+        else:
+            mid = total_students // 2
+            median_credits = round((sorted_asc[mid - 1] + sorted_asc[mid]) / 2.0, 2)
+
+        # 3. Students with >= 50% credits (which is >= 10 credits)
+        students_ge_10_count = sum(1 for c in credits_list if c >= 10)
+        percentage_ge_10 = round((students_ge_10_count / total_students) * 100, 1)
+
+        # Composite performance score combining the 3 parameters
+        composite_score = round((avg_credits * 0.4) + (median_credits * 0.3) + (percentage_ge_10 * 0.3), 2)
+
+        class_stats.append({
+            "class_id": f"{c_batch}_{c_sec}".replace(" ", "_"),
+            "class_name": f"Batch {c_batch} — Sec {c_sec}",
+            "batch": c_batch,
+            "section": c_sec,
+            "total_students": total_students,
+            "average_credits": avg_credits,
+            "median_credits": median_credits,
+            "students_ge_10_count": students_ge_10_count,
+            "percentage_ge_10": percentage_ge_10,
+            "composite_score": composite_score,
+            "students": s_list_sorted,
+        })
+
+    # Rank classes based on composite score, average, median, and >=10%
+    class_stats.sort(
+        key=lambda c: (c["composite_score"], c["average_credits"], c["median_credits"], c["percentage_ge_10"]),
+        reverse=True,
+    )
+
+    total_classes = len(class_stats)
+    for idx, c in enumerate(class_stats):
+        c["rank"] = idx + 1
+        if total_classes <= 3:
+            c["status"] = "Good" if c["average_credits"] >= 5 else "Needs Improvement"
+        else:
+            if idx < 3:
+                c["status"] = "Top Performer"
+            elif idx >= total_classes - 3:
+                c["status"] = "Needs Attention"
+            else:
+                c["status"] = "Moderate"
+
+    top_performing = class_stats[:3] if total_classes >= 1 else []
+    # Poor performing 3 classes: bottom 3 (sorted lowest first for clear view)
+    if total_classes >= 3:
+        poor_performing = list(reversed(class_stats[-3:]))
+    elif total_classes > 0:
+        poor_performing = list(reversed(class_stats))
+    else:
+        poor_performing = []
+
+    # Overall department-level summary
+    total_dept_students = len(students)
+    if total_dept_students > 0:
+        overall_avg = round(sum(all_credits_list) / total_dept_students, 2)
+        sorted_dept_asc = sorted(all_credits_list)
+        if total_dept_students % 2 == 1:
+            overall_median = float(sorted_dept_asc[total_dept_students // 2])
+        else:
+            mid = total_dept_students // 2
+            overall_median = round((sorted_dept_asc[mid - 1] + sorted_dept_asc[mid]) / 2.0, 2)
+        overall_ge_10 = sum(1 for c in all_credits_list if c >= 10)
+        overall_pct_ge_10 = round((overall_ge_10 / total_dept_students) * 100, 1)
+    else:
+        overall_avg = 0.0
+        overall_median = 0.0
+        overall_ge_10 = 0
+        overall_pct_ge_10 = 0.0
+
+    return {
+        "summary": {
+            "total_students": total_dept_students,
+            "total_classes": total_classes,
+            "overall_average_credits": overall_avg,
+            "overall_median_credits": overall_median,
+            "overall_students_ge_10_count": overall_ge_10,
+            "overall_percentage_ge_10": overall_pct_ge_10,
+        },
+        "top_performing": top_performing,
+        "poor_performing": poor_performing,
+        "classes": class_stats,
+        "available_batches": sorted(list(all_batches_set)),
+    }
+

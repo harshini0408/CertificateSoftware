@@ -24,6 +24,8 @@ const roleHomePath = (role, store) => {
       return '/student'
     case 'guest':
       return `/guest`
+    case 'faculty':
+      return '/faculty'
     default:
       return '/login'
   }
@@ -34,7 +36,8 @@ const roleHomePath = (role, store) => {
  *
  * Wraps a page component and enforces:
  *   1. Authentication — unauthenticated users → /login
- *   2. Role authorisation — wrong role → user's own dashboard
+ *   2. Mandatory password change → /login
+ *   3. Role authorisation — wrong role → user's own dashboard
  *
  * Props:
  *   allowedRoles  string[]   Roles that may access this route.
@@ -42,11 +45,16 @@ const roleHomePath = (role, store) => {
  */
 export default function ProtectedRoute({ allowedRoles = [], children }) {
   const store = useAuthStore()
-  const { isAuthenticated, role } = store
+  const { isAuthenticated, role, requires_password_change } = store
   const location = useLocation()
 
   // 1. Not logged in at all.
   if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+
+  // 1.1 First login password change mandatory
+  if (requires_password_change) {
     return <Navigate to="/login" replace />
   }
 

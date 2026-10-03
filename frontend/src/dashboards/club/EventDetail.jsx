@@ -7,9 +7,18 @@ import Sidebar from '../../components/Sidebar'
 import FileUpload from '../../components/FileUpload'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import DataTable from '../../components/DataTable'
-import GuestWizard from '../../components/GuestWizard'
-import { useEvent, eventKeys } from './eventsApi'
-import { participantKeys } from './participantsApi'
+import {
+  useEvent,
+  eventKeys,
+  useUploadReport,
+  useUploadPoster,
+  useClubCreditRules,
+  useVolunteerRequests,
+  useUpdateVolunteerStatus,
+  useUpdateVolunteerCount,
+  useUpdateEvent,
+} from './eventsApi'
+import { participantKeys, useParticipants, useUpdateParticipantType, useVerifyParticipant } from './participantsApi'
 import { certKeys } from './certificatesApi'
 import { useToastStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
@@ -18,18 +27,9 @@ import CertificateIssue from './CertificateIssue'
 import axiosInstance, { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ─── Tab ids ──────────────────────────────────────────────────────────────────
-const TABS = ['overview', 'participants', 'certificates']
+const TABS = ['overview', 'volunteer-requests', 'participants', 'certificates']
 
-const CERT_TYPES = [
-  'participant',
-  'coordinator',
-  'winner_1st',
-  'winner_2nd',
-  'winner_3rd',
-  'mentor',
-  'judge',
-  'volunteer',
-]
+// The roles will be fetched dynamically via useClubCreditRules
 
 const IST_TIMEZONE = 'Asia/Kolkata'
 const HAS_TZ_RE = /(Z|[+\-]\d{2}:\d{2})$/i
@@ -78,6 +78,42 @@ function formatDateOnly(value) {
 function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const logoPreview = event?.assets?.logo_url ?? null
   const sigPreview = event?.assets?.signature_url ?? null
+  const uploadPoster = useUploadPoster(clubId, eventId)
+  const uploadReport = useUploadReport(clubId, eventId)
+  const updateEvent = useUpdateEvent(clubId, eventId)
+  const [selectedReportFile, setSelectedReportFile] = useState(null)
+  const [selectedPosterFile, setSelectedPosterFile] = useState(null)
+
+  // ── Edit Details state ──
+  const [isEditing, setIsEditing] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [editTime, setEditTime] = useState('')
+  const [editVenue, setEditVenue] = useState('')
+
+  const handleStartEdit = () => {
+    setEditName(event?.name || '')
+    setEditDate(event?.event_date ? String(event.event_date).split('T')[0] : '')
+    setEditTime(event?.event_time || '')
+    setEditVenue(event?.venue || '')
+    setIsEditing(true)
+  }
+
+  const handleSaveEdit = (e) => {
+    e.preventDefault()
+    if (!editName.trim()) return
+    updateEvent.mutate(
+      {
+        name: editName.trim(),
+        event_date: editDate ? `${editDate}T00:00:00` : undefined,
+        event_time: editTime.trim(),
+        venue: editVenue.trim(),
+      },
+      {
+        onSuccess: () => setIsEditing(false),
+      }
+    )
+  }
 
   const toAssetSrc = (url, hash) => {
     if (!url) return null
@@ -87,29 +123,314 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     return `${BACKEND_URL}${normalized}`
   }
 
+  const handleReportUpload = () => {
+    if (!selectedReportFile) return
+    uploadReport.mutate(selectedReportFile, {
+      onSuccess: () => setSelectedReportFile(null),
+    })
+  }
+
+  const handlePosterUpload = () => {
+    if (!selectedPosterFile) return
+    uploadPoster.mutate(selectedPosterFile, {
+      onSuccess: () => setSelectedPosterFile(null),
+    })
+  }
+
+  const reportStatus = event?.report_status || 'not_submitted'
+  const reportStatusLabels = {
+    not_submitted: { text: 'Not Submitted', cls: 'bg-gray-100 text-gray-600' },
+    pending_review: { text: 'Under Review by Student Affairs', cls: 'bg-amber-100 text-amber-700' },
+    accepted: { text: 'Report Accepted', cls: 'bg-green-100 text-green-700' },
+    rejected: { text: 'Report Rejected', cls: 'bg-red-100 text-red-700' },
+  }
+  const currentReportStatus = reportStatusLabels[reportStatus] || reportStatusLabels.not_submitted
+
   return (
     <div className="space-y-8 max-w-3xl">
       {/* ── Event details card ─────────────────────────────────────────── */}
       <section className="card p-6">
-        <h2 className="section-title mb-4">Event Details</h2>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {[
-            ['Name',        event?.name],
-            ['Date',        event?.event_date
-                              ? formatDateOnly(event.event_date)
-                              : '—'],
-            ['Academic Year', event?.academic_year || '—'],
-          ].map(([label, value]) => (
-            <div key={label} className="flex flex-col gap-0.5">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                {label}
-              </dt>
-              <dd className="text-sm text-foreground">
-                {value}
-              </dd>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="section-title">Event Details</h2>
+          <div className="flex items-center gap-2">
+            {(event?.status === 'draft' || event?.status === 'active') && !isEditing && (
+              <button
+                type="button"
+                onClick={handleStartEdit}
+                className="text-xs text-navy hover:underline font-semibold flex items-center gap-1 mr-1"
+                title="Edit Event Details"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                Edit Details
+              </button>
+            )}
+
+            {event?.status === 'active' && (
+              <button
+                type="button"
+                onClick={() => updateEvent.mutate({ registration_stopped: !event?.registration_stopped })}
+                disabled={updateEvent.isPending}
+                className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                  event?.registration_stopped
+                    ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'
+                    : 'bg-red-50 text-red-700 border-red-300 hover:bg-red-100'
+                }`}
+                title={event?.registration_stopped ? 'Resume student registrations' : 'Stop student registrations'}
+              >
+                {event?.registration_stopped ? '▶ Resume Registration' : '⏹ Stop Registration'}
+              </button>
+            )}
+
+            {event?.is_published && (
+              <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                Published Upcoming
+              </span>
+            )}
+            <select
+              value={event?.status || 'draft'}
+              onChange={(e) => updateEvent.mutate({ status: e.target.value })}
+              disabled={updateEvent.isPending}
+              className={`rounded-full px-3 py-1 text-xs font-bold uppercase border focus:outline-none focus:ring-2 focus:ring-navy/20 cursor-pointer transition-colors ${
+                event?.status === 'active' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
+                event?.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200' :
+                event?.status === 'closed' ? 'bg-red-100 text-red-700 border-red-200' :
+                'bg-gray-100 text-gray-700 border-gray-300'
+              }`}
+            >
+              <option value="draft">Draft</option>
+              <option value="active">Active</option>
+              <option value="closed">Closed</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+        </div>
+
+        {isEditing ? (
+          <form onSubmit={handleSaveEdit} className="space-y-4 pt-2 border-t border-gray-100">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="form-label text-xs font-semibold">Event Name *</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                  className="form-input text-sm"
+                  placeholder="e.g. Workshop on AI"
+                />
+              </div>
+              <div>
+                <label className="form-label text-xs font-semibold">Event Date *</label>
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  required
+                  className="form-input text-sm"
+                />
+              </div>
+              <div>
+                <label className="form-label text-xs font-semibold">Event Time *</label>
+                <input
+                  type="text"
+                  value={editTime}
+                  onChange={(e) => setEditTime(e.target.value)}
+                  required
+                  className="form-input text-sm"
+                  placeholder="e.g. Morning (FN) | 10:00 AM"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="form-label text-xs font-semibold">Venue *</label>
+                <input
+                  type="text"
+                  value={editVenue}
+                  onChange={(e) => setEditVenue(e.target.value)}
+                  required
+                  className="form-input text-sm"
+                  placeholder="e.g. Lab 3 / Auditorium"
+                />
+              </div>
             </div>
-          ))}
-        </dl>
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="btn-secondary text-xs py-1.5 px-3 h-auto"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={updateEvent.isPending || !editName.trim()}
+                className="btn-primary text-xs py-1.5 px-3 h-auto"
+              >
+                {updateEvent.isPending ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {[
+                ['Name', event?.name],
+                ['Date', event?.event_date ? formatDateOnly(event.event_date) : '—'],
+                ['Time', event?.event_time || '—'],
+                ['Venue', event?.venue || '—'],
+                ['Category', event?.category || '—'],
+                ['Academic Year', event?.academic_year || '—'],
+                ['Registration Status', event?.registration_stopped ? 'Stopped' : 'Open'],
+                ['Participants', (event?.participant_count ?? 0).toLocaleString()],
+                ['Certificates Issued', (event?.cert_count ?? 0).toLocaleString()],
+              ].map(([label, value]) => (
+                <div key={label} className="flex flex-col gap-0.5">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    {label}
+                  </dt>
+                  <dd className={`text-sm font-medium ${
+                    label === 'Registration Status'
+                      ? event?.registration_stopped ? 'text-red-600 font-semibold' : 'text-green-600 font-semibold'
+                      : 'text-foreground'
+                  }`}>
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {event?.description && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-gray-400">Description</dt>
+                <dd className="mt-1 text-sm text-gray-600">{event.description}</dd>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      {/* ── Event Report Section ───────────────────────────────────────── */}
+      <section className="card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="section-title">Event Report</h2>
+              <span className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 uppercase tracking-wide">
+                Mandatory *
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">Submit an event completion report to Student Affairs for review. Report submission is required before certificate generation.</p>
+          </div>
+          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${currentReportStatus.cls}`}>
+            {currentReportStatus.text}
+          </span>
+        </div>
+
+        {/* Rejection Alert */}
+        {reportStatus === 'rejected' && (
+          <div className="p-4 rounded-lg bg-red-50 border border-red-200 space-y-1">
+            <p className="text-xs font-bold text-red-800 uppercase tracking-wide">Student Affairs Review Remarks:</p>
+            <p className="text-sm text-red-700">{event?.report_rejection_reason || 'Please review and re-upload the event report.'}</p>
+          </div>
+        )}
+
+        {/* Existing report link */}
+        {event?.report_url && (
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 border border-gray-200">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xl">📄</span>
+              <div className="truncate">
+                <p className="text-sm font-medium text-foreground truncate">{event.report_filename || 'Event Report'}</p>
+                <p className="text-xs text-gray-400">
+                  {event.report_uploaded_at ? `Uploaded ${new Date(event.report_uploaded_at).toLocaleDateString('en-IN')}` : ''}
+                </p>
+              </div>
+            </div>
+            <a
+              href={`${BACKEND_URL}${event.report_url}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary text-xs shrink-0"
+            >
+              View / Download
+            </a>
+          </div>
+        )}
+
+        {/* Upload form if not submitted or rejected */}
+        {(reportStatus === 'not_submitted' || reportStatus === 'rejected') && (
+          <div className="pt-2 space-y-3">
+            <label className="block text-xs font-semibold text-gray-600 uppercase">
+              {reportStatus === 'rejected' ? 'Re-upload Revised Report' : 'Upload Event Report (PDF, DOCX, PNG)'}
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                onChange={(e) => setSelectedReportFile(e.target.files?.[0] || null)}
+                className="form-input text-xs flex-1"
+              />
+              <button
+                type="button"
+                onClick={handleReportUpload}
+                disabled={!selectedReportFile || uploadReport.isPending}
+                className="btn-primary text-xs shrink-0"
+              >
+                {uploadReport.isPending ? 'Uploading…' : reportStatus === 'rejected' ? 'Re-submit Report' : 'Submit Report'}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Event Poster Section ────────────────────────────────────────── */}
+      <section className="card p-6 space-y-4">
+        <h2 className="section-title">Event Poster</h2>
+        {event?.poster_url ? (
+          <div className="space-y-3">
+            <img
+              src={event.poster_url.startsWith('/') ? `${BACKEND_URL}${event.poster_url}` : event.poster_url}
+              alt="Event Poster"
+              className="max-h-64 rounded-lg border border-gray-200 object-contain bg-gray-50"
+            />
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setSelectedPosterFile(e.target.files?.[0] || null)}
+                className="form-input text-xs flex-1"
+              />
+              <button
+                type="button"
+                onClick={handlePosterUpload}
+                disabled={!selectedPosterFile || uploadPoster.isPending}
+                className="btn-secondary text-xs shrink-0"
+              >
+                {uploadPoster.isPending ? 'Updating…' : 'Change Poster'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">Add an event poster to be displayed on the Student and Student Affairs upcoming event feeds.</p>
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setSelectedPosterFile(e.target.files?.[0] || null)}
+                className="form-input text-xs flex-1"
+              />
+              <button
+                type="button"
+                onClick={handlePosterUpload}
+                disabled={!selectedPosterFile || uploadPoster.isPending}
+                className="btn-primary text-xs shrink-0"
+              >
+                {uploadPoster.isPending ? 'Uploading…' : 'Upload Poster'}
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* ── Assets section ─────────────────────────────────────────────── */}
@@ -148,6 +469,239 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
           If you want to change these assets, change it in Settings.
         </p>
       </section>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Volunteer Requests Tab
+// ─────────────────────────────────────────────────────────────────────────────
+function VolunteerRequestsTab({ clubId, eventId, event }) {
+  const { data: volunteerRequests, isLoading } = useVolunteerRequests(clubId, eventId)
+  const updateStatus = useUpdateVolunteerStatus(clubId, eventId)
+  const updateCount = useUpdateVolunteerCount(clubId, eventId)
+  const [isEditingCount, setIsEditingCount] = useState(false)
+  const [countInput, setCountInput] = useState(event?.volunteers_required ?? 0)
+
+  useEffect(() => {
+    setCountInput(event?.volunteers_required ?? 0)
+  }, [event?.volunteers_required])
+
+  const requests = Array.isArray(volunteerRequests) ? volunteerRequests : []
+  const acceptedCount = requests.filter((r) => r.status === 'accepted' || (r.verified && r.status !== 'rejected')).length
+  const pendingCount = requests.filter((r) => r.status === 'pending' || (!r.verified && r.status !== 'rejected')).length
+  const rejectedCount = requests.filter((r) => r.status === 'rejected').length
+  const volunteersRequired = event?.volunteers_required ?? 0
+
+  const handleSaveCount = () => {
+    const num = Math.max(0, parseInt(countInput, 10) || 0)
+    updateCount.mutate(num, {
+      onSuccess: () => setIsEditingCount(false),
+    })
+  }
+
+  const columns = [
+    {
+      key: 'student_name',
+      header: 'Student Name',
+      sortable: true,
+      searchKey: true,
+      render: (v, row) => (
+        <div>
+          <div className="font-semibold text-foreground">{v || row.student_email || '—'}</div>
+          {row.registration_number && (
+            <div className="text-xs font-mono text-gray-400">{row.registration_number}</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'student_email',
+      header: 'Email',
+      sortable: true,
+      searchKey: true,
+      render: (v) => <span className="text-xs text-gray-600">{v}</span>,
+    },
+    {
+      key: 'department',
+      header: 'Department',
+      sortable: true,
+      searchKey: true,
+      render: (v) => <span className="text-xs text-gray-600">{v || '—'}</span>,
+    },
+    {
+      key: 'registered_at',
+      header: 'Applied Date',
+      sortable: true,
+      render: (v) => <span className="text-xs text-gray-500">{formatDateTime(v)}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (v, row) => {
+        const isAccepted = v === 'accepted' || (row.verified && v !== 'rejected')
+        const isRejected = v === 'rejected'
+        if (isAccepted) {
+          return (
+            <span className="inline-flex rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">
+              Accepted
+            </span>
+          )
+        }
+        if (isRejected) {
+          return (
+            <span className="inline-flex rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
+              Rejected
+            </span>
+          )
+        }
+        return (
+          <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+            Pending Review
+          </span>
+        )
+      },
+    },
+    {
+      key: '_actions',
+      header: 'Actions',
+      align: 'center',
+      searchKey: false,
+      render: (_, row) => {
+        const isAccepted = row.status === 'accepted' || (row.verified && row.status !== 'rejected')
+        const isRejected = row.status === 'rejected'
+        const itemId = row.participant_id || row.registration_id || row.id
+
+        return (
+          <div className="flex items-center justify-center gap-2">
+            {!isAccepted && (
+              <button
+                type="button"
+                className="btn-primary text-xs py-1 px-2.5 h-auto bg-green-600 hover:bg-green-700"
+                onClick={() => updateStatus.mutate({ itemId, status: 'accepted' })}
+                disabled={updateStatus.isPending}
+                title="Accept volunteer request"
+              >
+                Accept
+              </button>
+            )}
+            {!isRejected && (
+              <button
+                type="button"
+                className="btn-secondary text-xs py-1 px-2.5 h-auto text-red-600 border-red-200 hover:bg-red-50"
+                onClick={() => updateStatus.mutate({ itemId, status: 'rejected' })}
+                disabled={updateStatus.isPending}
+                title="Reject volunteer request"
+              >
+                Reject
+              </button>
+            )}
+          </div>
+        )
+      },
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      {/* Volunteer Capacity & Stats Header */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="card p-5 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Volunteers Required</span>
+            {!isEditingCount ? (
+              <button
+                type="button"
+                onClick={() => setIsEditingCount(true)}
+                className="text-xs text-navy hover:underline font-semibold flex items-center gap-1"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                Edit Count
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditingCount(false)
+                  setCountInput(volunteersRequired)
+                }}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+          {isEditingCount ? (
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                type="number"
+                min="0"
+                value={countInput}
+                onChange={(e) => setCountInput(e.target.value)}
+                className="form-input text-lg font-bold py-1 px-2 w-24 h-auto"
+                autoFocus
+              />
+              <button
+                type="button"
+                className="btn-primary text-xs py-1.5 px-3 h-auto"
+                onClick={handleSaveCount}
+                disabled={updateCount.isPending}
+              >
+                {updateCount.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="text-3xl font-black text-navy">{volunteersRequired}</span>
+              <span className="text-xs text-gray-500">slots needed</span>
+            </div>
+          )}
+        </div>
+
+        <div className="card p-5 flex flex-col justify-between border-l-4 border-green-500">
+          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Accepted Volunteers</span>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-3xl font-black text-green-700">{acceptedCount}</span>
+            <span className="text-xs text-gray-500">/ {volunteersRequired} filled</span>
+          </div>
+        </div>
+
+        <div className="card p-5 flex flex-col justify-between border-l-4 border-amber-400">
+          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Pending Requests</span>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-3xl font-black text-amber-600">{pendingCount}</span>
+            <span className="text-xs text-gray-500">awaiting decision</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Volunteer Requests Table */}
+      <div className="card p-6 space-y-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="section-title">Volunteer Requests</h2>
+            <p className="text-xs text-gray-500">Review, accept, or reject student requests to volunteer for this event.</p>
+          </div>
+          {acceptedCount >= volunteersRequired && volunteersRequired > 0 && (
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-full border border-teal-200">
+              ✓ Required volunteer capacity reached
+            </span>
+          )}
+        </div>
+
+        <DataTable
+          columns={columns}
+          data={requests}
+          isLoading={isLoading}
+          emptyMessage="No volunteer requests received yet for this event."
+          searchable
+          searchPlaceholder="Search volunteer applicants…"
+          rowKey="id"
+        />
+      </div>
     </div>
   )
 }
@@ -336,6 +890,16 @@ function ExcelUploadTab({ clubId, eventId }) {
 function ManualEntryTab({ clubId, eventId, event }) {
   const addToast = useToastStore((s) => s.addToast)
   const qc = useQueryClient()
+  const { data: creditRules } = useClubCreditRules(clubId)
+  // UI dropdown is restricted to these 5 preset roles.
+  // Excel uploads may contain any cert_type and are processed as-is.
+  const UI_CERT_ROLES = [
+    'non_technical_participant',
+    'technical_participant',
+    'first_place',
+    'second_place',
+    'third_place',
+  ]
 
   const {
     register,
@@ -347,7 +911,7 @@ function ManualEntryTab({ clubId, eventId, event }) {
       name: '',
       email: '',
       registration_number: '',
-      cert_type: 'participant',
+      cert_type: 'non_technical_participant',
     },
   })
 
@@ -420,10 +984,10 @@ function ManualEntryTab({ clubId, eventId, event }) {
             id="manual-email"
             type="email"
             className={`form-input ${errors.email ? 'form-input-error' : ''}`}
-            placeholder="participant@example.com"
+            placeholder="participant@psgitech.ac.in"
             {...register('email', {
               required: 'Email is required.',
-              pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email.' },
+              pattern: { value: /^[a-zA-Z0-9._%+-]+@psgitech\.ac\.in$/i, message: 'Only @psgitech.ac.in emails are allowed.' },
             })}
           />
           {errors.email && <p className="form-error">{errors.email.message}</p>}
@@ -439,7 +1003,7 @@ function ManualEntryTab({ clubId, eventId, event }) {
             className="form-input"
             {...register('cert_type')}
           >
-            {CERT_TYPES.map((ct) => (
+            {UI_CERT_ROLES.map((ct) => (
               <option key={ct} value={ct}>
                 {ct.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
               </option>
@@ -466,12 +1030,13 @@ function ManualEntryTab({ clubId, eventId, event }) {
 // Participants Tab (with 2 sub-tabs)
 // ─────────────────────────────────────────────────────────────────────────────
 const PARTICIPANT_SUBTABS = [
+  { id: 'list',   label: 'Registered List' },
   { id: 'excel',  label: 'Excel Upload' },
   { id: 'manual', label: 'Manual Entry' },
 ]
 
 function ParticipantsTab({ clubId, eventId, event }) {
-  const [subTab, setSubTab] = useState('excel')
+  const [subTab, setSubTab] = useState('list')
 
   return (
     <div className="space-y-6">
@@ -496,6 +1061,12 @@ function ParticipantsTab({ clubId, eventId, event }) {
       </div>
 
       {/* Sub-tab content */}
+      {subTab === 'list' && (
+        <ParticipantListTab
+          clubId={clubId}
+          eventId={eventId}
+        />
+      )}
       {subTab === 'excel' && (
         <ExcelUploadTab
           clubId={clubId}
@@ -513,10 +1084,83 @@ function ParticipantsTab({ clubId, eventId, event }) {
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Participant List Sub-tab
+// ─────────────────────────────────────────────────────────────────────────────
+function ParticipantListTab({ clubId, eventId }) {
+  const { data: participants, isLoading } = useParticipants(clubId, eventId)
+  const updateType = useUpdateParticipantType(clubId, eventId)
+  const verifyParticipant = useVerifyParticipant(clubId, eventId)
+  const { data: creditRules } = useClubCreditRules(clubId)
+  // UI dropdown is restricted to these 5 preset roles (Excel uploads are unrestricted).
+  const UI_CERT_ROLES = [
+    'non_technical_participant',
+    'technical_participant',
+    'first_place',
+    'second_place',
+    'third_place',
+  ]
+  
+  const columns = [
+    { key: 'name', header: 'Name', searchKey: true, sortable: true, render: (_, row) => row.fields?.Name || '—' },
+    { key: 'email', header: 'Email', searchKey: true, sortable: true },
+    { key: 'registration_number', header: 'Reg No.', searchKey: true, sortable: true, render: (v) => v || '—' },
+    {
+      key: 'cert_type',
+      header: 'Type',
+      sortable: true,
+      render: (v, row) => (
+        <select
+          className="form-input text-xs py-1 h-auto"
+          value={v || 'participant'}
+          onChange={(e) => updateType.mutate({ participantId: row.id, cert_type: e.target.value })}
+          disabled={updateType.isPending}
+        >
+          {UI_CERT_ROLES.map((ct) => (
+            <option key={ct} value={ct}>
+              {ct.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            </option>
+          ))}
+        </select>
+      )
+    },
+    { key: 'source', header: 'Source', sortable: true, render: (v) => <span className="capitalize">{v}</span> },
+    { key: 'registered_at', header: 'Added On', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-IN') : '—' },
+    {
+      key: 'verified',
+      header: 'Status',
+      render: (v, row) => (
+        v ? (
+          <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Verified</span>
+        ) : (
+          <button
+            className="btn-primary text-xs py-1 px-2 h-auto"
+            onClick={() => verifyParticipant.mutate(row.id)}
+            disabled={verifyParticipant.isPending}
+          >
+            Accept Request
+          </button>
+        )
+      )
+    }
+  ]
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EventDetail (main export)
-// ─────────────────────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-4">
+      <DataTable
+        columns={columns}
+        data={participants || []}
+        isLoading={isLoading}
+        emptyMessage="No participants found. Students who register or get uploaded will appear here."
+        searchable
+        searchPlaceholder="Search participants..."
+        rowKey="id"
+      />
+    </div>
+  )
+}
+
+
 export default function EventDetail() {
   const { club_id, event_id } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -533,7 +1177,7 @@ export default function EventDetail() {
   const activeTab = TABS.includes(requestedTab) ? requestedTab : deriveDefaultTab(event)
 
   const setActiveTab = (tab) => {
-    setSearchParams(tab === 'overview' ? {} : { tab }, { replace: true })
+    setSearchParams({ tab }, { replace: true })
   }
 
   if (isLoading) {
@@ -621,6 +1265,7 @@ export default function EventDetail() {
               {TABS.map((tab) => {
                 const labels = {
                   overview: 'Overview',
+                  'volunteer-requests': 'Volunteer Requests',
                   participants: 'Participants',
                   'field-mapping': 'Field Mapping',
                   certificates: 'Certificates',
@@ -638,7 +1283,7 @@ export default function EventDetail() {
                       }
                     `}
                   >
-                    {labels[tab]}
+                    {labels[tab] || tab}
                   </button>
                 )
               })}
@@ -650,7 +1295,14 @@ export default function EventDetail() {
                 event={event}
                 clubId={club_id}
                 eventId={event_id}
-                onNextStep={() => setActiveTab('participants')}
+                onNextStep={() => setActiveTab('volunteer-requests')}
+              />
+            )}
+            {activeTab === 'volunteer-requests' && (
+              <VolunteerRequestsTab
+                clubId={club_id}
+                eventId={event_id}
+                event={event}
               />
             )}
             {activeTab === 'participants' && (

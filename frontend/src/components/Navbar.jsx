@@ -2,13 +2,14 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useMutation } from '@tanstack/react-query'
+import { Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useUiStore } from '../store/uiStore'
 import { useToastStore } from '../store/uiStore'
 import {
-  useChangeDeptPassword,
-  useRequestDeptPasswordOtp,
-  useVerifyDeptPasswordOtp,
+  useChangePassword,
+  useRequestPasswordOtp,
+  useVerifyPasswordOtp,
 } from '../dashboards/auth/api'
 import axiosInstance from '../utils/axiosInstance'
 import queryClient from '../utils/queryClient'
@@ -17,209 +18,287 @@ import logoImg from '../Images/logo.png'
 // ── Role badge colours ────────────────────────────────────────────────────────
 const roleMeta = {
   super_admin:      { label: 'Super Admin',      cls: 'bg-purple-100 text-purple-700' },
+  student_affairs:  { label: 'Student Affairs',  cls: 'bg-amber-100 text-amber-700' },
   club_coordinator: { label: 'Club Coordinator', cls: 'bg-blue-100 text-blue-700' },
   dept_coordinator: { label: 'Dept Coordinator', cls: 'bg-teal-100 text-teal-700' },
   tutor:            { label: 'Tutor',            cls: 'bg-indigo-100 text-indigo-700' },
+  faculty:          { label: 'Faculty',          cls: 'bg-emerald-100 text-emerald-700' },
   student:          { label: 'Student',           cls: 'bg-green-100 text-green-700' },
   guest:            { label: 'Guest',             cls: 'bg-gray-100 text-gray-600' },
 }
 
 // ── Change-password popover ───────────────────────────────────────────────────
-function ChangePasswordForm({ onClose, useOtp }) {
-  const addToast = useToastStore((s) => s.addToast)
-  const requestDeptPasswordOtp = useRequestDeptPasswordOtp()
-  const verifyDeptPasswordOtp = useVerifyDeptPasswordOtp()
-  const changeDeptPassword = useChangeDeptPassword()
+function ChangePasswordForm({ onClose, onPasswordChanged, isRequired = false }) {
+  const requestPasswordOtp = useRequestPasswordOtp()
+  const verifyPasswordOtp = useVerifyPasswordOtp()
+  const changePassword = useChangePassword()
   const [otpRequested, setOtpRequested] = useState(false)
   const [otpVerified, setOtpVerified] = useState(false)
+  const [visiblePasswords, setVisiblePasswords] = useState({})
   const {
     register,
     handleSubmit,
     watch,
     reset,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm()
 
-  const mutation = useMutation({
-    mutationFn: (data) =>
-      axiosInstance.patch('/auth/password', {
-        current_password: data.current_password,
-        new_password: data.new_password,
-      }),
-    onSuccess: () => {
-      addToast({ type: 'success', message: 'Password changed successfully.' })
-      onClose()
-    },
-    onError: (err) => {
-      const msg = err?.response?.data?.detail || 'Failed to change password.'
-      addToast({ type: 'error', message: msg })
-    },
-  })
-
   const handleRequestOtp = handleSubmit(async () => {
-    await requestDeptPasswordOtp.mutateAsync()
-    setOtpRequested(true)
-    setOtpVerified(false)
+    try {
+      await requestPasswordOtp.mutateAsync()
+      setOtpRequested(true)
+      setOtpVerified(false)
+    } catch {
+      // Toast handled by hook
+    }
   })
 
   const handleVerifyOtp = handleSubmit(async (values) => {
-    await verifyDeptPasswordOtp.mutateAsync({ otp_code: values.otp_code })
-    setOtpVerified(true)
+    try {
+      await verifyPasswordOtp.mutateAsync({ otp_code: values.otp_code })
+      setOtpVerified(true)
+    } catch {
+      // Toast handled by hook
+    }
   })
 
   const handleOtpPasswordSubmit = handleSubmit(async (values) => {
     if (!otpVerified) return
-    await changeDeptPassword.mutateAsync({
-      current_password: values.current_password,
-      new_password: values.new_password,
-      otp_code: values.otp_code,
-    })
-    reset({
-      current_password: '',
-      new_password: '',
-      confirm: '',
-      otp_code: '',
-    })
-    setOtpRequested(false)
-    setOtpVerified(false)
-    onClose()
+    try {
+      await changePassword.mutateAsync({
+        current_password: values.current_password,
+        new_password: values.new_password,
+        otp_code: values.otp_code,
+      })
+      reset({
+        current_password: '',
+        new_password: '',
+        confirm: '',
+        otp_code: '',
+      })
+      setOtpRequested(false)
+      setOtpVerified(false)
+      onPasswordChanged()
+      onClose()
+    } catch {
+      // Toast handled by hook
+    }
   })
 
-  const handleDirectSubmit = handleSubmit((d) => mutation.mutate(d))
-  const handleFormSubmit = useOtp
-    ? (otpVerified ? handleOtpPasswordSubmit : otpRequested ? handleVerifyOtp : handleRequestOtp)
-    : handleDirectSubmit
+  const handleFormSubmit = (e) => {
+    e.preventDefault()
+    if (otpVerified) {
+      handleOtpPasswordSubmit(e)
+    } else if (otpRequested) {
+      handleVerifyOtp(e)
+    } else {
+      handleRequestOtp(e)
+    }
+  }
+
+  const togglePasswordVisibility = (field) => {
+    setVisiblePasswords((current) => ({
+      ...current,
+      [field]: !current[field],
+    }))
+  }
 
   return (
     <form
       onSubmit={handleFormSubmit}
-      className="flex flex-col gap-4"
+      className="flex flex-col gap-3"
     >
       <div>
-        <label className="form-label">Current password</label>
-        <input
-          type="password"
-          autoComplete="current-password"
-          className={`form-input ${errors.current_password ? 'form-input-error' : ''}`}
-          {...register('current_password', { required: 'Required' })}
-        />
+        <label className="form-label text-xs">Current password</label>
+        <div className="relative">
+          <input
+            type={visiblePasswords.current_password ? 'text' : 'password'}
+            autoComplete="current-password"
+            className={`form-input text-sm py-1.5 pr-9 ${errors.current_password ? 'form-input-error' : ''}`}
+            {...register('current_password', { required: 'Required' })}
+          />
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            onClick={() => togglePasswordVisibility('current_password')}
+            aria-label={visiblePasswords.current_password ? 'Hide current password' : 'Show current password'}
+            title={visiblePasswords.current_password ? 'Hide current password' : 'Show current password'}
+          >
+            {visiblePasswords.current_password ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {errors.current_password && (
-          <p className="form-error">{errors.current_password.message}</p>
+          <p className="form-error text-xs">{errors.current_password.message}</p>
         )}
       </div>
 
       <div>
-        <label className="form-label">New password</label>
-        <input
-          type="password"
-          autoComplete="new-password"
-          className={`form-input ${errors.new_password ? 'form-input-error' : ''}`}
-          {...register('new_password', {
-            required: 'Required',
-            minLength: { value: 8, message: 'Min 8 characters' },
-          })}
-        />
+        <label className="form-label text-xs">New password</label>
+        <div className="relative">
+          <input
+            type={visiblePasswords.new_password ? 'text' : 'password'}
+            autoComplete="new-password"
+            className={`form-input text-sm py-1.5 pr-9 ${errors.new_password ? 'form-input-error' : ''}`}
+            {...register('new_password', {
+              required: 'Required',
+              minLength: { value: 8, message: 'Min 8 characters' },
+            })}
+          />
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            onClick={() => togglePasswordVisibility('new_password')}
+            aria-label={visiblePasswords.new_password ? 'Hide new password' : 'Show new password'}
+            title={visiblePasswords.new_password ? 'Hide new password' : 'Show new password'}
+          >
+            {visiblePasswords.new_password ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {errors.new_password && (
-          <p className="form-error">{errors.new_password.message}</p>
+          <p className="form-error text-xs">{errors.new_password.message}</p>
         )}
       </div>
 
       <div>
-        <label className="form-label">Confirm new password</label>
-        <input
-          type="password"
-          autoComplete="new-password"
-          className={`form-input ${errors.confirm ? 'form-input-error' : ''}`}
-          {...register('confirm', {
-            required: 'Required',
-            validate: (v) => v === watch('new_password') || 'Passwords do not match',
-          })}
-        />
+        <label className="form-label text-xs">Confirm new password</label>
+        <div className="relative">
+          <input
+            type={visiblePasswords.confirm ? 'text' : 'password'}
+            autoComplete="new-password"
+            className={`form-input text-sm py-1.5 pr-9 ${errors.confirm ? 'form-input-error' : ''}`}
+            {...register('confirm', {
+              required: 'Required',
+              validate: (v) => v === watch('new_password') || 'Passwords do not match',
+            })}
+          />
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+            onClick={() => togglePasswordVisibility('confirm')}
+            aria-label={visiblePasswords.confirm ? 'Hide password confirmation' : 'Show password confirmation'}
+            title={visiblePasswords.confirm ? 'Hide password confirmation' : 'Show password confirmation'}
+          >
+            {visiblePasswords.confirm ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {errors.confirm && (
-          <p className="form-error">{errors.confirm.message}</p>
+          <p className="form-error text-xs">{errors.confirm.message}</p>
         )}
       </div>
 
-      {useOtp && otpRequested && (
-        <div>
-          <label className="form-label">OTP Code</label>
+      {otpRequested && (
+        <div className="pt-1">
+          <label className="form-label text-xs">Email OTP Code (4 digits)</label>
           <input
             type="text"
             inputMode="numeric"
             maxLength={4}
-            placeholder="Enter the 4-digit code"
-            className={`form-input text-center tracking-[0.45em] ${errors.otp_code ? 'form-input-error' : ''}`}
+            placeholder="0000"
+            className={`form-input text-center font-bold tracking-[0.4em] text-sm py-1.5 ${errors.otp_code ? 'form-input-error' : ''}`}
             {...register('otp_code', {
               required: otpVerified ? false : 'OTP code is required',
-              minLength: { value: 4, message: 'OTP must be 4 digits' },
-              maxLength: { value: 4, message: 'OTP must be 4 digits' },
-              pattern: { value: /^\d{4}$/, message: 'OTP must be 4 digits' },
+              minLength: { value: 4, message: 'Must be 4 digits' },
+              maxLength: { value: 4, message: 'Must be 4 digits' },
+              pattern: { value: /^\d{4}$/, message: 'Must be 4 digits' },
             })}
-            disabled={verifyDeptPasswordOtp.isPending || changeDeptPassword.isPending}
+            disabled={verifyPasswordOtp.isPending || changePassword.isPending || otpVerified}
           />
-          {errors.otp_code && <p className="form-error">{errors.otp_code.message}</p>}
+          {errors.otp_code && <p className="form-error text-xs">{errors.otp_code.message}</p>}
         </div>
       )}
 
-      {!useOtp && (
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" className="btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      )}
-
-      {useOtp && !otpRequested && (
-        <div className="flex justify-end">
+      {!otpRequested && (
+        <div className="flex items-center justify-end gap-2 pt-2">
+          {!isRequired && (
+            <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
+              Cancel
+            </button>
+          )}
           <button
             type="submit"
-            className="btn-primary"
-            disabled={requestDeptPasswordOtp.isPending}
+            className="btn-primary text-xs px-3 py-1.5"
+            disabled={requestPasswordOtp.isPending}
           >
-            {requestDeptPasswordOtp.isPending ? 'Sending OTP...' : 'Send OTP to Email'}
+            {requestPasswordOtp.isPending ? 'Sending OTP...' : 'Send OTP to Email'}
           </button>
         </div>
       )}
 
-      {useOtp && otpRequested && !otpVerified && (
-        <div className="flex items-center justify-end gap-2">
+      {otpRequested && !otpVerified && (
+        <div className="flex items-center justify-end gap-2 pt-2">
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary text-xs px-2.5 py-1.5"
             onClick={handleRequestOtp}
-            disabled={requestDeptPasswordOtp.isPending}
+            disabled={requestPasswordOtp.isPending}
           >
-            {requestDeptPasswordOtp.isPending ? 'Resending...' : 'Resend OTP'}
+            {requestPasswordOtp.isPending ? 'Resending...' : 'Resend'}
           </button>
           <button
             type="submit"
-            className="btn-primary"
-            disabled={verifyDeptPasswordOtp.isPending}
+            className="btn-primary text-xs px-3 py-1.5"
+            disabled={verifyPasswordOtp.isPending}
           >
-            {verifyDeptPasswordOtp.isPending ? 'Verifying...' : 'Verify OTP'}
+            {verifyPasswordOtp.isPending ? 'Verifying...' : 'Verify OTP'}
           </button>
         </div>
       )}
 
-      {useOtp && otpVerified && (
-        <div className="flex items-center justify-end gap-2">
-          <p className="text-xs font-medium text-green-700">OTP verified.</p>
-          <button type="submit" className="btn-primary" disabled={changeDeptPassword.isPending}>
-            {changeDeptPassword.isPending ? 'Updating...' : 'Change Password'}
-          </button>
+      {otpVerified && (
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs font-semibold text-green-700 flex items-center gap-1">
+            ✓ OTP Verified
+          </span>
+          <div className="flex items-center gap-2">
+            {!isRequired && (
+              <button type="button" className="btn-secondary text-xs px-2.5 py-1.5" onClick={onClose}>
+                Cancel
+              </button>
+            )}
+            <button type="submit" className="btn-primary text-xs px-3 py-1.5" disabled={changePassword.isPending}>
+              {changePassword.isPending ? 'Saving…' : 'Save Password'}
+            </button>
+          </div>
         </div>
       )}
     </form>
   )
 }
 
+export function FirstLoginPasswordGate() {
+  const requiresPasswordChange = useAuthStore((state) => state.requires_password_change)
+  const role = useAuthStore((state) => state.role)
+  const setRequiresPasswordChange = useAuthStore((state) => state.setRequiresPasswordChange)
+  const requiredRoles = ['tutor', 'hod', 'principal']
+
+  if (!requiresPasswordChange || !requiredRoles.includes(role)) return null
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-navy/60 px-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+        <h1 className="text-xl font-bold text-navy">Change your password</h1>
+        <p className="mt-2 mb-5 text-sm text-gray-600">
+          You must set a new password before continuing to your dashboard.
+        </p>
+        <ChangePasswordForm
+          isRequired
+          onClose={() => {}}
+          onPasswordChanged={() => setRequiresPasswordChange(false)}
+        />
+      </div>
+    </div>
+  )
+}
+
 // ── Navbar ────────────────────────────────────────────────────────────────────
 export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
   const navigate = useNavigate()
-  const { user, role, clearAuth } = useAuthStore()
+  const {
+    user,
+    role,
+    setRequiresPasswordChange,
+    clearAuth,
+  } = useAuthStore()
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
   const addToast = useToastStore((s) => s.addToast)
 
@@ -279,7 +358,7 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
             <img src={logoImg} alt="Logo" className="h-8 w-8 object-contain" />
             <span className="hidden sm:block text-sm font-semibold text-navy leading-tight text-left">
               PSG iTech<br />
-              <span className="font-normal text-xs text-gray-500">Certificate Platform</span>
+              <span className="font-normal text-xs text-gray-500">Students Activity Management Software</span>
             </span>
           </button>
         ) : (
@@ -287,7 +366,7 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
             <img src={logoImg} alt="Logo" className="h-8 w-8 object-contain" />
             <span className="hidden sm:block text-sm font-semibold text-navy leading-tight">
               PSG iTech<br />
-              <span className="font-normal text-xs text-gray-500">Certificate Platform</span>
+              <span className="font-normal text-xs text-gray-500">Students Activity Management Software</span>
             </span>
           </div>
         )}
@@ -341,7 +420,7 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
                   ) : (
                     <ChangePasswordForm
                       onClose={() => setShowChangePw(false)}
-                      useOtp={role === 'dept_coordinator'}
+                      onPasswordChanged={() => setRequiresPasswordChange(false)}
                     />
                   )}
                 </div>

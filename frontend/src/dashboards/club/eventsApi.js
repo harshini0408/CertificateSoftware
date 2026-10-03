@@ -256,3 +256,137 @@ export function useSaveFieldPositions(clubId, eventId) {
     },
   })
 }
+
+// ── useUploadPoster ───────────────────────────────────────────────────────────
+export function useUploadPoster(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (file) => {
+      const formData = new FormData()
+      formData.append('poster', file)
+      const { data } = await axiosInstance.post(
+        `/clubs/${clubId}/events/${eventId}/poster`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      addToast({ type: 'success', message: 'Poster uploaded successfully.' })
+    },
+    onError: (err) => {
+      const msg = extractErrorMsg(err, 'Failed to upload poster.')
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useUploadReport ───────────────────────────────────────────────────────────
+export function useUploadReport(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (file) => {
+      const formData = new FormData()
+      formData.append('report', file)
+      const { data } = await axiosInstance.post(
+        `/clubs/${clubId}/events/${eventId}/report`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      addToast({ type: 'success', message: 'Event report uploaded and submitted for review.' })
+    },
+    onError: (err) => {
+      const msg = extractErrorMsg(err, 'Failed to upload event report.')
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useClubCreditRules ──────────────────────────────────────────────────────
+export function useClubCreditRules(clubId) {
+  return useQuery({
+    queryKey: ['club-credit-rules', clubId],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/clubs/${clubId}/credit-rules`)
+      return data
+    },
+    enabled: !!clubId,
+  })
+}
+
+// ── Volunteer Requests Hooks ──────────────────────────────────────────────────
+export function useVolunteerRequests(clubId, eventId) {
+  return useQuery({
+    queryKey: ['events', clubId, eventId, 'volunteers'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/clubs/${clubId}/events/${eventId}/volunteers`)
+      return data
+    },
+    enabled: !!clubId && !!eventId,
+  })
+}
+
+export function useUpdateVolunteerStatus(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ itemId, status }) => {
+      const { data } = await axiosInstance.patch(
+        `/clubs/${clubId}/events/${eventId}/volunteers/${itemId}/status`,
+        { status },
+      )
+      return data
+    },
+    onSuccess: (_, { status }) => {
+      qc.invalidateQueries({ queryKey: ['events', clubId, eventId, 'volunteers'] })
+      qc.invalidateQueries({ queryKey: ['participants', clubId, eventId] })
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      addToast({
+        type: 'success',
+        message: `Volunteer request ${status === 'accepted' ? 'accepted' : 'rejected'} successfully.`,
+      })
+    },
+    onError: (err) => {
+      const msg = extractErrorMsg(err, 'Failed to update volunteer status.')
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useUpdateVolunteerCount(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (volunteers_required) => {
+      const { data } = await axiosInstance.patch(
+        `/clubs/${clubId}/events/${eventId}/volunteers-count`,
+        { volunteers_required: Number(volunteers_required) },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eventKeys.detail(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: eventKeys.list(clubId) })
+      qc.invalidateQueries({ queryKey: ['events', clubId, eventId, 'volunteers'] })
+      addToast({ type: 'success', message: 'Volunteer count updated successfully.' })
+    },
+    onError: (err) => {
+      const msg = extractErrorMsg(err, 'Failed to update volunteer count.')
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}

@@ -20,11 +20,12 @@ class Settings(BaseSettings):
     app_env: Literal["development", "production"] = "development"
     secret_key: str = "replace-with-random-64-char-hex-string"
     algorithm: str = "HS256"
-    frontend_url: str = "http://localhost:5173"
-    base_url: str = "https://certs.psgit.edu"
+    frontend_url: str = ""
+    allowed_origins: str = ""
+    base_url: str = "http://backend:2849"
 
     # ── MongoDB ──────────────────────────────────────────────────────────
-    mongodb_url: str = "mongodb://localhost:27017"
+    mongodb_url: str = "mongodb://mongodb:27017"
     db_name: str = "certsoftware"
 
     # ── JWT ──────────────────────────────────────────────────────────────
@@ -40,14 +41,20 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""           # Gmail App Password or Brevo SMTP key
-    email_sender: str = "certs@psgit.edu"
+    email_sender: str = "certificate@psgitech.ac.in"
     email_sender_name: str = "PSG iTech Certificates"
     email_daily_limit: int = 500
+    secondary_smtp_host: str = ""
+    secondary_smtp_port: int = 587
+    secondary_smtp_user: str = ""
+    secondary_smtp_password: str = ""
+    secondary_email_sender: str = ""
+    secondary_email_sender_name: str = ""
 
     # ── Super Admin Seed ─────────────────────────────────────────────────
     superadmin_username: str = "superadmin"
     superadmin_password: str = "change-me-on-first-run"
-    superadmin_email: str = "admin@psgit.edu"
+    superadmin_email: str = "admin@psgitech.ac.in"
     superadmin_name: str = "Platform Admin"
 
     # ── Derived helpers ──────────────────────────────────────────────────
@@ -78,6 +85,22 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """Resolve CORS origins from ALLOWED_ORIGINS and safe development defaults."""
+        explicit = [o.strip().rstrip("/") for o in self.allowed_origins.split(",") if o.strip()]
+        if self.frontend_url:
+            explicit.append(self.frontend_url.strip().rstrip("/"))
+
+        if self.app_env == "development":
+            explicit.extend([
+                "http://localhost:2848",
+                "http://127.0.0.1:2848",
+            ])
+
+        # Preserve order while removing duplicates.
+        return list(dict.fromkeys([o for o in explicit if o]))
 
     def ensure_storage_dirs(self) -> None:
         """Create storage directories if they don't exist."""

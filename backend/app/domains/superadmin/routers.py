@@ -28,11 +28,12 @@ from ...models.scan_log import ScanLog
 from ...models.credit_rule import CreditRule
 from ...models.student_credit import StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...services.semester_service import get_current_semester, set_current_semester
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
 from ...schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
 from ...schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
-from ...schemas.user import UserCreate, UserUpdate, UserResponse
+from ...schemas.user import UserCreate, UserUpdate, UserResponse, TutorClassRequest, FacultyRoleRequest
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -51,6 +52,8 @@ class TutorStudentAssignRequest(BaseModel):
 
 class TutorReassignRequest(BaseModel):
     new_tutor_id: PydanticObjectId
+    student_emails: Optional[List[str]] = None
+    student_ids: Optional[List[str]] = None
 
 
 class CreditResetRequest(BaseModel):
@@ -69,6 +72,8 @@ async def _assign_student_to_tutor(
     reg_norm = registration_number.strip()
     if not email_norm or not reg_norm:
         raise ValueError("email and registration_number are required")
+    if not email_norm.endswith("@psgitech.ac.in"):
+        raise ValueError(f"Student email '{email_norm}' must be a @psgitech.ac.in address")
 
     existing = await StudentCredit.find_one(
         StudentCredit.student_email == email_norm,
@@ -118,10 +123,33 @@ async def _find_tutor_by_email(email: str | None) -> User | None:
 
 # ── Helper: Build UserResponse from User document ────────────────────────────
 
+def _tutor_classes(u: User) -> List[dict]:
+    classes = []
+    if u.department and u.batch and u.section:
+        classes.append({"department": u.department, "batch": u.batch, "section": u.section})
+    if getattr(u, "assigned_classes", None):
+        for c in u.assigned_classes:
+            if isinstance(c, dict) and c.get("department") and c.get("batch") and c.get("section"):
+                if not any(
+                    (x.get("department") or "").lower() == (c.get("department") or "").lower() and
+                    (x.get("batch") or "").lower() == (c.get("batch") or "").lower() and
+                    (x.get("section") or "").lower() == (c.get("section") or "").lower()
+                    for x in classes
+                ):
+                    classes.append({
+                        "department": c.get("department"),
+                        "batch": c.get("batch"),
+                        "section": c.get("section"),
+                    })
+    return classes
+
+
 def _user_response(u: User) -> UserResponse:
     user_departments = getattr(u, "departments", None)
     if not user_departments and u.role == UserRole.HOD and u.department:
         user_departments = [u.department]
+
+    assigned_classes = _tutor_classes(u) if u.role == UserRole.TUTOR else None
 
     return UserResponse(
         id=str(u.id),
@@ -138,6 +166,7 @@ def _user_response(u: User) -> UserResponse:
         registration_number=u.registration_number,
         batch=u.batch,
         section=u.section,
+        assigned_classes=assigned_classes,
     )
 
 
@@ -492,10 +521,12 @@ async def create_user(body: UserCreate, _user: User = _admin):
     username = body.username.strip()
     email = body.email.strip().lower()
     name = body.name.strip()
-    password_input = body.password.strip()
-
-    if len(password_input) < 8:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Password must be at least 8 characters")
+    if body.role == "faculty":
+        password_input = (body.password or "").strip() or email
+    else:
+        password_input = (body.password or "").strip()
+        if len(password_input) < 8:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Password must be at least 8 characters")
 
     # Uniqueness checks
     if await User.find_one(User.username == username):
@@ -539,7 +570,7 @@ async def create_user(body: UserCreate, _user: User = _admin):
 
     department_name = None
     department_names = None
-    if body.role in ["dept_coordinator", "hod", "student", "tutor"]:
+    if body.role in ["dept_coordinator", "hod", "student", "tutor", "faculty"]:
         if body.role == "hod":
             raw_departments = list(body.departments or [])
             if body.department:
@@ -595,15 +626,15 @@ async def create_user(body: UserCreate, _user: User = _admin):
         email=email,
         password_hash=hash_password(password_input),
         role=UserRole(body.role),
-        first_login_completed=(body.role != "club_coordinator"),
+        first_login_completed=(body.role not in {"faculty", "tutor", "hod", "principal", "club_coordinator"}),
         is_active=body.is_active,
         club_id=club_oid,
         event_id=event_oid,
         department=department_name,
         departments=department_names if body.role == "hod" else None,
-        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor"] else None,
-        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod"] else None,
-        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod"] else None,
+        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor", "faculty"] else None,
+        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod", "faculty"] else None,
+        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod", "faculty"] else None,
     )
     await new_user.insert()
 
@@ -707,6 +738,12 @@ async def bulk_import_students(
             if len(password) < 8:
                 raise ValueError("Password must be at least 8 characters")
 
+            if not email.endswith("@psgitech.ac.in"):
+                raise ValueError(f"Student email '{email}' must be a @psgitech.ac.in address")
+
+            if tutor_email and not tutor_email.endswith("@psgitech.ac.in"):
+                raise ValueError(f"Tutor email '{tutor_email}' must be a @psgitech.ac.in address")
+
             resolved_dept = await _resolve_department_name(dept)
             if not resolved_dept:
                 raise ValueError("Department is required")
@@ -767,8 +804,10 @@ async def bulk_import_students(
             created += 1
 
         except ValueError as ve:
+            skipped += 1
             errors.append({"row": row_idx, "reason": str(ve)})
         except Exception as exc:
+            skipped += 1
             errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
 
     return {"created": created, "skipped": skipped, "errors": errors}
@@ -868,6 +907,9 @@ async def bulk_import_tutors(
             if len(password) < 8:
                 raise ValueError("Password must be at least 8 characters")
 
+            if not email.endswith("@psgitech.ac.in"):
+                raise ValueError(f"Tutor email '{email}' must be a @psgitech.ac.in address")
+
             resolved_dept = await _resolve_department_name(department)
             if not resolved_dept:
                 raise ValueError("Department is required")
@@ -888,7 +930,7 @@ async def bulk_import_tutors(
                 email=email,
                 password_hash=hash_password(password),
                 role=UserRole.TUTOR,
-                first_login_completed=True,
+                first_login_completed=False,
                 is_active=True,
                 department=resolved_dept,
                 batch=batch,
@@ -898,8 +940,174 @@ async def bulk_import_tutors(
             created += 1
 
         except ValueError as ve:
+            skipped += 1
             errors.append({"row": row_idx, "reason": str(ve)})
         except Exception as exc:
+            skipped += 1
+            errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+@router.get("/users/bulk-import-faculty/sample")
+async def download_faculty_import_sample(_user: User = _admin):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Faculty"
+
+    headers = [
+        "name",
+        "faculty id",
+        "email",
+        "department",
+        "username (faculty id)",
+        "password (faculty id)",
+    ]
+    ws.append(headers)
+    ws.append([
+        "Dr. Jane Doe",
+        "FAC101",
+        "jane.doe@psgitech.ac.in",
+        "Computer Science and Engineering",
+        "FAC101",
+        "FAC101",
+    ])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=faculty_bulk_import_sample.xlsx"},
+    )
+
+
+@router.post("/users/bulk-import-faculty", status_code=200)
+async def bulk_import_faculty(
+    file: UploadFile = File(...),
+    _user: User = _admin,
+):
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only .xlsx files are accepted")
+
+    import openpyxl
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not parse the Excel file. Ensure it is a valid .xlsx.")
+
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel file is empty or has no header row")
+
+    raw_headers = [re.sub(r"\s+", " ", str(h).strip().lower()) if h is not None else "" for h in header_row]
+
+    exact_required_headers = [
+        "name",
+        "faculty id",
+        "email",
+        "department",
+        "username (faculty id)",
+        "password (faculty id)",
+    ]
+
+    non_empty_headers = [h for h in raw_headers if h]
+    missing = [h for h in exact_required_headers if h not in non_empty_headers]
+    unexpected = [h for h in non_empty_headers if h not in exact_required_headers]
+
+    if missing or unexpected:
+        error_parts = []
+        if missing:
+            error_parts.append(f"Missing required header(s): {', '.join(missing)}")
+        if unexpected:
+            error_parts.append(f"Unexpected header(s): {', '.join(unexpected)}")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{'; '.join(error_parts)}. The following excel headers only should be accepted: {', '.join(exact_required_headers)}",
+        )
+
+    name_idx = raw_headers.index("name")
+    fac_id_idx = raw_headers.index("faculty id")
+    email_idx = raw_headers.index("email")
+    dept_idx = raw_headers.index("department")
+    user_idx = raw_headers.index("username (faculty id)")
+    pass_idx = raw_headers.index("password (faculty id)")
+
+    def get_cell(row_vals, idx):
+        if idx >= 0 and idx < len(row_vals):
+            return _excel_cell_text(row_vals[idx])
+        return ""
+
+    created = 0
+    skipped = 0
+    errors = []
+
+    for row_idx, row_vals in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if _excel_row_is_empty(row_vals):
+            continue
+
+        name = get_cell(row_vals, name_idx)
+        faculty_id = get_cell(row_vals, fac_id_idx)
+        email = get_cell(row_vals, email_idx).lower()
+        department = get_cell(row_vals, dept_idx)
+        username = get_cell(row_vals, user_idx)
+        password = get_cell(row_vals, pass_idx)
+
+        try:
+            missing_fields = [
+                field for field, value in [
+                    ("name", name),
+                    ("faculty id", faculty_id),
+                    ("email", email),
+                    ("department", department),
+                    ("username (faculty id)", username),
+                    ("password (faculty id)", password),
+                ] if not value
+            ]
+            if missing_fields:
+                raise ValueError(f"Missing: {', '.join(missing_fields)}")
+
+            if not email.endswith("@psgitech.ac.in"):
+                raise ValueError(f"Faculty email '{email}' must be a @psgitech.ac.in address")
+
+            resolved_dept = await _resolve_department_name(department)
+            if not resolved_dept:
+                raise ValueError(f"Invalid department '{department}'")
+
+            if await User.find_one(User.username == username):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Faculty ID/Username '{username}' already exists — skipped"})
+                continue
+
+            if await User.find_one(User.email == email):
+                skipped += 1
+                errors.append({"row": row_idx, "reason": f"Email '{email}' already exists — skipped"})
+                continue
+
+            faculty = User(
+                username=username,
+                name=name,
+                email=email,
+                password_hash=hash_password(password),
+                role=UserRole.FACULTY,
+                first_login_completed=False,
+                is_active=True,
+                department=resolved_dept,
+            )
+            await faculty.insert()
+            created += 1
+
+        except ValueError as ve:
+            skipped += 1
+            errors.append({"row": row_idx, "reason": str(ve)})
+        except Exception as exc:
+            skipped += 1
             errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
 
     return {"created": created, "skipped": skipped, "errors": errors}
@@ -1033,26 +1241,415 @@ async def reassign_tutor_students(
     if from_tutor.id == to_tutor.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Source and target tutor cannot be the same")
 
-    mapped = await StudentCredit.find(StudentCredit.tutor_email == from_tutor.email).to_list()
-    moved = 0
+    target_emails = set()
+    if body.student_emails:
+        target_emails.update(e.strip().lower() for e in body.student_emails if e and e.strip())
+    if body.student_ids:
+        st_oids = []
+        for sid in body.student_ids:
+            try:
+                st_oids.append(PydanticObjectId(sid))
+            except Exception:
+                pass
+        if st_oids:
+            st_users = await User.find({"_id": {"$in": st_oids}}).to_list()
+            target_emails.update((u.email or "").strip().lower() for u in st_users if u.email)
+
+    import re
     now = datetime.utcnow()
-    for doc in mapped:
-        await doc.set(
-            {
+    moved = 0
+
+    if target_emails:
+        email_patterns = [re.compile(f"^{re.escape(e)}$", re.IGNORECASE) for e in target_emails]
+        existing_docs = await StudentCredit.find({"student_email": {"$in": email_patterns}}).to_list()
+        updated_emails = set()
+        for doc in existing_docs:
+            updates = {
                 "tutor_email": to_tutor.email,
-                "department": to_tutor.department,
-                "batch": to_tutor.batch,
-                "section": to_tutor.section,
                 "last_updated": now,
             }
-        )
-        moved += 1
+            if not doc.department and to_tutor.department:
+                updates["department"] = to_tutor.department
+            if not doc.batch and to_tutor.batch:
+                updates["batch"] = to_tutor.batch
+            if not doc.section and to_tutor.section:
+                updates["section"] = to_tutor.section
+
+            await doc.set(updates)
+            if doc.student_email:
+                updated_emails.add(doc.student_email.strip().lower())
+            moved += 1
+
+        missing_emails = target_emails - updated_emails
+        if missing_emails:
+            missing_patterns = [re.compile(f"^{re.escape(e)}$", re.IGNORECASE) for e in missing_emails]
+            users_missing = await User.find({
+                "email": {"$in": missing_patterns},
+                "role": UserRole.STUDENT,
+            }).to_list()
+            for u in users_missing:
+                await StudentCredit(
+                    student_email=u.email.strip().lower(),
+                    tutor_email=to_tutor.email,
+                    registration_number=u.registration_number or "",
+                    student_name=u.name,
+                    department=u.department or to_tutor.department,
+                    batch=u.batch or to_tutor.batch,
+                    section=u.section or to_tutor.section,
+                    total_credits=0,
+                    credit_history=[],
+                    last_updated=now,
+                ).insert()
+                moved += 1
+
+        # Reassign pending verification submissions of moved students to the new tutor
+        await ManualCreditSubmission.find({
+            "student_email": {"$in": email_patterns},
+            "status": ManualSubmissionStatus.PENDING,
+        }).update_many({"$set": {"tutor_email": to_tutor.email}})
+    else:
+        tutor_pattern = re.compile(f"^{re.escape(from_tutor.email.strip())}$", re.IGNORECASE)
+        mapped = await StudentCredit.find({"tutor_email": tutor_pattern}).to_list()
+        for doc in mapped:
+            updates = {
+                "tutor_email": to_tutor.email,
+                "last_updated": now,
+            }
+            if not doc.department and to_tutor.department:
+                updates["department"] = to_tutor.department
+            if not doc.batch and to_tutor.batch:
+                updates["batch"] = to_tutor.batch
+            if not doc.section and to_tutor.section:
+                updates["section"] = to_tutor.section
+
+            await doc.set(updates)
+            moved += 1
+
+        # Reassign all pending submissions of from_tutor to the new tutor
+        await ManualCreditSubmission.find({
+            "tutor_email": tutor_pattern,
+            "status": ManualSubmissionStatus.PENDING,
+        }).update_many({"$set": {"tutor_email": to_tutor.email}})
 
     return {
         "moved": moved,
         "from_tutor": from_tutor.email,
         "to_tutor": to_tutor.email,
     }
+
+
+@router.post("/students/assign-tutor")
+async def assign_unassigned_students_to_tutor(
+    body: TutorReassignRequest,
+    _user: User = _admin,
+):
+    """Assign selected, currently unassigned students to a tutor."""
+    tutor = await User.get(body.new_tutor_id)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tutor not found")
+
+    student_ids = []
+    for student_id in body.student_ids or []:
+        try:
+            student_ids.append(PydanticObjectId(student_id))
+        except Exception:
+            continue
+
+    if not student_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "At least one student is required")
+
+    students = await User.find({
+        "_id": {"$in": student_ids},
+        "role": UserRole.STUDENT,
+    }).to_list()
+
+    assigned = 0
+    skipped = 0
+    assigned_emails = []
+    now = datetime.utcnow()
+
+    for student in students:
+        email = (student.email or "").strip().lower()
+        if not email:
+            skipped += 1
+            continue
+
+        credit = await StudentCredit.find_one(StudentCredit.student_email == email)
+        if credit and credit.tutor_email:
+            skipped += 1
+            continue
+
+        if credit:
+            await credit.set({
+                "tutor_email": tutor.email,
+                "last_updated": now,
+            })
+        else:
+            await StudentCredit(
+                student_email=email,
+                tutor_email=tutor.email,
+                registration_number=student.registration_number or "",
+                student_name=student.name,
+                department=student.department,
+                batch=student.batch,
+                section=student.section,
+                total_credits=0,
+                credit_history=[],
+                last_updated=now,
+            ).insert()
+
+        assigned += 1
+        assigned_emails.append(email)
+
+    if assigned_emails:
+        import re
+        email_patterns = [re.compile(f"^{re.escape(email)}$", re.IGNORECASE) for email in assigned_emails]
+        await ManualCreditSubmission.find({
+            "student_email": {"$in": email_patterns},
+            "status": ManualSubmissionStatus.PENDING,
+        }).update_many({"$set": {"tutor_email": tutor.email}})
+
+    return {
+        "assigned": assigned,
+        "skipped": skipped,
+        "tutor": tutor.email,
+    }
+
+
+@router.post("/tutors/{tutor_id}/classes", response_model=UserResponse)
+async def add_tutor_class(
+    tutor_id: PydanticObjectId,
+    body: TutorClassRequest,
+    _user: User = _admin,
+):
+    tutor = await User.get(tutor_id)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tutor not found")
+
+    resolved_dept = await _resolve_department_name(body.department)
+    if not resolved_dept:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required")
+
+    batch = body.batch.strip()
+    section = body.section.strip().upper()
+    if not batch or not section:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Batch and Section are required")
+
+    if not tutor.department:
+        tutor.department = resolved_dept
+        tutor.batch = batch
+        tutor.section = section
+
+    assigned = list(tutor.assigned_classes or [])
+    exists = any(
+        (c.get("department") or "").lower() == resolved_dept.lower() and
+        (c.get("batch") or "").lower() == batch.lower() and
+        (c.get("section") or "").lower() == section.lower()
+        for c in assigned
+    ) or (
+        (tutor.department or "").lower() == resolved_dept.lower() and
+        (tutor.batch or "").lower() == batch.lower() and
+        (tutor.section or "").lower() == section.lower()
+    )
+
+    if not exists:
+        assigned.append({
+            "department": resolved_dept,
+            "batch": batch,
+            "section": section,
+        })
+        tutor.assigned_classes = assigned
+
+    await tutor.save()
+
+    if body.assign_unassigned_students:
+        students = await User.find({
+            "role": UserRole.STUDENT,
+            "department": resolved_dept,
+            "batch": batch,
+            "section": section,
+        }).to_list()
+        for st in students:
+            st_email = (st.email or "").strip().lower()
+            if not st_email:
+                continue
+            sc = await StudentCredit.find_one(StudentCredit.student_email == st_email)
+            if not sc:
+                await StudentCredit(
+                    student_email=st_email,
+                    tutor_email=tutor.email,
+                    registration_number=st.registration_number or "",
+                    student_name=st.name,
+                    department=resolved_dept,
+                    batch=batch,
+                    section=section,
+                    total_credits=0,
+                    credit_history=[],
+                    last_updated=datetime.utcnow(),
+                ).insert()
+            elif not sc.tutor_email:
+                await sc.set({"tutor_email": tutor.email, "last_updated": datetime.utcnow()})
+
+    return _user_response(tutor)
+
+
+@router.delete("/tutors/{tutor_id}/classes", response_model=UserResponse)
+async def remove_tutor_class(
+    tutor_id: PydanticObjectId,
+    department: str = Query(...),
+    batch: str = Query(...),
+    section: str = Query(...),
+    _user: User = _admin,
+):
+    tutor = await User.get(tutor_id)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tutor not found")
+
+    assigned = [
+        c for c in (tutor.assigned_classes or [])
+        if not (
+            (c.get("department") or "").lower() == department.strip().lower() and
+            (c.get("batch") or "").lower() == batch.strip().lower() and
+            (c.get("section") or "").lower() == section.strip().lower()
+        )
+    ]
+    tutor.assigned_classes = assigned
+
+    if (
+        (tutor.department or "").lower() == department.strip().lower() and
+        (tutor.batch or "").lower() == batch.strip().lower() and
+        (tutor.section or "").lower() == section.strip().lower()
+    ):
+        if assigned:
+            tutor.department = assigned[0]["department"]
+            tutor.batch = assigned[0]["batch"]
+            tutor.section = assigned[0]["section"]
+        else:
+            tutor.department = None
+            tutor.batch = None
+            tutor.section = None
+
+    await tutor.save()
+    return _user_response(tutor)
+
+
+@router.post("/faculty/{faculty_id}/make-role", response_model=UserResponse)
+async def make_faculty_tutor(
+    faculty_id: PydanticObjectId,
+    body: FacultyRoleRequest,
+    _user: User = _admin,
+):
+    user = await User.get(faculty_id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Faculty user not found")
+    if user.role not in (UserRole.FACULTY, UserRole.TUTOR):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"User with role '{user.role}' cannot be assigned this role")
+
+    resolved_dept = await _resolve_department_name(body.department)
+    if not resolved_dept:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required")
+
+    if body.role == "hod":
+        existing_hod = await User.find_one({
+            "$and": [
+                {"role": UserRole.HOD.value},
+                {"$or": [{"department": resolved_dept}, {"departments": resolved_dept}]},
+                {"_id": {"$ne": user.id}},
+            ]
+        })
+        if existing_hod and not body.replace_existing_hod:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"HOD already exists for department '{resolved_dept}'",
+            )
+        if existing_hod:
+            remaining_departments = [
+                dep for dep in (existing_hod.departments or [])
+                if dep.lower() != resolved_dept.lower()
+            ]
+            if remaining_departments:
+                existing_hod.departments = remaining_departments
+                existing_hod.department = remaining_departments[0]
+            else:
+                existing_hod.role = UserRole.FACULTY
+                existing_hod.departments = None
+                existing_hod.department = None
+            await existing_hod.save()
+
+        user.role = UserRole.HOD
+        user.department = resolved_dept
+        user.departments = [resolved_dept]
+        user.batch = None
+        user.section = None
+        user.assigned_classes = None
+        await user.save()
+        return _user_response(user)
+
+    batch = (body.batch or "").strip()
+    section = (body.section or "").strip().upper()
+    if not batch or not section:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Batch and Section are required")
+
+    # Upgrade/update role to TUTOR
+    user.role = UserRole.TUTOR
+    user.department = resolved_dept
+    user.batch = batch
+    user.section = section
+
+    # Ensure assigned_classes contains this class
+    assigned = list(user.assigned_classes or [])
+    exists = any(
+        (c.get("department") or "").lower() == resolved_dept.lower() and
+        (c.get("batch") or "").lower() == batch.lower() and
+        (c.get("section") or "").lower() == section.lower()
+        for c in assigned
+    )
+    if not exists:
+        assigned.append({
+            "department": resolved_dept,
+            "batch": batch,
+            "section": section,
+        })
+    user.assigned_classes = assigned
+    await user.save()
+
+    # Map unassigned students if requested
+    if body.assign_unassigned_students:
+        students = await User.find({
+            "role": UserRole.STUDENT,
+            "department": resolved_dept,
+            "batch": batch,
+            "section": section,
+        }).to_list()
+        now = datetime.utcnow()
+        for st in students:
+            st_email = (st.email or "").strip().lower()
+            if not st_email:
+                continue
+            sc = await StudentCredit.find_one(StudentCredit.student_email == st_email)
+            if not sc:
+                await StudentCredit(
+                    student_email=st_email,
+                    tutor_email=user.email,
+                    registration_number=st.registration_number or "",
+                    student_name=st.name,
+                    department=resolved_dept,
+                    batch=batch,
+                    section=section,
+                    total_credits=0,
+                    credit_history=[],
+                    last_updated=now,
+                ).insert()
+            elif not sc.tutor_email:
+                await sc.set({
+                    "tutor_email": user.email,
+                    "department": resolved_dept,
+                    "batch": batch,
+                    "section": section,
+                    "last_updated": now,
+                })
+
+    return _user_response(user)
 
 
 @router.get("/users", response_model=List[UserResponse])
@@ -1066,7 +1663,12 @@ async def list_users(
 ):
     filters = []
     if role:
-        filters.append({"role": role})
+        # Tutors and HODs inherit faculty permissions, so include them in the
+        # Faculty management view while preserving their primary role.
+        if role == UserRole.FACULTY.value:
+            filters.append({"role": {"$in": [UserRole.FACULTY.value, UserRole.TUTOR.value, UserRole.HOD.value]}})
+        else:
+            filters.append({"role": role})
     if club_id:
         filters.append({"club_id": PydanticObjectId(club_id)})
     if department:
@@ -1089,7 +1691,95 @@ async def list_users(
     query = {"$and": filters} if len(filters) > 1 else (filters[0] if filters else {})
 
     users = await User.find(query).to_list()
-    return [_user_response(u) for u in users]
+    responses = [_user_response(u) for u in users]
+
+    has_students = any(u.role == UserRole.STUDENT for u in users)
+    if has_students:
+        tutors = await User.find(User.role == UserRole.TUTOR).to_list()
+        tutor_by_email = {(t.email or "").strip().lower(): t for t in tutors if t.email}
+        tutor_by_class = {}
+        for t in tutors:
+            for c in _tutor_classes(t):
+                key = (
+                    (c.get("department") or "").strip().lower(),
+                    (c.get("batch") or "").strip().lower(),
+                    (c.get("section") or "").strip().lower(),
+                )
+                if key not in tutor_by_class:
+                    tutor_by_class[key] = t
+
+        student_emails = [
+            (u.email or "").strip().lower()
+            for u in users
+            if u.role == UserRole.STUDENT and u.email
+        ]
+        credits = (
+            await StudentCredit.find({"student_email": {"$in": student_emails}}).to_list()
+            if student_emails
+            else []
+        )
+        credit_by_email = {
+            (c.student_email or "").strip().lower(): c
+            for c in credits
+            if c.student_email
+        }
+
+        user_by_id = {str(u.id): u for u in users}
+        for resp in responses:
+            if resp.role != "student":
+                continue
+            u = user_by_id.get(resp.id)
+            if not u:
+                continue
+            sc = credit_by_email.get((u.email or "").strip().lower())
+            tutor = None
+            if sc and sc.tutor_email:
+                tutor = tutor_by_email.get(sc.tutor_email.strip().lower())
+            if not tutor and u.department and u.batch and u.section:
+                key = (
+                    u.department.strip().lower(),
+                    u.batch.strip().lower(),
+                    u.section.strip().lower(),
+                )
+                tutor = tutor_by_class.get(key)
+
+            if tutor:
+                resp.tutor_id = str(tutor.id)
+                resp.tutor_name = tutor.name
+                resp.tutor_email = tutor.email
+                resp.tutor_username = tutor.username
+            elif sc and sc.tutor_email:
+                resp.tutor_email = sc.tutor_email
+                resp.tutor_name = sc.tutor_email
+
+    return responses
+
+
+@router.get("/users/{user_id}/club-memberships")
+async def get_student_club_memberships(
+    user_id: PydanticObjectId,
+    _user: User = _admin,
+):
+    """Return all club memberships (any status) for a given student user."""
+    student = await User.get(user_id)
+    if not student or student.role != UserRole.STUDENT:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found")
+
+    memberships = await StudentClubMembership.find(
+        StudentClubMembership.student_id == student.id
+    ).sort("-applied_at").to_list()
+
+    return [
+        {
+            "id": str(m.id),
+            "club_id": str(m.club_id),
+            "club_name": m.club_name or "",
+            "status": m.status.value,
+            "applied_at": m.applied_at,
+            "updated_at": m.updated_at,
+        }
+        for m in memberships
+    ]
 
 
 @router.get("/student-certificates/search")
@@ -1265,6 +1955,22 @@ async def update_user(
 
     updates = body.model_dump(exclude_none=True)
 
+    if target.role == UserRole.HOD and "departments" in updates:
+        requested_departments = [str(department).strip() for department in updates["departments"] if str(department).strip()]
+        if not requested_departments:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "An HOD must be assigned to at least one department")
+
+        resolved_departments = []
+        for department in requested_departments:
+            resolved_department = await _resolve_department_name(department)
+            if not resolved_department:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Department '{department}' was not found")
+            if resolved_department not in resolved_departments:
+                resolved_departments.append(resolved_department)
+
+        updates["departments"] = resolved_departments
+        updates["department"] = resolved_departments[0]
+
     # Username uniqueness check
     if "username" in updates and updates["username"] != target.username:
         if await User.find_one(User.username == updates["username"]):
@@ -1302,6 +2008,8 @@ async def reset_user_password(user_id: PydanticObjectId, _user: User = _admin):
 
     tmp_pw = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
     target.password_hash = hash_password(tmp_pw)
+    if target.role in {UserRole.TUTOR, UserRole.HOD, UserRole.PRINCIPAL}:
+        target.first_login_completed = False
     await target.save()
 
     return {"message": "Password reset successfully", "temp_password": tmp_pw}

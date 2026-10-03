@@ -41,23 +41,44 @@ async def get_current_user(
 # ── Role gate ────────────────────────────────────────────────────────────
 
 def require_role(*roles: UserRole):
-    """Dependency factory: 403 if authenticated user's role is not in *roles*."""
+    """Dependency factory: 403 if authenticated user's role is not in *roles*.
+    Tutors and HODs are faculty by default, so both satisfy UserRole.FACULTY.
+    """
     async def _checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in roles:
+        effective_roles = {current_user.role}
+        if current_user.role in {UserRole.TUTOR, UserRole.HOD}:
+            effective_roles.add(UserRole.FACULTY)
+        if not any(r in roles for r in effective_roles):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
         return current_user
     return _checker
 
 
-# ── Guest-only gate ──────────────────────────────────────────────────────
+# ── Certificate Generator Gate (Guest, Faculty, Tutor, HOD, SuperAdmin) ──────
+
+CERT_GENERATOR_ROLES = {
+    UserRole.GUEST,
+    UserRole.FACULTY,
+    UserRole.TUTOR,
+    UserRole.HOD,
+    UserRole.SUPER_ADMIN,
+}
+
+
+async def require_cert_generator(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allow access to active certificate-generator users."""
+    if current_user.role not in CERT_GENERATOR_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Certificate generation access denied")
+    return current_user
+
 
 async def require_guest(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """Allow access only to active guest users."""
-    if current_user.role != UserRole.GUEST:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Guest access only")
-    return current_user
+    """Allow access to active cert generator users (guest, faculty, tutor, super_admin)."""
+    return await require_cert_generator(current_user=current_user)
 
 
 # ── Club access gate ─────────────────────────────────────────────────────

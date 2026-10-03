@@ -12,9 +12,11 @@ class UserRole(str, Enum):
     HOD = "hod"
     CLUB_COORDINATOR = "club_coordinator"
     DEPT_COORDINATOR = "dept_coordinator"
+    STUDENT_AFFAIRS = "student_affairs"
     TUTOR = "tutor"
     STUDENT = "student"
     GUEST = "guest"
+    FACULTY = "faculty"
 
 
 class User(Document):
@@ -38,6 +40,9 @@ class User(Document):
     registration_number: Optional[str] = None          # student only (unique)
     batch: Optional[str] = None                        # student only  e.g. "2022-2026"
     section: Optional[str] = None                      # student only
+    assigned_classes: Optional[List[dict]] = None      # tutor assigned classes: [{department, batch, section}]
+    student_reg_no_change_count: int = 0               # student self-update count (max 1)
+    tutor_reg_no_change_count: int = 0                 # tutor edit count for student (max 2)
 
     otp_code: Optional[str] = None
     otp_expires_at: Optional[datetime] = None

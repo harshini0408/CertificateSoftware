@@ -11,6 +11,11 @@ export const creditKeys = {
   manualSubmissions: ()   => ['credits', 'manual-submissions'],
 }
 
+export const clubMembershipKeys = {
+  myMemberships: () => ['clubs', 'me', 'memberships'],
+  availableClubs: () => ['clubs', 'available'],
+}
+
 // ── Credit weights (mirrors backend config) ───────────────────────────────────
 export const CREDIT_WEIGHTS = {
   participant: 1,
@@ -126,3 +131,207 @@ export function useCreateManualCreditSubmission() {
     },
   })
 }
+
+/**
+ * GET /clubs — list available clubs (for student to apply to)
+ */
+export function useAvailableClubs() {
+  return useQuery({
+    queryKey: clubMembershipKeys.availableClubs(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/clubs')
+      return data
+    },
+  })
+}
+
+/**
+ * GET /students/me/clubs — list my club memberships
+ */
+export function useMyClubMemberships() {
+  return useQuery({
+    queryKey: clubMembershipKeys.myMemberships(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/students/me/clubs')
+      return data
+    },
+  })
+}
+
+/**
+ * POST /students/me/clubs/apply — apply to a club
+ */
+export function useApplyForClub() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (club_id) => {
+      const { data } = await axiosInstance.post('/students/me/clubs/apply', { club_id })
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: clubMembershipKeys.myMemberships() })
+      addToast({ type: 'success', message: 'Application submitted! Awaiting coordinator approval.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to apply for club.',
+      })
+    },
+  })
+}
+
+/**
+ * GET /student/upcoming-events — published club events for this week
+ */
+export function useStudentUpcomingEvents() {
+  return useQuery({
+    queryKey: ['student', 'upcoming-events'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/student/upcoming-events')
+      return data
+    },
+  })
+}
+
+/**
+ * POST /student/events/:eventId/register
+ */
+export function useRegisterForEvent() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ eventId, type = 'participant' }) => {
+      const { data } = await axiosInstance.post(`/student/events/${eventId}/register?type=${type}`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({ type: 'success', message: data?.message || 'Registered for event successfully!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to register for event.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+/**
+ * POST /student/events/:eventId/cancel-registration
+ */
+export function useCancelEventRegistration() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (eventId) => {
+      const { data } = await axiosInstance.post(`/student/events/${eventId}/cancel-registration`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({ type: 'success', message: data?.message || 'Event registration cancelled.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to cancel registration.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+/**
+ * POST /student/events/:eventId/validate-qr
+ * Validates a QR scan within 20 seconds.
+ * Returns { valid, event_id, token } — token used for the unique attendance URL.
+ */
+export function useValidateAttendanceQR() {
+  return useMutation({
+    mutationFn: async ({ eventId, qr_payload }) => {
+      const { data } = await axiosInstance.post(
+        `/student/events/${eventId}/validate-qr`,
+        { qr_payload },
+      )
+      return data // { valid, event_id, token }
+    },
+    // Error handling done in the component for richer inline UX
+  })
+}
+
+/**
+ * GET /student/events/:eventId/attendance/:token
+ * Fetches event + session info after a successful QR scan.
+ * No time limit — used on the unique attendance page.
+ */
+export function useAttendanceSession(eventId, token) {
+  return useQuery({
+    queryKey: ['student', 'attendance-session', eventId, token],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(
+        `/student/events/${eventId}/attendance/${token}`,
+      )
+      return data // { event_name, club_name, event_date, venue, student_name, student_email }
+    },
+    enabled: !!eventId && !!token,
+    retry: false,
+  })
+}
+
+/**
+ * POST /student/events/:eventId/attendance/:token/submit
+ * Final attendance + feedback submission.  No time limit.
+ */
+export function useSubmitAttendance() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ eventId, token, feedback }) => {
+      const { data } = await axiosInstance.post(
+        `/student/events/${eventId}/attendance/${token}/submit`,
+        { feedback: feedback || null },
+      )
+      return data // { success, message, event_name, marked_at }
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({ type: 'success', message: data?.message || 'Attendance marked!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to submit attendance.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+/**
+ * POST /students/me/update-registration-number
+ * Update temporary register number to 12-digit number (1 time only).
+ */
+export function useUpdateStudentRegNo() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (registration_number) => {
+      const { data } = await axiosInstance.post('/students/me/update-registration-number', {
+        registration_number,
+      })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'me', 'profile'] })
+      qc.invalidateQueries({ queryKey: creditKeys.mine() })
+      addToast({ type: 'success', message: data?.message || 'Registration number updated successfully!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to update registration number.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// Legacy alias kept for any internal usage during refactor — can be removed after testing
+export { useSubmitAttendance as useMarkAttendance }

@@ -37,6 +37,7 @@ from ...config import get_settings
 from ...core.dependencies import require_guest
 from ...models.dept_certificate import DeptCertificate
 from ...models.field_position import FieldPosition
+from ...models.credit_rule import CreditRule
 from ...models.guest_session import GuestSession
 from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.user import User, UserRole
@@ -148,6 +149,67 @@ def _detect_email_column(rows: list[dict[str, Any]] | None, headers: list[str] |
     return None
 
 
+def _normalize_guest_email(value: Any) -> str:
+    s = str(value or "").strip()
+    if not s or s.lower() in ("none", "null", "-", "n/a", "na"):
+        return ""
+    return s.lower()
+
+
+def _pick_row_value(row: dict[str, Any], keys: tuple[str, ...]) -> str:
+    if not row:
+        return ""
+    for k in keys:
+        if k in row and row[k] is not None and str(row[k]).strip():
+            return str(row[k]).strip()
+    row_lower = {str(k).strip().lower(): str(v).strip() for k, v in row.items() if v is not None}
+    for k in keys:
+        val = row_lower.get(k.lower())
+        if val:
+            return val
+    return ""
+
+
+async def _award_guest_credits(
+    cert_number: str,
+    student_email: str,
+    student_name: str,
+    points: int,
+    event_name: str,
+) -> None:
+    email = student_email.strip().lower()
+    if not email or points <= 0:
+        return
+
+    credit_doc = await StudentCredit.find_one(StudentCredit.student_email == email)
+    semester = await get_current_semester() or "Unknown"
+    entry = CreditHistoryEntry(
+        cert_number=cert_number,
+        event_name=event_name,
+        club_name="Guest Event",
+        cert_type="Guest Certificate",
+        points_awarded=points,
+        semester=semester,
+        awarded_at=datetime.utcnow(),
+    )
+
+    if credit_doc:
+        if any(h.cert_number == cert_number for h in credit_doc.credit_history):
+            return
+        credit_doc.total_credits += points
+        credit_doc.credit_history.append(entry)
+        credit_doc.last_updated = datetime.utcnow()
+        await credit_doc.save()
+    else:
+        await StudentCredit(
+            student_email=email,
+            student_name=student_name,
+            total_credits=points,
+            credit_history=[entry],
+            last_updated=datetime.utcnow(),
+        ).insert()
+
+
 def _safe_session_cert_path(session: GuestSession, cert_path_str: str) -> Path:
     cert_path = Path(cert_path_str)
     base_dir = _guest_certs_dir(str(session.id)).resolve()
@@ -191,6 +253,20 @@ async def start_guest_session(
     in history until they expire (15 days).
     """
     now = datetime.utcnow()
+
+    # Clean up previous draft sessions where no certificates were generated
+    old_drafts = await GuestSession.find(
+        GuestSession.user_id == current_user.id
+    ).to_list()
+    for draft in old_drafts:
+        if not draft.guest_generated_certs:
+            if draft.guest_template_path:
+                try:
+                    Path(draft.guest_template_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            await draft.delete()
+
     session = GuestSession(
         user_id=current_user.id,
         event_name=body.event_name,
@@ -1037,6 +1113,8 @@ async def get_guest_history(
     result = []
     for s in sessions:
         cert_count = len(s.guest_generated_certs) if s.guest_generated_certs else 0
+        if cert_count == 0:
+            continue
         has_downloadable = (
             cert_count > 0
             and any(Path(p).exists() for p in (s.guest_generated_certs or []))
@@ -1207,3 +1285,91 @@ def _build_zip_response(session: GuestSession) -> StreamingResponse:
             "Content-Disposition": f'attachment; filename="{safe_name}_certificates.zip"'
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRESET CREDIT RULES — Available for certificate generation
+# GET /guest/credit-rules
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/credit-rules")
+async def get_guest_credit_rules(
+    current_user: User = Depends(require_guest),
+):
+    """Return all preset credit rules available for credit point allocation."""
+    rules = await CreditRule.find_all().to_list()
+    rules.sort(key=lambda r: r.cert_type.lower())
+    return [
+        {"id": str(r.id), "cert_type": r.cert_type, "points": int(r.points or 0)}
+        for r in rules
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EDIT / DELETE SESSION — Update event name or delete session
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EditSessionRequest(BaseModel):
+    event_name: str
+
+    @field_validator("event_name")
+    @classmethod
+    def validate_event_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Event name must be at least 3 characters")
+        if len(v) > 100:
+            raise ValueError("Event name must be at most 100 characters")
+        return v
+
+
+@router.patch("/sessions/{session_id}")
+async def update_guest_session(
+    session_id: PydanticObjectId,
+    body: EditSessionRequest,
+    current_user: User = Depends(require_guest),
+):
+    """Update event name for a historical guest session."""
+    session = await GuestSession.get(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status.HTTP_410_GONE, "Session has expired")
+
+    await session.set({"event_name": body.event_name})
+    return {
+        "message": "Event updated successfully",
+        "session_id": str(session.id),
+        "event_name": session.event_name,
+    }
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_guest_session(
+    session_id: PydanticObjectId,
+    current_user: User = Depends(require_guest),
+):
+    """Delete a session and its associated files."""
+    session = await GuestSession.get(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+
+    if session.guest_template_path:
+        try:
+            Path(session.guest_template_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    if session.guest_generated_certs:
+        for p in session.guest_generated_certs:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    await session.delete()
+    return {"message": "Event session deleted successfully", "session_id": str(session_id)}

@@ -13,11 +13,15 @@ from ..core.dependencies import require_club_access, require_event_access
 from ..models.user import User
 from ..models.club import Club
 from ..models.event import Event, EventStatus, EventAssets
+from ..models.event_registration import EventRegistration
 from ..models.template import Template
 from ..models.certificate import Certificate, CertStatus
-from ..models.participant import Participant
+from ..models.participant import Participant, ParticipantSource
 from ..models.field_position import FieldPosition
-from ..schemas.event import EventCreate, EventUpdate, EventResponse
+from ..schemas.event import (
+    EventCreate, EventUpdate, EventResponse,
+    VolunteerStatusUpdate, VolunteerCountUpdate, VolunteerRequestResponse,
+)
 from ..services.signature_service import process_signature, save_logo
 from ..services.storage_service import storage_path_to_url, storage_url_to_path
 from ..services.excel_service import generate_excel_template, get_active_role_names
@@ -76,17 +80,30 @@ async def _get_latest_event_with_assets(club_id: PydanticObjectId) -> Optional[E
     return None
 
 
-def _event_response(e: Event, cert_count: int = 0) -> EventResponse:
+def _event_response(e: Event, cert_count: int = 0, volunteers_registered: int = 0) -> EventResponse:
     return EventResponse(
         id=str(e.id), club_id=str(e.club_id), name=e.name,
         description=e.description, event_date=e.event_date,
+        event_time=e.event_time, venue=e.venue, category=e.category,
         academic_year=e.academic_year,
+        academic_years=getattr(e, "academic_years", []) or ([] if not e.academic_year else [e.academic_year]),
         status=e.status.value, template_map={k: str(v) if v else None for k, v in e.template_map.items()},
         assets=e.assets.model_dump(),
         mapping_confirmed=e.mapping_confirmed,
         participant_count=e.participant_count,
+        volunteers_required=getattr(e, "volunteers_required", 0) or 0,
+        volunteers_registered=volunteers_registered,
         cert_count=cert_count,
+        qr_generations_count=getattr(e, "qr_generations_count", 0) or 0,
+        registration_stopped=getattr(e, "registration_stopped", False) or False,
         created_at=e.created_at,
+        is_published=e.is_published,
+        poster_url=e.poster_url,
+        report_url=e.report_url,
+        report_filename=e.report_filename,
+        report_status=e.report_status or "not_submitted",
+        report_rejection_reason=e.report_rejection_reason,
+        report_uploaded_at=e.report_uploaded_at,
     )
 
 
@@ -98,6 +115,14 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
     certs_by_event: dict[str, list[Certificate]] = {}
     for cert in certs:
         certs_by_event.setdefault(str(cert.event_id), []).append(cert)
+
+    vol_regs = await EventRegistration.find(
+        {"event_id": {"$in": event_ids}, "registration_type": "volunteer", "$or": [{"status": "accepted"}, {"status": "pending"}]}
+    ).to_list() if event_ids else []
+    vol_count_by_event: dict[str, int] = {}
+    for vr in vol_regs:
+        vid = str(vr.event_id)
+        vol_count_by_event[vid] = vol_count_by_event.get(vid, 0) + 1
 
     responses = []
     issued_candidates = set(_issued_status_candidates())
@@ -115,7 +140,8 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
                 in issued_candidates
             )
         )
-        responses.append(_event_response(e, cert_count=cert_count))
+        vol_reg = vol_count_by_event.get(str(e.id), 0)
+        responses.append(_event_response(e, cert_count=cert_count, volunteers_registered=vol_reg))
     return responses
 
 
@@ -144,9 +170,19 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
             inherited_assets = latest_with_assets.assets
             await club.set({"assets": inherited_assets.model_dump()})
 
-    event = Event(club_id=club_id, name=body.name,
-                  event_date=body.event_date, academic_year=body.academic_year,
-                  template_map=tmap, assets=inherited_assets)
+    acad_years = body.academic_years or ([] if not body.academic_year else [body.academic_year])
+    acad_year_str = ", ".join(acad_years) if acad_years else body.academic_year
+
+    event = Event(
+        club_id=club_id, name=body.name,
+        description=body.description,
+        event_date=body.event_date, event_time=body.event_time,
+        venue=body.venue, category=body.category,
+        academic_year=acad_year_str,
+        academic_years=acad_years,
+        template_map=tmap, assets=inherited_assets,
+        is_published=body.is_published,
+    )
     await event.insert()
     return _event_response(event)
 
@@ -232,7 +268,12 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         event = await Event.get(event_id)
 
     cert_count = await _count_event_certificates(event.id)
-    return _event_response(event, cert_count=cert_count)
+    vol_reg = await EventRegistration.find(
+        EventRegistration.event_id == event.id,
+        EventRegistration.registration_type == "volunteer",
+        {"$or": [{"status": "accepted"}, {"status": "pending"}]},
+    ).count()
+    return _event_response(event, cert_count=cert_count, volunteers_registered=vol_reg)
 
 
 @router.put("/{event_id}", response_model=EventResponse)
@@ -249,7 +290,13 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
     if updates:
         await event.set(updates)
         event = await Event.get(event_id)
-    return _event_response(event)
+    cert_count = await _count_event_certificates(event.id)
+    vol_reg = await EventRegistration.find(
+        EventRegistration.event_id == event.id,
+        EventRegistration.registration_type == "volunteer",
+        {"$or": [{"status": "accepted"}, {"status": "pending"}]},
+    ).count()
+    return _event_response(event, cert_count=cert_count, volunteers_registered=vol_reg)
 
 
 @router.delete("/{event_id}")
@@ -329,3 +376,252 @@ async def download_excel_template(club_id: PydanticObjectId, event_id: PydanticO
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=certificate_template.xlsx"},
     )
+
+
+# ═══ EVENT POSTER UPLOAD ════════════════════════════════════════════════
+
+@router.post("/{event_id}/poster")
+async def upload_poster(club_id: PydanticObjectId, event_id: PydanticObjectId,
+                        poster: UploadFile = File(...),
+                        _user: User = Depends(require_event_access)):
+    event = await Event.get(event_id)
+    if not event or event.club_id != club_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    club = await Club.get(club_id)
+    club_slug = club.slug if club else "unknown"
+
+    poster_bytes = await poster.read()
+    poster_dir = settings.storage_root / "posters" / club_slug
+    poster_dir.mkdir(parents=True, exist_ok=True)
+    poster_filename = f"{event_id}_{poster.filename}"
+    poster_path = poster_dir / poster_filename
+    poster_path.write_bytes(poster_bytes)
+
+    poster_url = storage_path_to_url(str(poster_path))
+    await event.set({"poster_path": str(poster_path), "poster_url": poster_url})
+
+    return {"message": "Poster uploaded", "poster_url": poster_url}
+
+
+# ═══ EVENT REPORT UPLOAD (CLUB EVENTS ONLY) ════════════════════════════
+
+@router.post("/{event_id}/report")
+async def upload_report(club_id: PydanticObjectId, event_id: PydanticObjectId,
+                        report: UploadFile = File(...),
+                        _user: User = Depends(require_event_access)):
+    """Upload or re-upload an event report. Allowed when status is not_submitted or rejected."""
+    event = await Event.get(event_id)
+    if not event or event.club_id != club_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    if event.report_status not in (None, "not_submitted", "rejected"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Report is already under review or has been accepted",
+        )
+
+    club = await Club.get(club_id)
+    club_slug = club.slug if club else "unknown"
+
+    report_bytes = await report.read()
+    report_dir = settings.storage_root / "reports" / club_slug
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_filename = f"{event_id}_{report.filename}"
+    report_path = report_dir / report_filename
+    report_path.write_bytes(report_bytes)
+
+    from datetime import datetime as _dt
+    report_url = storage_path_to_url(str(report_path))
+    await event.set({
+        "report_path": str(report_path),
+        "report_url": report_url,
+        "report_filename": report.filename,
+        "report_uploaded_at": _dt.utcnow(),
+        "report_status": "pending_review",
+        "report_rejection_reason": None,
+    })
+
+    return {"message": "Report uploaded", "report_url": report_url, "report_status": "pending_review"}
+ 
+
+# ═══ VOLUNTEER MANAGEMENT ═════════════════════════════════════════════════════
+
+@router.get("/{event_id}/volunteers", response_model=List[VolunteerRequestResponse])
+async def list_volunteer_requests(
+    club_id: PydanticObjectId,
+    event_id: PydanticObjectId,
+    _user: User = Depends(require_event_access),
+):
+    """List all volunteer requests for this event."""
+    event = await Event.get(event_id)
+    if not event or event.club_id != club_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    participants = await Participant.find(
+        Participant.event_id == event_id,
+        Participant.cert_type == "volunteer",
+    ).to_list()
+
+    registrations = await EventRegistration.find(
+        EventRegistration.event_id == event_id,
+        EventRegistration.registration_type == "volunteer",
+    ).to_list()
+    reg_map = {r.student_email.lower(): r for r in registrations}
+
+    results = []
+    seen_emails = set()
+
+    for p in participants:
+        email = p.email.lower()
+        seen_emails.add(email)
+        reg = reg_map.get(email)
+        status_val = getattr(p, "status", None)
+        if not status_val:
+            status_val = "accepted" if p.verified else (getattr(reg, "status", "pending") if reg else "pending")
+
+        results.append(VolunteerRequestResponse(
+            id=str(p.id),
+            participant_id=str(p.id),
+            registration_id=str(reg.id) if reg else None,
+            student_name=p.fields.get("Name") or (reg.student_name if reg else "") or email,
+            student_email=p.email,
+            registration_number=p.registration_number or (reg.registration_number if reg else None),
+            department=p.fields.get("Department") or (reg.department if reg else None),
+            status=status_val,
+            verified=p.verified,
+            registered_at=p.registered_at,
+        ))
+
+    for email, reg in reg_map.items():
+        if email not in seen_emails:
+            results.append(VolunteerRequestResponse(
+                id=str(reg.id),
+                participant_id=None,
+                registration_id=str(reg.id),
+                student_name=reg.student_name or email,
+                student_email=reg.student_email,
+                registration_number=reg.registration_number,
+                department=reg.department,
+                status=getattr(reg, "status", "pending"),
+                verified=(getattr(reg, "status", "pending") == "accepted"),
+                registered_at=reg.registered_at,
+            ))
+
+    results.sort(key=lambda r: r.registered_at, reverse=True)
+    return results
+
+
+@router.patch("/{event_id}/volunteers/{item_id}/status")
+async def update_volunteer_status(
+    club_id: PydanticObjectId,
+    event_id: PydanticObjectId,
+    item_id: str,
+    body: VolunteerStatusUpdate,
+    _user: User = Depends(require_event_access),
+):
+    """Accept or reject a volunteer request."""
+    event = await Event.get(event_id)
+    if not event or event.club_id != club_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    target_status = body.status
+    is_verified = (target_status == "accepted")
+
+    p = None
+    try:
+        p = await Participant.get(PydanticObjectId(item_id))
+    except Exception:
+        pass
+
+    reg = None
+    try:
+        reg = await EventRegistration.get(PydanticObjectId(item_id))
+    except Exception:
+        pass
+
+    if not p and not reg:
+        p = await Participant.find_one(
+            Participant.event_id == event_id,
+            {"$or": [{"_id": item_id}, {"id": item_id}]}
+        )
+        if not p:
+            reg = await EventRegistration.find_one(
+                EventRegistration.event_id == event_id,
+                {"$or": [{"_id": item_id}, {"id": item_id}]}
+            )
+
+    email = None
+    if p:
+        email = p.email.lower()
+        await p.set({
+            "verified": is_verified,
+            "status": target_status,
+        })
+    if reg:
+        email = email or reg.student_email.lower()
+        await reg.set({
+            "status": target_status,
+        })
+
+    if email and not reg:
+        matching_reg = await EventRegistration.find_one(
+            EventRegistration.event_id == event_id,
+            EventRegistration.student_email == email,
+        )
+        if matching_reg:
+            await matching_reg.set({"status": target_status})
+
+    if email and not p:
+        matching_p = await Participant.find_one(
+            Participant.event_id == event_id,
+            Participant.email == email,
+        )
+        if matching_p:
+            await matching_p.set({
+                "verified": is_verified,
+                "status": target_status,
+            })
+        elif is_verified and reg:
+            new_p = Participant(
+                event_id=event_id,
+                club_id=club_id,
+                email=email,
+                registration_number=reg.registration_number,
+                cert_type="volunteer",
+                fields={
+                    "Name": reg.student_name or "",
+                    "Email": email,
+                    "Registration Number": reg.registration_number or "",
+                    "Department": reg.department or "",
+                },
+                source=ParticipantSource.REGISTRATION,
+                verified=True,
+                status="accepted",
+            )
+            await new_p.insert()
+
+    return {"message": f"Volunteer request marked as {target_status}"}
+
+
+@router.patch("/{event_id}/volunteers-count", response_model=EventResponse)
+async def update_volunteers_count(
+    club_id: PydanticObjectId,
+    event_id: PydanticObjectId,
+    body: VolunteerCountUpdate,
+    _user: User = Depends(require_event_access),
+):
+    """Update required volunteers count for an event."""
+    event = await Event.get(event_id)
+    if not event or event.club_id != club_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    await event.set({"volunteers_required": body.volunteers_required})
+    event = await Event.get(event_id)
+    cert_count = await _count_event_certificates(event.id)
+    vol_reg = await EventRegistration.find(
+        EventRegistration.event_id == event.id,
+        EventRegistration.registration_type == "volunteer",
+        {"$or": [{"status": "accepted"}, {"status": "pending"}]},
+    ).count()
+    return _event_response(event, cert_count=cert_count, volunteers_registered=vol_reg)

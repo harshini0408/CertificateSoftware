@@ -131,3 +131,26 @@ export async function downloadTutorAllAssignedCertificates() {
   const { data } = await axiosInstance.get('/tutor/certificates/download-all', { responseType: 'blob' })
   return data
 }
+
+export function useTutorUpdateStudentRegNo() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ studentEmail, registration_number }) => {
+      const { data } = await axiosInstance.post(
+        `/tutor/students/${encodeURIComponent(studentEmail)}/update-registration-number`,
+        { registration_number },
+      )
+      return data
+    },
+    onSuccess: (data, variables) => {
+      qc.invalidateQueries({ queryKey: ['tutor', 'students'] })
+      qc.invalidateQueries({ queryKey: ['tutor', 'students', variables.studentEmail] })
+      addToast({ type: 'success', message: data?.message || 'Student registration number updated successfully!' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to update registration number.' })
+    },
+  })
+}

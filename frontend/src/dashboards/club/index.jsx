@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import QRCode from 'qrcode'
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
 import StatCard from '../../components/StatCard'
@@ -11,25 +12,54 @@ import StatusBadge from '../../components/StatusBadge'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import ConfirmModal from '../../components/ConfirmModal'
 import FileUpload from '../../components/FileUpload'
-import { useClubDashboard, useClubAssets, useUpdateClubAssets } from './api'
+import {
+  useClubDashboard,
+  useClubAssets,
+  useUpdateClubAssets,
+  useMembershipRequests,
+  useUpdateMembershipStatus,
+  useClubOfficeBearers,
+  useAllocateOfficeBearer,
+  useRemoveOfficeBearer,
+  useAddOfficeBearerPosition,
+  useDeleteOfficeBearerPosition,
+  useClubActiveMembers,
+} from './api'
 import { useCreateEvent, useDeleteEvent, useEvents } from './eventsApi'
+import { useGenerateAttendanceQR } from './attendanceApi'
 import { useAuthStore } from '../../store/authStore'
+import { useToastStore } from '../../store/uiStore'
 import { useChangePassword } from '../auth/api'
 import axiosInstance from '../../utils/axiosInstance'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 
 // ── Tab ids ───────────────────────────────────────────────────────────────────
-const TABS = ['events', 'settings']
+const TABS = ['events', 'active_members', 'members', 'office_bearers', 'settings']
 
 const TAB_LABELS = {
   events: 'Club Dashboard',
+  active_members: 'Active Members',
+  members: 'Membership Requests',
+  office_bearers: 'Office Bearers',
   settings: 'Settings',
 }
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+function isEventDay(iso) {
+  if (!iso) return false
+  const options = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }
+  const formatter = new Intl.DateTimeFormat('en-CA', options) // returns YYYY-MM-DD
+  const todayStr = formatter.format(new Date())
+  const eventDate = new Date(iso)
+  if (Number.isNaN(eventDate.getTime())) return false
+  const eventStr = formatter.format(eventDate)
+  return todayStr === eventStr
 }
 
 // ── Icon helpers ──────────────────────────────────────────────────────────────
@@ -42,99 +72,154 @@ const Icon = {
 // Dashboard tab
 // ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab({ clubId, dashboard, isLoading }) {
-  const { data: events, isLoading: eventsLoading } = useEvents(clubId)
-  if (isLoading || eventsLoading) return <LoadingSpinner fullPage label="Loading dashboard…" />
-
-  const club = dashboard?.club || {}
-  const eventRows = Array.isArray(events) ? events : []
-  const totalEvents = eventRows.length
-  const totalCertificatesIssued = eventRows.reduce((sum, event) => sum + Number(event?.cert_count ?? 0), 0)
-  const recentEvents = [...eventRows].sort((a, b) => {
-    const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0
-    const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0
-    return bTime - aTime
-  })
-
-  const eventColumns = [
-    { key: 'name', header: 'Event', sortable: true },
-    { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
-    { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
-    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
-    { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
-  ]
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-bold text-foreground">{club.name || 'Club Dashboard'}</h1>
-        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold text-navy">{club.slug}</span>
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
-        <StatCard label="Total Events" value={totalEvents} icon={Icon.events} accent="navy" />
-        <StatCard label="Certificates Issued" value={totalCertificatesIssued} icon={Icon.certs} accent="green" />
-      </div>
-
-      {/* Recent events */}
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="section-title">Recent Events</h2>
-        </div>
-        <DataTable
-          columns={eventColumns}
-          data={recentEvents}
-          isLoading={false}
-          emptyMessage="No events yet. Create your first event."
-          rowKey="id"
-        />
-      </div>
-
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Events tab
-// ═══════════════════════════════════════════════════════════════════════════════
-function EventsTab({ clubId }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+  const { data: events, isLoading: eventsLoading } = useEvents(clubId)
   const createEvent = useCreateEvent(clubId)
   const deleteEvent = useDeleteEvent(clubId)
-
+  const generateQR = useGenerateAttendanceQR(clubId, null) // eventId set per-call
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+
+  // ── QR Modal state ───────────────────────────────────────────────────────
+  const [qrModal, setQrModal] = useState(null)
+  // qrModal shape: { eventId, eventName, payload, issuedAt, expiresIn, qrDataUrl, secondsLeft, expired, generationsCount }
+  const qrTimerRef = useRef(null)
+  const qrCanvasRef = useRef(null)
+
+  const openQRModal = useCallback(async (row) => {
+    try {
+      const { data } = await axiosInstance.post(
+        `/clubs/${clubId}/events/${row.id ?? row._id}/generate-qr`
+      )
+      const dataUrl = await QRCode.toDataURL(data.payload, {
+        width: 240,
+        margin: 2,
+        color: { dark: '#1E3A5F', light: '#FFFFFF' },
+      })
+      setQrModal({
+        eventId: row.id ?? row._id,
+        eventName: row.name,
+        payload: data.payload,
+        issuedAt: data.issued_at,
+        expiresIn: data.expires_in,
+        qrDataUrl: dataUrl,
+        secondsLeft: data.expires_in,
+        generationsCount: data.qr_generations_count ?? 1,
+        expired: false,
+      })
+      // Refresh event list to update generations count live
+      qc.invalidateQueries({ queryKey: ['events', 'list', clubId] })
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Failed to generate QR.'
+      addToast({ type: 'error', message: msg })
+      console.error(msg)
+    }
+  }, [clubId, qc, addToast])
+
+  // Count-down timer
+  useEffect(() => {
+    if (!qrModal) return undefined
+    if (qrModal.expired) return undefined
+    qrTimerRef.current = setInterval(() => {
+      setQrModal((prev) => {
+        if (!prev) return null
+        const next = prev.secondsLeft - 1
+        if (next <= 0) {
+          clearInterval(qrTimerRef.current)
+          return { ...prev, secondsLeft: 0, expired: true }
+        }
+        return { ...prev, secondsLeft: next }
+      })
+    }, 1000)
+    return () => clearInterval(qrTimerRef.current)
+  }, [qrModal?.eventId, qrModal?.issuedAt]) // restart when a new QR is generated
 
   useEffect(() => {
     if (!isModalOpen) return undefined
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = prevOverflow
-    }
+    return () => { document.body.style.overflow = prevOverflow }
   }, [isModalOpen])
 
-  const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm()
+  const [selectedAcademicYears, setSelectedAcademicYears] = useState([])
+  const [acadYearError, setAcadYearError] = useState('')
+  const [selectedPosterFile, setSelectedPosterFile] = useState(null)
+  const [posterError, setPosterError] = useState('')
 
-  const { data: events, isLoading } = useQuery({
-    queryKey: ['events', clubId, 'list'],
-    queryFn: async () => {
-      const { data } = await axiosInstance.get(`/clubs/${clubId}/events`)
-      return data
+  const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm({
+    defaultValues: {
+      session_type: 'Morning (FN)',
+      timing: '',
     },
-    enabled: !!clubId,
   })
 
-  const onSubmit = (data) => {
-    createEvent.mutate(data, {
-      onSuccess: (res) => {
+  const handleAcadYearToggle = (year) => {
+    setSelectedAcademicYears((prev) => {
+      const next = prev.includes(year) ? prev.filter((y) => y !== year) : [...prev, year]
+      if (next.length > 0) setAcadYearError('')
+      return next
+    })
+  }
+
+  const handlePosterChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) {
+      setSelectedPosterFile(null)
+      setPosterError('')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setPosterError('Poster size must be 2MB or less.')
+      setSelectedPosterFile(null)
+      e.target.value = ''
+      return
+    }
+    setPosterError('')
+    setSelectedPosterFile(file)
+  }
+
+  const onSubmit = async (data) => {
+    if (selectedAcademicYears.length === 0) {
+      setAcadYearError('Please select at least one academic year')
+      return
+    }
+    if (selectedPosterFile && selectedPosterFile.size > 2 * 1024 * 1024) {
+      setPosterError('Poster size must be 2MB or less.')
+      return
+    }
+
+    const payload = {
+      ...data,
+      event_time: data.timing ? `${data.session_type} | ${data.timing}` : data.session_type,
+      academic_years: selectedAcademicYears,
+      academic_year: selectedAcademicYears.join(', '),
+    }
+
+    createEvent.mutate(payload, {
+      onSuccess: async (res) => {
+        const event = res?.data ?? res
+        const eventId = event.id ?? event._id
+        if (selectedPosterFile && eventId) {
+          const formData = new FormData()
+          formData.append('poster', selectedPosterFile)
+          try {
+            await axiosInstance.post(`/clubs/${clubId}/events/${eventId}/poster`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            })
+          } catch (e) {
+            console.error('Poster upload failed', e)
+          }
+        }
         setIsModalOpen(false)
         reset()
-        const event = res?.data ?? res
-        navigate(`/club/${clubId}/events/${event.id ?? event._id}`)
-      }
+        setSelectedAcademicYears([])
+        setSelectedPosterFile(null)
+        setAcadYearError('')
+        setPosterError('')
+        navigate(`/club/${clubId}/events/${eventId}`)
+      },
     })
   }
 
@@ -144,8 +229,33 @@ function EventsTab({ clubId }) {
     })
   }
 
+  if (isLoading || eventsLoading) return <LoadingSpinner fullPage label="Loading dashboard…" />
+
+  const club = dashboard?.club || {}
+  const eventRows = Array.isArray(events) ? events : []
+  
+  const now = new Date()
+  const currentMonth = now.getMonth() // 0-indexed: 6 is July
+  const semStart = currentMonth >= 6 ? new Date(now.getFullYear(), 6, 1) : new Date(now.getFullYear(), 0, 1)
+  const semEnd = currentMonth >= 6 ? new Date(now.getFullYear(), 11, 31, 23, 59, 59) : new Date(now.getFullYear(), 5, 30, 23, 59, 59)
+
+  const completedEvents = eventRows.filter((e) => e?.status === 'completed' || (Number(e?.cert_count ?? 0) > 0 && e?.status !== 'draft'))
+  const eventsThisSemesterCount = dashboard?.stats?.events_this_semester ?? completedEvents.filter((e) => {
+    if (!e?.event_date) return false
+    const d = new Date(e.event_date)
+    return d >= semStart && d <= semEnd
+  }).length
+  const cumulativeEventsCount = dashboard?.stats?.cumulative_events ?? completedEvents.length
+  const totalCertificatesIssued = dashboard?.stats?.total_certificates_issued ?? eventRows.reduce((sum, event) => sum + Number(event?.cert_count ?? 0), 0)
+
+  const recentEvents = [...eventRows].sort((a, b) => {
+    const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0
+    const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0
+    return bTime - aTime
+  })
+
   const eventColumns = [
-    { key: 'name', header: 'Event Name', sortable: true, searchKey: true,
+    { key: 'name', header: 'Event', sortable: true, searchKey: true,
       render: (v, row) => (
         <button
           className="text-sm font-semibold text-navy hover:underline text-left"
@@ -153,26 +263,69 @@ function EventsTab({ clubId }) {
         >
           {v}
         </button>
-      ) },
+      )
+    },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
     { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
     { key: '_actions', header: 'Actions', align: 'center', searchKey: false, render: (_, row) => (
-        <div className="flex justify-center gap-2">
-          <button onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)} className="text-navy hover:bg-gray-100 p-1.5 rounded" title="Edit">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-          </button>
-          <button onClick={() => setDeleteTarget(row)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Delete">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-          </button>
-        </div>
-      ) }
+      <div className="flex justify-center gap-2">
+        <button onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)} className="text-navy hover:bg-gray-100 p-1.5 rounded" title="Open">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+        </button>
+        {/* Generate QR — only for active events */}
+        {(row.status === 'active') && (() => {
+          const isToday = isEventDay(row.event_date)
+          const genCount = row.qr_generations_count ?? 0
+          const genLeft = Math.max(0, 3 - genCount)
+          const isDisabled = !isToday || genLeft <= 0
+
+          return (
+            <div className="flex flex-col items-center justify-center">
+              <button
+                onClick={() => openQRModal(row)}
+                disabled={isDisabled}
+                className={`p-1.5 rounded transition-colors ${
+                  isDisabled
+                    ? 'text-gray-400 bg-gray-100/70 cursor-not-allowed'
+                    : 'text-indigo-600 hover:bg-indigo-50'
+                }`}
+                title={
+                  !isToday
+                    ? 'QR generation is only available on the event day'
+                    : genLeft <= 0
+                    ? 'Maximum QR generation limit (3/3) reached'
+                    : 'Generate Attendance QR'
+                }
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                </svg>
+              </button>
+              <span className={`text-[10px] font-medium leading-tight whitespace-nowrap ${
+                isDisabled ? 'text-gray-400' : 'text-indigo-600'
+              }`}>
+                {genLeft}/3 available
+              </span>
+            </div>
+          )
+        })()}
+        <button onClick={() => setDeleteTarget(row)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Delete">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        </button>
+      </div>
+    )},
   ]
 
   return (
-    <div className="space-y-4 relative">
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Events</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-foreground">{club.name || 'Club Dashboard'}</h1>
+          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold text-navy">{club.slug}</span>
+        </div>
         <button
           className="btn-primary"
           onClick={() => setIsModalOpen(true)}
@@ -180,64 +333,203 @@ function EventsTab({ clubId }) {
           + New Event
         </button>
       </div>
-      <DataTable
-        columns={eventColumns}
-        data={events ?? []}
-        isLoading={isLoading}
-        emptyMessage="No events yet. Click '+ New Event' to create one."
-        searchable
-        searchPlaceholder="Search events…"
-      />
 
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard label="Events Completed (This Semester)" value={eventsThisSemesterCount} icon={Icon.events} accent="navy" />
+        <StatCard label="Cumulative Events Completed" value={cumulativeEventsCount} icon={Icon.events} accent="navy" />
+        <StatCard label="Certificates Issued" value={totalCertificatesIssued} icon={Icon.certs} accent="green" />
+      </div>
+
+      {/* Events table */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="section-title">Events</h2>
+        </div>
+        <DataTable
+          columns={eventColumns}
+          data={recentEvents}
+          isLoading={false}
+          emptyMessage="No events yet. Click '+ New Event' to create one."
+          rowKey="id"
+          searchable
+          searchPlaceholder="Search events…"
+        />
+      </div>
+
+      {/* Create Event Modal */}
       {isModalOpen && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setIsModalOpen(false)}>
           <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
-          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
               <h3 className="text-lg font-bold text-navy">Create New Event</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close modal">x</button>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl" aria-label="Close modal">×</button>
             </div>
             <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
               <div>
-                <label className="form-label" htmlFor="title">Event Name *</label>
-                <input id="title" type="text" className={`form-input ${errors.name ? 'form-input-error' : ''}`} placeholder="e.g. Hackathon 2024" {...register('name', { required: 'Event name is required' })} />
+                <label className="form-label" htmlFor="dash-event-name">Event Name *</label>
+                <input id="dash-event-name" type="text" className={`form-input ${errors.name ? 'form-input-error' : ''}`} placeholder="e.g. AI & Robotics Hackathon 2026" {...register('name', { required: 'Event name is required' })} />
                 {errors.name && <p className="form-error">{errors.name.message}</p>}
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label" htmlFor="dash-event-date">Event Date *</label>
+                  <input
+                    id="dash-event-date"
+                    type="date"
+                    className={`form-input ${errors.event_date ? 'form-input-error' : ''}`}
+                    {...register('event_date', { required: 'Event date is required' })}
+                  />
+                  {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
+                </div>
+                <div>
+                  <label className="form-label" htmlFor="dash-event-time">Event Session *</label>
+                  <select
+                    id="dash-event-time"
+                    className="form-input"
+                    {...register('session_type', { required: 'Event session is required' })}
+                  >
+                    <option value="Morning (FN)">Morning (FN)</option>
+                    <option value="Afternoon (AN)">Afternoon (AN)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label" htmlFor="dash-timing">Event Timings</label>
+                  <input
+                    id="dash-timing"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. 09:00 AM - 12:00 PM"
+                    {...register('timing')}
+                  />
+                </div>
+                <div>
+                  <label className="form-label" htmlFor="dash-venue">Venue *</label>
+                  <input
+                    id="dash-venue"
+                    type="text"
+                    className={`form-input ${errors.venue ? 'form-input-error' : ''}`}
+                    placeholder="e.g. Auditorium / Lab 3"
+                    {...register('venue', { required: 'Venue is required' })}
+                  />
+                  {errors.venue && <p className="form-error">{errors.venue.message}</p>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label" htmlFor="dash-category">Category</label>
+                  <select id="dash-category" className="form-input" {...register('category')}>
+                    <option value="">Select category</option>
+                    <option value="Workshop">Workshop</option>
+                    <option value="Technical Talk">Technical Talk</option>
+                    <option value="Hackathon">Hackathon</option>
+                    <option value="Cultural">Cultural</option>
+                    <option value="Seminar">Seminar</option>
+                    <option value="Competition">Competition</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label" htmlFor="dash-volunteers-required">Volunteers Required</label>
+                  <input
+                    id="dash-volunteers-required"
+                    type="number"
+                    min="0"
+                    className={`form-input ${errors.volunteers_required ? 'form-input-error' : ''}`}
+                    placeholder="0"
+                    {...register('volunteers_required', {
+                      valueAsNumber: true,
+                      min: { value: 0, message: 'Cannot be negative' }
+                    })}
+                  />
+                  {errors.volunteers_required && <p className="form-error">{errors.volunteers_required.message}</p>}
+                </div>
+              </div>
+
               <div>
-                <label className="form-label" htmlFor="date">Event Date *</label>
-                <input
-                  id="date"
-                  type="date"
-                  className={`form-input ${errors.event_date ? 'form-input-error' : ''}`}
-                  {...register('event_date', { required: 'Event date is required' })}
+                <label className="form-label">Academic Year (Select all applicable) *</label>
+                <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3">
+                  {['2026-2027(ODD)', '2026-2027(EVEN)'].map((year) => (
+                    <label key={year} className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={selectedAcademicYears.includes(year)}
+                        onChange={() => handleAcadYearToggle(year)}
+                        className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
+                      />
+                      <span>{year}</span>
+                    </label>
+                  ))}
+                </div>
+                {acadYearError && <p className="form-error mt-1">{acadYearError}</p>}
+              </div>
+
+              <div>
+                <label className="form-label" htmlFor="dash-description">Description *</label>
+                <textarea
+                  id="dash-description"
+                  className={`form-input ${errors.description ? 'form-input-error' : ''}`}
+                  rows={2}
+                  placeholder="Detailed description of the event…"
+                  {...register('description', { required: 'Description is required' })}
                 />
-                {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
+                {errors.description && <p className="form-error">{errors.description.message}</p>}
               </div>
-              <div>
-                <label className="form-label" htmlFor="academic_year">Academic Year *</label>
-                <select
-                  id="academic_year"
-                  className={`form-input ${errors.academic_year ? 'form-input-error' : ''}`}
-                  {...register('academic_year', { required: 'Academic year is required' })}
-                  defaultValue=""
-                >
-                  <option value="" disabled>Select academic year</option>
-                  <option value="2025-2026(EVEN)">2025-2026(EVEN)</option>
-                  <option value="2026-2027(ODD)">2026-2027(ODD)</option>
-                  <option value="2026-2027(EVEN)">2026-2027(EVEN)</option>
-                </select>
-                {errors.academic_year && <p className="form-error">{errors.academic_year.message}</p>}
+
+              {/* Event Poster Upload */}
+              <div className="space-y-1">
+                <label className="form-label" htmlFor="dash-event-poster">
+                  Event Poster (PNG, JPEG, PDF • Max 2MB)
+                </label>
+                <input
+                  id="dash-event-poster"
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+                  onChange={handlePosterChange}
+                  className="form-input text-xs"
+                />
+                <p className="text-[11px] text-gray-500">
+                  Accepted formats: PNG, JPEG, PDF. Maximum image/file size is 2MB. Displayed on Student & Student Affairs feeds.
+                </p>
+                {posterError && <p className="form-error">{posterError}</p>}
+                {selectedPosterFile && (
+                  <p className="text-xs font-medium text-navy mt-1">
+                    ✓ Selected: {selectedPosterFile.name} ({(selectedPosterFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
               </div>
-              <div className="pt-2 flex justify-end gap-3">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="btn-secondary">Cancel</button>
-                <button type="submit" disabled={isSubmitting} className="btn-primary">{isSubmitting ? 'Creating...' : 'Create'}</button>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  id="dash-is-published"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
+                  {...register('is_published')}
+                />
+                <label htmlFor="dash-is-published" className="text-sm font-medium text-gray-700 cursor-pointer">
+                  Publish to Upcoming Events (visible on Student & Student Affairs dashboards)
+                </label>
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 flex justify-end gap-3">
+                <button type="button" onClick={() => { setIsModalOpen(false); reset() }} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={isSubmitting || createEvent.isPending} className="btn-primary">
+                  {(isSubmitting || createEvent.isPending) ? 'Creating...' : 'Create Event'}
+                </button>
               </div>
             </form>
           </div>
         </div>,
-        document.body,
+        document.body
       )}
 
+      {/* Delete Confirm Modal */}
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -247,92 +539,572 @@ function EventsTab({ clubId }) {
         onConfirm={handleDelete}
         isLoading={deleteEvent.isPending}
       />
+
+      {/* ── Attendance QR Modal ─────────────────────────────────────────── */}
+      {qrModal && createPortal(
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+          onClick={() => { clearInterval(qrTimerRef.current); setQrModal(null) }}
+        >
+          <div className="absolute inset-0 bg-navy/50 backdrop-blur-sm" aria-hidden="true" />
+          <div
+            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className={`px-6 py-4 flex items-center justify-between ${
+              qrModal.expired ? 'bg-gray-100' : 'bg-navy'
+            }`}>
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-wider ${
+                  qrModal.expired ? 'text-gray-500' : 'text-white/70'
+                }`}>Attendance QR</p>
+                <h3 className={`text-base font-bold ${
+                  qrModal.expired ? 'text-gray-700' : 'text-white'
+                } line-clamp-1`}>{qrModal.eventName}</h3>
+              </div>
+              <button
+                onClick={() => { clearInterval(qrTimerRef.current); setQrModal(null) }}
+                className={`text-xl font-bold ${
+                  qrModal.expired ? 'text-gray-400 hover:text-gray-600' : 'text-white/70 hover:text-white'
+                }`}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* QR image area */}
+            <div className="flex flex-col items-center py-6 px-6 gap-4">
+              <div className={`relative rounded-xl overflow-hidden border-4 ${
+                qrModal.expired ? 'border-gray-300 opacity-40 grayscale' : 'border-navy/20'
+              }`}>
+                <img
+                  src={qrModal.qrDataUrl}
+                  alt="Attendance QR Code"
+                  className="w-56 h-56 object-contain"
+                />
+                {qrModal.expired && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/80">
+                    <span className="text-2xl font-black text-gray-500 tracking-widest rotate-[-12deg] border-4 border-gray-400 rounded-lg px-3 py-1">
+                      EXPIRED
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Countdown / status badge */}
+              {qrModal.expired ? (
+                <div className="flex flex-col items-center gap-2 w-full">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-red-100 px-4 py-1.5 text-sm font-bold text-red-700">
+                    <span className="h-2 w-2 rounded-full bg-red-500" />
+                    QR Expired
+                  </span>
+                  <p className="text-xs text-gray-500 text-center">
+                    {(qrModal.generationsCount ?? 1) >= 3
+                      ? 'Maximum QR generation limit (3/3) reached for this event.'
+                      : 'Generate a new QR for students to scan.'}
+                  </p>
+                  {(qrModal.generationsCount ?? 1) < 3 ? (
+                    <button
+                      type="button"
+                      onClick={() => openQRModal({ id: qrModal.eventId, name: qrModal.eventName })}
+                      className="w-full btn-primary justify-center mt-1"
+                    >
+                      🔄 Generate New QR ({3 - (qrModal.generationsCount ?? 1)} remaining)
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full btn-secondary justify-center mt-1 opacity-50 cursor-not-allowed text-xs py-2"
+                    >
+                      Generation Limit Reached (3/3)
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2 w-full">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-green-100 px-4 py-1.5 text-sm font-bold text-green-700">
+                    <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                    Active — {qrModal.secondsLeft}s remaining
+                  </span>
+                  {/* Progress bar */}
+                  <div className="w-full bg-gray-100 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full transition-all duration-1000 ${
+                        qrModal.secondsLeft > 10 ? 'bg-green-500' :
+                        qrModal.secondsLeft > 5  ? 'bg-amber-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${(qrModal.secondsLeft / qrModal.expiresIn) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 text-center">
+                    Show this QR to students. It expires automatically in {qrModal.secondsLeft} second{qrModal.secondsLeft !== 1 ? 's' : ''}.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Templates tab  —  shows the PNG image template gallery (read-only)
-// ═══════════════════════════════════════════════════════════════════════════════
-function TemplatesTab() {
-  const { data: templates, isLoading, error, refetch } = useImageTemplates()
 
-  if (isLoading) return <LoadingSpinner fullPage label="Loading templates…" />
+// ═══════════════════════════════════════════════════════════════════════════════
+// Members tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function MembersTab() {
+  const { data: requests, isLoading } = useMembershipRequests()
+  const updateStatus = useUpdateMembershipStatus()
+  const [notes, setNotes] = useState({})
 
-  if (error) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16 text-center">
-        <p className="text-sm text-red-500">Failed to load templates.</p>
-        <button className="btn-secondary text-xs" onClick={() => refetch()}>Retry</button>
-      </div>
-    )
-  }
+  if (isLoading) return <LoadingSpinner fullPage label="Loading membership requests…" />
+
+  const pending  = (requests || []).filter((r) => r.status === 'pending')
+  const reviewed = (requests || []).filter((r) => r.status !== 'pending')
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Certificate Templates</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          These are the pre-built templates available for your events.
-        </p>
-      </div>
-
-      {(!templates || templates.length === 0) ? (
-        <div className="card p-12 text-center text-gray-400">
-          <svg className="h-12 w-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <p className="text-lg font-semibold">No templates found</p>
-          <p className="text-sm mt-2 max-w-sm mx-auto text-gray-400">
-            Add PNG files to{' '}
-            <code className="bg-gray-100 px-1 rounded text-xs">
-              backend/app/static/certificate_templates/
-            </code>{' '}
-            and restart the backend server.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {templates.map((t) => (
-            <div
-              key={t.id}
-              className="group flex flex-col rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white hover:shadow-md hover:border-indigo-300 transition-all duration-200"
-            >
-              {/* Preview */}
-              <div className="w-full bg-gray-50 overflow-hidden" style={{ aspectRatio: '210/297' }}>
-                {t.preview_url ? (
-                  <img
-                    src={BACKEND_URL + t.preview_url}
-                    alt={t.display_name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
+      <div className="card p-5">
+        <h2 className="section-title mb-4">Pending Requests ({pending.length})</h2>
+        {pending.length === 0 ? (
+          <p className="text-sm text-gray-400">No pending membership requests.</p>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {pending.map((req) => (
+              <div key={req.id} className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">{req.student_name || '—'}</p>
+                  <p className="text-xs text-gray-400">{req.student_email}</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Applied {req.applied_at ? new Date(req.applied_at).toLocaleDateString('en-IN') : '—'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col gap-1.5 sm:items-end">
+                  <input
+                    type="text"
+                    placeholder="Optional note…"
+                    className="form-input h-8 text-xs w-48"
+                    value={notes[req.id] || ''}
+                    onChange={(e) => setNotes((p) => ({ ...p, [req.id]: e.target.value }))}
                   />
-                ) : null}
-                <div
-                  className="w-full h-full items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50"
-                  style={{ display: t.preview_url ? 'none' : 'flex' }}
-                >
-                  <svg className="h-10 w-10 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
+                  <div className="flex gap-2">
+                    <button
+                      id={`approve-${req.id}`}
+                      className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+                      disabled={updateStatus.isPending}
+                      onClick={() => updateStatus.mutate({ membershipId: req.id, status: 'approved', review_note: notes[req.id] || undefined })}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      id={`reject-${req.id}`}
+                      className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                      disabled={updateStatus.isPending}
+                      onClick={() => updateStatus.mutate({ membershipId: req.id, status: 'rejected', review_note: notes[req.id] || undefined })}
+                    >
+                      Reject
+                    </button>
+                  </div>
                 </div>
               </div>
-              {/* Info */}
-              <div className="px-3 py-2.5 border-t border-gray-100">
-                <p className="text-sm font-semibold text-gray-800 truncate">{t.display_name}</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">{t.filename}</p>
-                <span className="inline-flex mt-1.5 items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-600">
-                  Read-only
+            ))}
+          </div>
+        )}
+      </div>
+
+      {reviewed.length > 0 && (
+        <div className="card p-5">
+          <h2 className="section-title mb-4">Reviewed Requests</h2>
+          <div className="divide-y divide-gray-100">
+            {reviewed.map((req) => (
+              <div key={req.id} className="flex items-center justify-between py-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-foreground">{req.student_name || '—'}</p>
+                    {req.office_bearer_role && (
+                      <span className="rounded bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy">
+                        {req.office_bearer_role}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">{req.student_email}</p>
+                  {req.review_note && <p className="text-xs text-gray-500 mt-0.5">{req.review_note}</p>}
+                </div>
+                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                  req.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>
+                  {req.status}
                 </span>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>
   )
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Active Members tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function ActiveMembersTab() {
+  const { data, isLoading } = useClubActiveMembers()
+
+  if (isLoading) return <LoadingSpinner fullPage label="Loading active members…" />
+
+  const members = data?.members || []
+  const totalEvents = data?.total_events || 0
+  const totalApproved = data?.total_approved_members || 0
+  const totalStudents = data?.total_students || 0
+
+  const columns = [
+    { key: 'name', header: 'Name', sortable: true, searchKey: true,
+      render: (v) => <span className="text-sm font-semibold text-foreground">{v || '—'}</span>
+    },
+    { key: 'registration_number', header: 'Register Number', sortable: true, searchKey: true,
+      render: (v) => <span className="text-sm text-gray-600 font-mono">{v || '—'}</span>
+    },
+    { key: 'department', header: 'Department', sortable: true, searchKey: true,
+      render: (v) => <span className="text-sm text-gray-600">{v || '—'}</span>
+    },
+    { key: 'email', header: 'Email ID', sortable: true, searchKey: true,
+      render: (v) => <span className="text-sm text-gray-600">{v || '—'}</span>
+    },
+    { key: 'membership_status', header: 'Membership Status', sortable: true,
+      render: (v) => (
+        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${
+          v === 'Yes'
+            ? 'bg-green-50 text-green-700 ring-green-600/20'
+            : 'bg-red-50 text-red-600 ring-red-500/20'
+        }`}>
+          {v}
+        </span>
+      )
+    },
+    { key: 'participation_ratio', header: 'Participation', sortable: false, align: 'center',
+      render: (v, row) => {
+        const pct = row.participation_percentage || 0
+        const barColor = pct >= 75 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : pct >= 25 ? 'bg-orange-500' : 'bg-red-400'
+        return (
+          <div className="flex flex-col items-center gap-1 min-w-[100px]">
+            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ring-1 ring-inset ${
+              pct >= 50 ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-amber-50 text-amber-700 ring-amber-600/20'
+            }`}>
+              {v}
+            </span>
+            <div className="w-full bg-gray-100 rounded-full h-1.5 mt-0.5">
+              <div className={`h-1.5 rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+            </div>
+            <span className="text-[10px] text-gray-500 font-medium">{pct}%</span>
+          </div>
+        )
+      }
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Active Members</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Student participation overview for this club. Participation is calculated as events participated, won, or coordinated out of total club events.
+        </p>
+      </div>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Total Club Events" value={totalEvents} icon={Icon.events} accent="navy" />
+        <StatCard label="Approved Members" value={totalApproved} icon={Icon.certs} accent="green" />
+        <StatCard
+          label="Students Listed"
+          value={totalStudents}
+          icon={<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>}
+          accent="navy"
+        />
+      </div>
+
+      {/* Data table */}
+      <DataTable
+        columns={columns}
+        data={members}
+        isLoading={false}
+        emptyMessage="No students found for this club."
+        rowKey="email"
+        searchable
+        searchPlaceholder="Search by name, register number, department, or email…"
+      />
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Office Bearers tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function OfficeBearersTab() {
+  const { data, isLoading } = useClubOfficeBearers()
+  const allocateMutation = useAllocateOfficeBearer()
+  const removeMutation = useRemoveOfficeBearer()
+  const addPositionMutation = useAddOfficeBearerPosition()
+  const deletePositionMutation = useDeleteOfficeBearerPosition()
+
+  const [activeModalRole, setActiveModalRole] = useState(null)
+  const [selectedStudentId, setSelectedStudentId] = useState('')
+  const [showAddPositionModal, setShowAddPositionModal] = useState(false)
+  const [newPositionName, setNewPositionName] = useState('')
+  const [deleteConfirmPos, setDeleteConfirmPos] = useState(null)
+
+  if (isLoading) return <LoadingSpinner fullPage label="Loading office bearer allocations…" />
+
+  const positions = data?.positions || ['President', 'Vice President', 'Secretary', 'Joint Secretary', 'Treasurer']
+  const allocations = data?.allocations || {}
+  const approvedMembers = data?.approved_members || []
+
+  const handleOpenModal = (role) => {
+    setActiveModalRole(role)
+    const currentHolder = allocations[role]
+    setSelectedStudentId(currentHolder ? currentHolder.student_id : '')
+  }
+
+  const handleAllocateSubmit = (e) => {
+    e.preventDefault()
+    if (!selectedStudentId) return
+    allocateMutation.mutate(
+      { position: activeModalRole, student_id: selectedStudentId },
+      { onSuccess: () => setActiveModalRole(null) }
+    )
+  }
+
+  const handleAddPosition = (e) => {
+    e.preventDefault()
+    const trimmed = (newPositionName || '').trim()
+    if (!trimmed) return
+    addPositionMutation.mutate(trimmed, {
+      onSuccess: () => {
+        setNewPositionName('')
+        setShowAddPositionModal(false)
+      }
+    })
+  }
+
+  const handleDeletePosition = () => {
+    if (!deleteConfirmPos) return
+    deletePositionMutation.mutate(deleteConfirmPos, {
+      onSuccess: () => setDeleteConfirmPos(null)
+    })
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Club Office Bearers</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Allocate office bearer roles for your club. A student can hold an office bearer role in at most one club and position.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setShowAddPositionModal(true)}
+        >
+          + Add Position
+        </button>
+      </div>
+
+      {/* Grid of positions */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {positions.map((pos) => {
+          const holder = allocations[pos]
+          return (
+            <div key={pos} className="card p-5 flex flex-col justify-between space-y-4 border border-gray-100 hover:shadow-md transition-shadow">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-navy bg-navy/5 px-2.5 py-1 rounded-md">
+                    {pos}
+                  </span>
+                  {holder ? (
+                    <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                      Allocated
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
+                      Not Allocated
+                    </span>
+                  )}
+                </div>
+
+                {holder ? (
+                  <div className="pt-2 space-y-1">
+                    <p className="text-base font-bold text-foreground">{holder.name || '—'}</p>
+                    <p className="text-xs text-gray-500">{holder.email}</p>
+                    <div className="pt-1 flex flex-wrap gap-2 text-xs text-gray-600 font-mono">
+                      {holder.registration_number && (
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded">{holder.registration_number}</span>
+                      )}
+                      {holder.department && (
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded">{holder.department}</span>
+                      )}
+                      {holder.batch && (
+                        <span className="bg-gray-100 px-1.5 py-0.5 rounded">{holder.batch}</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-4 text-center">
+                    <p className="text-sm text-gray-400 italic">No member assigned to this position yet.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenModal(pos)}
+                  className="flex-1 rounded-md bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy/90 transition-colors"
+                >
+                  {holder ? 'Change Member' : 'Allocate Member'}
+                </button>
+                {holder && (
+                  <button
+                    type="button"
+                    disabled={removeMutation.isPending}
+                    onClick={() => removeMutation.mutate(pos)}
+                    className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    Remove
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={deletePositionMutation.isPending}
+                  onClick={() => setDeleteConfirmPos(pos)}
+                  title="Delete this position"
+                  className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Allocation Modal */}
+      {activeModalRole && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setActiveModalRole(null)}>
+          <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-navy">Allocate {activeModalRole}</h3>
+              <button onClick={() => setActiveModalRole(null)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
+            </div>
+            <form onSubmit={handleAllocateSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="form-label" htmlFor="student-select">
+                  Select Approved Club Member *
+                </label>
+                {approvedMembers.length === 0 ? (
+                  <p className="text-sm text-red-500 mt-1">
+                    No approved club members available. Please approve student membership requests first.
+                  </p>
+                ) : (
+                  <select
+                    id="student-select"
+                    className="form-input text-sm"
+                    value={selectedStudentId}
+                    onChange={(e) => setSelectedStudentId(e.target.value)}
+                    required
+                  >
+                    <option value="">-- Choose a student --</option>
+                    {approvedMembers.map((mem) => {
+                      const isCurrentRole = mem.office_bearer_role === activeModalRole
+                      const isOtherRole = mem.office_bearer_role && !isCurrentRole
+                      return (
+                        <option key={mem.student_id} value={mem.student_id} disabled={isOtherRole}>
+                          {mem.name} ({mem.registration_number || mem.email})
+                          {isCurrentRole ? ' - Currently Assigned' : isOtherRole ? ` - (${mem.office_bearer_role})` : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                )}
+              </div>
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveModalRole(null)}
+                  className="btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!selectedStudentId || allocateMutation.isPending}
+                  className="btn-primary"
+                >
+                  {allocateMutation.isPending ? 'Allocating...' : 'Confirm Allocation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Add Position Modal */}
+      {showAddPositionModal && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setShowAddPositionModal(false)}>
+          <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-navy">Add New Position</h3>
+              <button onClick={() => setShowAddPositionModal(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
+            </div>
+            <form onSubmit={handleAddPosition} className="p-6 space-y-4">
+              <div>
+                <label className="form-label" htmlFor="new-position-name">Position Name *</label>
+                <input
+                  id="new-position-name"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Event Coordinator"
+                  value={newPositionName}
+                  onChange={(e) => setNewPositionName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="pt-2 flex justify-end gap-3">
+                <button type="button" onClick={() => { setShowAddPositionModal(false); setNewPositionName('') }} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newPositionName.trim() || addPositionMutation.isPending} className="btn-primary">
+                  {addPositionMutation.isPending ? 'Adding...' : 'Add Position'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Delete Position Confirm Modal */}
+      <ConfirmModal
+        isOpen={!!deleteConfirmPos}
+        onClose={() => setDeleteConfirmPos(null)}
+        title="Delete Position"
+        message={`Are you sure you want to delete the "${deleteConfirmPos}" position? Any assigned member will be unassigned.`}
+        confirmLabel="Delete"
+        onConfirm={handleDeletePosition}
+        isLoading={deletePositionMutation.isPending}
+      />
+    </div>
+  )
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Settings tab
@@ -658,8 +1430,12 @@ export default function ClubDashboard() {
               </div>
             )}
 
-            {activeTab === 'events' && <EventsTab clubId={effectiveClubId} />}
+            {activeTab === 'events' && <DashboardTab clubId={effectiveClubId} dashboard={dashboard} isLoading={dashLoading} />}
+            {activeTab === 'active_members' && <ActiveMembersTab />}
+            {activeTab === 'members' && <MembersTab />}
+            {activeTab === 'office_bearers' && <OfficeBearersTab />}
             {activeTab === 'settings' && (
+
               <SettingsTab
                 club={club}
                 clubId={effectiveClubId}

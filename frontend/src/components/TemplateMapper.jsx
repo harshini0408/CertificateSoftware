@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import axiosInstance, { toBackendUrl } from '../utils/axiosInstance';
 import { Trash2, Plus, Save, Mouse, AlertCircle } from 'lucide-react';
 
 const TemplateMapper = ({ templateName, onSave }) => {
@@ -14,14 +14,14 @@ const TemplateMapper = ({ templateName, onSave }) => {
   const imageRef = useRef(null);
 
   useEffect(() => {
-    setImageUrl(`http://localhost:8000/static/certificate_templates/${templateName}`);
+    setImageUrl(toBackendUrl(`/static/certificate_templates/${templateName}`));
     loadExistingConfig();
   }, [templateName]);
 
   const loadExistingConfig = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`http://localhost:8000/api/certificate-config/config/${templateName}`);
+      const res = await axiosInstance.get(`/api/certificate-config/config/${templateName}`);
       const fieldArray = Object.entries(res.data).map(([name, pos]) => ({
         id: Math.random().toString(36).substr(2, 9),
         field_name: name,
@@ -100,7 +100,7 @@ const TemplateMapper = ({ templateName, onSave }) => {
           y: f.y
         }))
       };
-      await axios.post('http://localhost:8000/api/certificate-config/save', payload);
+      await axiosInstance.post('/api/certificate-config/save', payload);
       alert('Configuration saved successfully!');
       if (onSave) onSave();
     } catch (err) {

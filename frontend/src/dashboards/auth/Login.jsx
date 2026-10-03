@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useLogin, useLogout } from './api'
 import ForgotPasswordModal from './ForgotPasswordModal'
+import FirstLoginPasswordModal from './FirstLoginPasswordModal'
 import { useAuthStore } from '../../store/authStore'
 import { Navigate, useSearchParams } from 'react-router-dom'
+import { CircleHelp, ExternalLink } from 'lucide-react'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import collegeBg from '../../Images/college bg.jpeg'
 import collegeLogo from '../../Images/College logo.png'
@@ -22,7 +24,7 @@ function PsgLogo() {
       <div className="text-center">
         <p className="text-xl font-bold text-navy leading-tight">PSG iTech</p>
         <p className="text-xs font-medium text-gray-500 tracking-wide uppercase">
-          Certificate Platform
+          Students Activity Management Software
         </p>
       </div>
     </div>
@@ -59,6 +61,7 @@ function TogglePasswordBtn({ show, onToggle }) {
 export default function Login() {
   const [searchParams] = useSearchParams()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const requiresPasswordChange = useAuthStore((s) => s.requires_password_change)
   const role = useAuthStore((s) => s.role)
   const club_id = useAuthStore((s) => s.club_id)
   const event_id = useAuthStore((s) => s.event_id)
@@ -66,6 +69,8 @@ export default function Login() {
 
   const [showPassword, setShowPassword] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [showFirstLoginModal, setShowFirstLoginModal] = useState(false)
+  const [firstLoginData, setFirstLoginData] = useState(null)
   const [loginMode, setLoginMode] = useState('username')
 
   const loginMutation = useLogin()
@@ -78,17 +83,19 @@ export default function Login() {
     formState: { errors, isSubmitting },
   } = useForm({ defaultValues: { username: '', password: '' } })
 
-  // Already logged in — redirect to own dashboard
-  if (isAuthenticated && !switchMode) {
+  // Already logged in — redirect to own dashboard (unless mandatory password change needed)
+  if (isAuthenticated && !switchMode && !requiresPasswordChange) {
     const redirectMap = {
       super_admin: '/admin',
       principal: '/principal',
       hod: '/hod',
+      student_affairs: '/student-affairs',
       club_coordinator: `/club/${club_id}`,
       dept_coordinator: '/dept',
       tutor: '/tutor',
       student: '/student',
       guest: '/guest',
+      faculty: '/faculty',
     }
     return <Navigate to={redirectMap[role] ?? '/login'} replace />
   }
@@ -98,7 +105,15 @@ export default function Login() {
       if (isAuthenticated) {
         await logoutMutation.mutateAsync()
       }
-      await loginMutation.mutateAsync(values)
+      const res = await loginMutation.mutateAsync(values)
+      if (res?.data?.requires_password_change) {
+        setFirstLoginData({
+          username: values.username,
+          password: values.password,
+          email: res.data.email,
+        })
+        setShowFirstLoginModal(true)
+      }
     } catch {
       // Mutation handlers surface the error toast.
     }
@@ -121,7 +136,6 @@ export default function Login() {
         className="absolute inset-0 bg-white/55"
       />
 
-      {/* Card */}
       <div className="relative z-10 w-full max-w-sm">
         {/* Card shell */}
         <div className="card px-8 py-10 shadow-modal">
@@ -292,9 +306,40 @@ export default function Login() {
         </p>
       </div>
 
+      <aside
+        aria-label="Software support"
+        className="absolute bottom-11 right-4 z-20 w-56 border border-[#9dbdd8] bg-[#dceaf5] px-5 py-4 text-center shadow-lg sm:bottom-14 sm:right-6"
+      >
+        <div className="flex items-center justify-center gap-1.5 text-[#315b7c]">
+          <CircleHelp className="h-4 w-4" aria-hidden="true" />
+          <h2 className="text-sm font-bold">Need help?</h2>
+        </div>
+        <p className="mt-1.5 text-xs leading-4 text-[#466b88]">
+          Having an issue with the software? Let us know.
+        </p>
+        <a
+          href="https://docs.google.com/spreadsheets/d/1G3YgbwjkEJKHj3UC19WqvTgsuhqqwdrMeFbRCfSB8g4/edit?gid=0#gid=0"
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#315b7c] underline underline-offset-2 transition-colors hover:text-[#1f4768]"
+        >
+          Click here
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </a>
+      </aside>
+
       <ForgotPasswordModal
         isOpen={showForgotPassword}
         onClose={() => setShowForgotPassword(false)}
+      />
+
+      <FirstLoginPasswordModal
+        isOpen={showFirstLoginModal}
+        loginData={firstLoginData}
+        onClose={() => {
+          setShowFirstLoginModal(false)
+          setFirstLoginData(null)
+        }}
       />
     </div>
   )

@@ -1,11 +1,14 @@
 from pathlib import Path
 import re
 from datetime import date, datetime
+from typing import Optional, List, Dict
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from beanie import PydanticObjectId
 
+from pydantic import BaseModel
 from ...config import get_settings
 from ...core.dependencies import require_role
 from ...models.user import User, UserRole
@@ -14,8 +17,10 @@ from ...models.certificate import Certificate, CertStatus
 from ...models.dept_certificate import DeptCertificate
 from ...models.credit_rule import CreditRule
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
-from ...models.event import Event
+from ...models.event import Event, EventStatus
 from ...models.club import Club
+from ...models.student_club_membership import StudentClubMembership, MembershipStatus
+from ...models.event_registration import EventRegistration
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
 
@@ -24,6 +29,150 @@ router = APIRouter(tags=["Student"])
 
 def _norm_email(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+def _manual_submission_cert_number(submission: ManualCreditSubmission) -> str:
+    return f"STU-MANUAL-{str(submission.id)[-8:].upper()}"
+
+
+def is_temporary_reg_no(reg_no: Optional[str]) -> bool:
+    if not reg_no:
+        return True
+    clean = reg_no.strip()
+    return not bool(re.fullmatch(r"^\d{12}$", clean))
+
+
+class StudentUpdateRegNoRequest(BaseModel):
+    registration_number: str
+
+
+# ── /students/me ─────────────────────────────────────────────────────────
+
+@router.get("/students/me")
+async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    is_temp = is_temporary_reg_no(current_user.registration_number)
+    can_update = is_temp and (getattr(current_user, "student_reg_no_change_count", 0) or 0) == 0
+
+    tutor_email = None
+    tutor_name = None
+
+    email = _norm_email(current_user.email)
+    reg_no = (current_user.registration_number or "").strip()
+    query = {"$or": [{"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}]}
+    if reg_no:
+        query["$or"].append({"registration_number": reg_no})
+
+    credit_doc = await StudentCredit.find_one(query)
+    if credit_doc and credit_doc.tutor_email:
+        tutor_email = credit_doc.tutor_email
+
+    # Fallback to assigned_classes or class matching if not mapped in StudentCredit
+    if not tutor_email and current_user.department and current_user.batch and current_user.section:
+        tutor_user = await User.find_one({
+            "role": {"$in": [UserRole.TUTOR, UserRole.FACULTY]},
+            "assigned_classes": {
+                "$elemMatch": {
+                    "department": current_user.department,
+                    "batch": current_user.batch,
+                    "section": current_user.section,
+                }
+            }
+        })
+        if not tutor_user:
+            tutor_user = await User.find_one({
+                "role": {"$in": [UserRole.TUTOR, UserRole.FACULTY]},
+                "department": current_user.department,
+                "batch": current_user.batch,
+                "section": current_user.section,
+            })
+        if tutor_user:
+            tutor_email = tutor_user.email
+
+    if tutor_email:
+        tutor_user = await User.find_one({"email": {"$regex": f"^{re.escape(tutor_email.strip())}$", "$options": "i"}})
+        if tutor_user:
+            tutor_name = tutor_user.name
+        else:
+            tutor_name = tutor_email
+
+    return {
+        "id": str(current_user.id),
+        "name": current_user.name,
+        "username": current_user.username,
+        "email": current_user.email,
+        "registration_number": current_user.registration_number,
+        "batch": current_user.batch,
+        "department": current_user.department,
+        "section": current_user.section,
+        "tutor_name": tutor_name,
+        "tutor_email": tutor_email,
+        "is_temporary_reg_no": is_temp,
+        "can_update_reg_no": can_update,
+        "student_reg_no_change_count": getattr(current_user, "student_reg_no_change_count", 0) or 0,
+    }
+
+
+@router.post("/students/me/update-registration-number")
+async def student_update_registration_number(
+    body: StudentUpdateRegNoRequest,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    if (getattr(current_user, "student_reg_no_change_count", 0) or 0) >= 1:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration number can only be updated once by the student.",
+        )
+    if not is_temporary_reg_no(current_user.registration_number):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "You already have a valid 12-digit registration number and cannot update it.",
+        )
+
+    new_reg = body.registration_number.strip()
+    if not re.fullmatch(r"^\d{12}$", new_reg):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration number must be a valid 12-digit number (e.g. 715522104001).",
+        )
+
+    # Check if another user already has this registration_number or username
+    existing_user = await User.find_one({
+        "_id": {"$ne": current_user.id},
+        "$or": [
+            {"registration_number": {"$regex": f"^{re.escape(new_reg)}$", "$options": "i"}},
+            {"username": {"$regex": f"^{re.escape(new_reg)}$", "$options": "i"}},
+        ]
+    })
+    if existing_user:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This registration number is already registered by another student.",
+        )
+
+    old_reg = current_user.registration_number
+    current_user.registration_number = new_reg
+    if current_user.username == old_reg or is_temporary_reg_no(current_user.username):
+        current_user.username = new_reg
+    current_user.student_reg_no_change_count = (getattr(current_user, "student_reg_no_change_count", 0) or 0) + 1
+    await current_user.save()
+
+    # Sync registration number across StudentCredit docs for this student's email
+    norm_email = _norm_email(current_user.email)
+    credit_docs = await StudentCredit.find({
+        "student_email": {"$regex": f"^{re.escape(norm_email)}$", "$options": "i"}
+    }).to_list()
+    for cd in credit_docs:
+        cd.registration_number = new_reg
+        await cd.save()
+
+    return {
+        "message": "Registration number updated successfully",
+        "registration_number": new_reg,
+        "username": current_user.username,
+        "can_update_reg_no": False,
+        "is_temporary_reg_no": False,
+        "student_reg_no_change_count": current_user.student_reg_no_change_count,
+    }
 
 
 def _norm_cert_type(value: str | None) -> str:
@@ -50,9 +199,18 @@ async def _filter_emailed_credit_entries(entries: list):
             filtered.append(entry)
             continue
 
+        # If it's a student manual upload, direct tutor award, department cert, or not an event Certificate document, keep it
+        if (
+            cert_number.startswith("STU-MANUAL-")
+            or cert_number.startswith("MANUAL-")
+            or cert_number.startswith("DPT-")
+            or cert_number not in cert_status_map
+        ):
+            filtered.append(entry)
+            continue
+
         status_value = (cert_status_map.get(cert_number) or "").lower()
-        if status_value == CertStatus.EMAILED.value or cert_number.startswith("DPT-"):
-            # Allow department certificates (DPT-) regardless of email status if they were awarded
+        if status_value == CertStatus.EMAILED.value:
             filtered.append(entry)
 
     return filtered
@@ -78,20 +236,6 @@ async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
     return None
 
 
-# ── /students/me ─────────────────────────────────────────────────────────
-
-@router.get("/students/me")
-async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT))):
-    return {
-        "id": str(current_user.id),
-        "name": current_user.name,
-        "username": current_user.username,
-        "email": current_user.email,
-        "registration_number": current_user.registration_number,
-        "batch": current_user.batch,
-        "department": current_user.department,
-        "section": current_user.section,
-    }
 
 
 # ── /students/me/credits ─────────────────────────────────────────────────
@@ -200,7 +344,8 @@ async def get_credits_history(current_user: User = Depends(require_role(UserRole
 async def get_my_certificates(current_user: User = Depends(require_role(UserRole.STUDENT))):
     """Return all certificates belonging to the current student.
 
-    Includes both club and department certificates.
+    Includes club certificates, department certificates, and tutor-verified
+    student uploads.
     Matches by email since participants may not have a user_id link.
     """
     email = _norm_email(current_user.email)
@@ -245,6 +390,25 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
             "pdf_url": None,
         })
 
+    # A verified student upload is the student's original certificate image,
+    # rather than an event-generated Certificate document.
+    manual_submissions = await ManualCreditSubmission.find({
+        "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        "status": ManualSubmissionStatus.VERIFIED.value,
+    }).to_list()
+    for submission in manual_submissions:
+        results.append({
+            "_id": f"manual-{submission.id}",
+            "cert_number": _manual_submission_cert_number(submission),
+            "cert_type": submission.cert_type,
+            "event_name": "Student Certificate Submission",
+            "club_name": "Student Upload",
+            "issued_at": submission.reviewed_at or submission.submitted_at,
+            "status": ManualSubmissionStatus.VERIFIED.value,
+            "png_url": submission.certificate_image_url,
+            "pdf_url": None,
+        })
+
     # Sort by issued_at descending
     results.sort(key=lambda x: x.get("issued_at") or datetime.min, reverse=True)
     return results
@@ -265,8 +429,35 @@ async def get_my_manual_credit_submissions(current_user: User = Depends(require_
         "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
     }).sort("-submitted_at").to_list()
 
-    return [
-        {
+    tutor_emails = list({s.tutor_email for s in submissions if s.tutor_email})
+    reviewer_ids = list({s.reviewed_by for s in submissions if s.reviewed_by})
+    users_by_email = {}
+    users_by_id = {}
+    if tutor_emails:
+        t_users = await User.find({"email": {"$in": tutor_emails}}).to_list()
+        for u in t_users:
+            users_by_email[u.email.lower()] = u.name
+    if reviewer_ids:
+        r_oids = []
+        for rid in reviewer_ids:
+            try:
+                r_oids.append(PydanticObjectId(rid))
+            except Exception:
+                pass
+        if r_oids:
+            r_users = await User.find({"_id": {"$in": r_oids}}).to_list()
+            for u in r_users:
+                users_by_id[str(u.id)] = u.name
+
+    result = []
+    for s in submissions:
+        reviewer_name = s.reviewed_by_name
+        if not reviewer_name and s.reviewed_by and str(s.reviewed_by) in users_by_id:
+            reviewer_name = users_by_id[str(s.reviewed_by)]
+        if not reviewer_name and s.status in [ManualSubmissionStatus.VERIFIED, ManualSubmissionStatus.REJECTED] and s.tutor_email:
+            reviewer_name = users_by_email.get(s.tutor_email.lower()) or s.tutor_email
+
+        result.append({
             "id": str(s.id),
             "cert_type": s.cert_type,
             "event_date": s.event_date,
@@ -275,11 +466,11 @@ async def get_my_manual_credit_submissions(current_user: User = Depends(require_
             "points_awarded": int(s.points_awarded or 0),
             "review_comment": s.review_comment,
             "reviewed_at": s.reviewed_at,
+            "reviewed_by_name": reviewer_name,
             "submitted_at": s.submitted_at,
             "semester": s.semester,
-        }
-        for s in submissions
-    ]
+        })
+    return result
 
 
 @router.post("/students/me/manual-credit-submissions")
@@ -357,7 +548,89 @@ async def create_manual_credit_submission(
     }
 
 
-# ── /students/{student_id}/credits (admin/coordinator view) ──────────────
+# ── /students/me/clubs ───────────────────────────────────────────────────────
+
+@router.get("/students/me/clubs")
+async def get_my_club_memberships(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    """Return all club membership applications for the current student."""
+    memberships = await StudentClubMembership.find(
+        StudentClubMembership.student_id == current_user.id
+    ).sort("-applied_at").to_list()
+    return [
+        {
+            "id": str(m.id),
+            "club_id": str(m.club_id),
+            "club_name": m.club_name or "",
+            "status": m.status.value,
+            "applied_at": m.applied_at,
+            "updated_at": m.updated_at,
+            "review_note": m.review_note,
+            "office_bearer_role": m.office_bearer_role,
+        }
+        for m in memberships
+    ]
+
+
+@router.post("/students/me/clubs/apply")
+async def apply_for_club(
+    body: dict,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Apply to join a club. A student may have at most 2 active (pending/approved) memberships."""
+    club_id_str = (body.get("club_id") or "").strip()
+    if not club_id_str:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "club_id is required")
+
+    from beanie import PydanticObjectId as ObjId
+    try:
+        club_oid = ObjId(club_id_str)
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid club_id")
+
+    club = await Club.get(club_oid)
+    if not club or not club.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found or inactive")
+
+    # Check for duplicate active application to this club
+    existing_for_club = await StudentClubMembership.find_one({
+        "student_id": current_user.id,
+        "club_id": club_oid,
+        "status": {"$in": [MembershipStatus.PENDING.value, MembershipStatus.APPROVED.value]},
+    })
+    if existing_for_club:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "You already have an active application or membership for this club",
+        )
+
+    # Enforce max 2 active (pending + approved) memberships across all clubs
+    active_count = await StudentClubMembership.find({
+        "student_id": current_user.id,
+        "status": {"$in": [MembershipStatus.PENDING.value, MembershipStatus.APPROVED.value]},
+    }).count()
+    if active_count >= 2:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "You can apply for at most 2 clubs. Please wait for a pending application outcome or have an approved membership removed.",
+        )
+
+    membership = await StudentClubMembership(
+        student_id=current_user.id,
+        student_name=current_user.name,
+        student_email=(current_user.email or "").strip().lower(),
+        club_id=club_oid,
+        club_name=club.name,
+        status=MembershipStatus.PENDING,
+    ).insert()
+
+    return {
+        "message": "Application submitted. Awaiting coordinator approval.",
+        "id": str(membership.id),
+        "club_name": club.name,
+        "status": membership.status.value,
+    }
+
+
 
 @router.get("/students/{student_id}/credits")
 async def get_student_credits(student_id: str):
@@ -431,27 +704,35 @@ async def download_my_certificate(
     Verifies ownership by matching snapshot.email == current_user.email.
     Returns the PNG as a file attachment.
     """
-    # Find certificate by cert_number
+    # Find an event-generated certificate by cert_number first.
     cert = await Certificate.find_one(Certificate.cert_number == cert_number)
-    if not cert:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
-
-    # Ownership check — the certificate must belong to this student
-    if not cert.snapshot or cert.snapshot.email.lower() != current_user.email.lower():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
-
-    # Certificate must be in a downloadable state
-    if cert.status.value not in ("generated", "emailed"):
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            "Certificate has not been generated yet"
+    certificate_url = None
+    if cert:
+        # Ownership check — the certificate must belong to this student.
+        if not cert.snapshot or cert.snapshot.email.lower() != current_user.email.lower():
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+        if cert.status.value not in (CertStatus.GENERATED.value, CertStatus.EMAILED.value):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate has not been generated yet")
+        certificate_url = cert.png_url
+    else:
+        # Manual submissions keep the uploaded image in their own collection.
+        email = _norm_email(current_user.email)
+        manual_submissions = await ManualCreditSubmission.find({
+            "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            "status": ManualSubmissionStatus.VERIFIED.value,
+        }).to_list()
+        submission = next(
+            (item for item in manual_submissions if _manual_submission_cert_number(item) == cert_number),
+            None,
         )
+        if not submission:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+        certificate_url = submission.certificate_image_url
 
-    # Resolve the PNG file path from the stored /storage URL
-    if not cert.png_url:
+    if not certificate_url:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate file not available")
 
-    file_path = Path(storage_url_to_path(cert.png_url))
+    file_path = Path(storage_url_to_path(certificate_url))
     if not file_path.exists():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -460,7 +741,236 @@ async def download_my_certificate(
 
     return FileResponse(
         path=str(file_path),
-        media_type="image/png",
-        filename=f"{cert_number}.png",
-        headers={"Content-Disposition": f'attachment; filename="{cert_number}.png"'},
+        filename=f"{cert_number}{file_path.suffix.lower() or '.png'}",
     )
+
+
+# ═══ UPCOMING EVENTS & EVENT REGISTRATION ═══════════════════════════════════
+
+
+def _normalize_session(time_str: Optional[str]) -> str:
+    """Normalize session to 'FN' or 'AN'."""
+    val = (time_str or "").strip().lower()
+    if "an" in val or "afternoon" in val or "pm" in val and not "10" in val and not "11" in val and not "9" in val and not "8" in val:
+        return "AN"
+    return "FN"
+
+
+@router.get("/student/upcoming-events")
+async def list_upcoming_events(
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+
+    now = datetime.utcnow()
+    today_start = datetime(now.year, now.month, now.day)
+
+    # Auto-complete past active/closed events
+    past_active = await Event.find({
+        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "event_date": {"$lt": today_start},
+    }).to_list()
+    for pe in past_active:
+        await pe.set({"status": EventStatus.COMPLETED.value})
+
+    events = await Event.find({
+        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "event_date": {"$gte": today_start},
+    }).sort(+Event.event_date).to_list()
+
+    clubs = await Club.find().to_list()
+    club_map = {str(c.id): c.name for c in clubs}
+
+    # Fetch this student's registrations
+    registrations = await EventRegistration.find(
+        EventRegistration.student_email == current_user.email.lower(),
+    ).to_list()
+    student_reg_map = {}
+    for r in registrations:
+        eid = str(r.event_id)
+        reg_type = getattr(r, "registration_type", "participant")
+        reg_status = getattr(r, "status", "accepted" if reg_type == "participant" else "pending")
+        student_reg_map[eid] = {
+            "id": str(r.id),
+            "type": reg_type,
+            "status": reg_status,
+        }
+
+    # Count registrations per event
+    all_regs = await EventRegistration.find().to_list()
+    reg_counts = {}
+    volunteer_counts = {}
+    for r in all_regs:
+        eid = str(r.event_id)
+        reg_type = getattr(r, "registration_type", "participant")
+        reg_status = getattr(r, "status", "accepted")
+        reg_counts[eid] = reg_counts.get(eid, 0) + 1
+        if reg_type == "volunteer" and reg_status != "rejected":
+            volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
+
+    results = []
+    for e in events:
+        eid = str(e.id)
+        session = _normalize_session(e.event_time)
+        my_reg = student_reg_map.get(eid)
+        results.append({
+            "id": eid,
+            "name": e.name,
+            "description": e.description,
+            "club_id": str(e.club_id),
+            "club_name": club_map.get(str(e.club_id), "Unknown"),
+            "event_date": e.event_date.isoformat() if e.event_date else None,
+            "event_time": e.event_time,
+            "session": session,
+            "venue": e.venue,
+            "category": e.category,
+            "poster_url": e.poster_url,
+            "is_registered": my_reg is not None,
+            "registration_id": my_reg["id"] if my_reg else None,
+            "registration_type": my_reg["type"] if my_reg else None,
+            "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
+            "registered_count": reg_counts.get(eid, 0),
+            "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
+            "volunteers_registered": volunteer_counts.get(eid, 0),
+            "registration_stopped": getattr(e, "registration_stopped", False) or False,
+        })
+    return results
+
+
+@router.post("/student/events/{event_id}/register")
+async def register_for_event(
+    event_id: PydanticObjectId,
+    type: str = "participant",
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Register for an upcoming event. Validates against duplicate registration and same-day same-session collision."""
+    event = await Event.get(event_id)
+    if not event or event.status != EventStatus.ACTIVE:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
+
+    if getattr(event, "registration_stopped", False):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration has been stopped for this event. Max participants reached."
+        )
+
+    student_email = current_user.email.lower()
+
+    # Check if already registered for this event
+    existing_reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == student_email,
+    )
+    if existing_reg:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event")
+
+    # Format event date and session
+    event_date_str = event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
+    session = _normalize_session(event.event_time)
+    session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
+
+    # Collision Check: Cannot register for multiple events on same date & same session
+    collision = await EventRegistration.find_one(
+        EventRegistration.student_email == student_email,
+        EventRegistration.event_date_str == event_date_str,
+        EventRegistration.session == session,
+    )
+    if collision:
+        conflicting_event = await Event.get(collision.event_id)
+        conflict_name = conflicting_event.name if conflicting_event else "another event"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Registration conflict: You are already registered for '{conflict_name}' on {event_date_str} in the {session_label} session.",
+        )
+
+    # Volunteer capacity check
+    if type == "volunteer":
+        if (event.volunteers_required or 0) <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Volunteering is not currently open for this event")
+        volunteers_registered = await EventRegistration.find(
+            EventRegistration.event_id == event_id,
+            EventRegistration.registration_type == "volunteer",
+            {"$or": [{"status": "accepted"}, {"status": "pending"}]}
+        ).count()
+        if volunteers_registered >= (event.volunteers_required or 0):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Maximum volunteers already registered for this event")
+
+    # Create registration
+    reg = EventRegistration(
+        event_id=event.id,
+        student_id=current_user.id,
+        student_name=current_user.name,
+        student_email=student_email,
+        registration_number=current_user.registration_number,
+        department=current_user.department,
+        event_date_str=event_date_str,
+        session=session,
+        registration_type=type,
+        status="pending" if type == "volunteer" else "accepted",
+    )
+    await reg.insert()
+
+    from ...models.participant import Participant, ParticipantSource
+    existing_p = await Participant.find_one(
+        Participant.event_id == event_id,
+        Participant.email == student_email
+    )
+    if not existing_p:
+        p = Participant(
+            event_id=event.id,
+            club_id=event.club_id,
+            email=student_email,
+            registration_number=current_user.registration_number,
+            cert_type=type,
+            fields={
+                "Name": current_user.name or "",
+                "Email": student_email,
+                "Registration Number": current_user.registration_number or "",
+                "Department": current_user.department or "",
+            },
+            source=ParticipantSource.REGISTRATION,
+            verified=(type != "volunteer"),
+            status="pending" if type == "volunteer" else "accepted",
+        )
+        await p.insert()
+
+    # Increment participant count
+    await event.set({"participant_count": event.participant_count + 1})
+
+    msg = f"Volunteer request submitted for '{event.name}'. Awaiting club coordinator approval." if type == "volunteer" else f"Successfully registered for '{event.name}'"
+    return {
+        "message": msg,
+        "registration_id": str(reg.id),
+        "session": session,
+    }
+
+
+@router.post("/student/events/{event_id}/cancel-registration")
+@router.delete("/student/events/{event_id}/register")
+async def cancel_event_registration(
+    event_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Cancel registration for an upcoming event."""
+    student_email = current_user.email.lower()
+    reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == student_email,
+    )
+    if not reg:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
+
+    await reg.delete()
+
+    from ...models.participant import Participant, ParticipantSource
+    p = await Participant.find_one(
+        Participant.event_id == event_id,
+        Participant.email == student_email
+    )
+    if p and p.source == ParticipantSource.REGISTRATION:
+        await p.delete()
+
+    event = await Event.get(event_id)
+    if event and event.participant_count > 0:
+        await event.set({"participant_count": max(0, event.participant_count - 1)})
+
+    return {"message": "Registration cancelled successfully"}

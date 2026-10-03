@@ -8,6 +8,7 @@ import {
   useUpdateRoleMapping,
 } from './api'
 import { useImageTemplates } from '../club/eventsApi'
+import { toBackendUrl } from '../../utils/axiosInstance'
 
 const EMPTY_POSITION = { x_percent: 50, y_percent: 50, font_size_percent: 2.5 }
 const CERT_FIELD_KEY = 'Cert'
@@ -381,7 +382,7 @@ export default function CertificateMappingTab() {
                 >
                   <img 
                     ref={imageRef}
-                    src={`http://localhost:8000/static/certificate_templates/${form.template_filename}`}
+                    src={toBackendUrl(`/static/certificate_templates/${form.template_filename}`)}
                     alt="Certificate Template Preview" 
                     className="w-full h-auto block select-none pointer-events-none"
                     onError={(e) => e.target.style.display = 'none'}

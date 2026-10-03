@@ -5,6 +5,7 @@ export const hodKeys = {
   me: () => ['hod', 'me'],
   students: (filters) => ['hod', 'students', filters],
   certificates: (studentId) => ['hod', 'student-certificates', studentId],
+  performance: (filters) => ['hod', 'performance', filters],
 }
 
 export function useHodProfile() {
@@ -41,3 +42,16 @@ export function useHodStudentCertificates(studentId) {
     enabled: !!studentId,
   })
 }
+
+export function useHodPerformance(filters = {}) {
+  return useQuery({
+    queryKey: hodKeys.performance(filters),
+    queryFn: async () => {
+      const params = {}
+      if (filters.batch) params.batch = filters.batch
+      const { data } = await axiosInstance.get('/hod/performance', { params })
+      return data
+    },
+  })
+}
+

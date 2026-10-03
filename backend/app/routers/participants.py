@@ -8,7 +8,7 @@ from ..models.user import User
 from ..models.event import Event
 from ..models.participant import Participant, ParticipantSource
 from ..schemas.participant import (
-    FieldMappingRequest, ParticipantCreate, ParticipantResponse, UploadResponse,
+    FieldMappingRequest, ParticipantCreate, ParticipantResponse, UploadResponse, ParticipantTypeUpdate
 )
 from ..services.excel_service import parse_participants_excel
 
@@ -86,6 +86,20 @@ async def verify_participant(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Participant not found")
     await p.set({"verified": True})
     return {"message": "Participant verified"}
+
+
+@router.patch("/{participant_id}/type")
+async def update_participant_type(
+    club_id: PydanticObjectId, event_id: PydanticObjectId,
+    participant_id: PydanticObjectId,
+    body: ParticipantTypeUpdate,
+    _user: User = Depends(require_event_access),
+):
+    p = await Participant.get(participant_id)
+    if not p or p.event_id != event_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Participant not found")
+    await p.set({"cert_type": body.cert_type})
+    return {"message": "Participant type updated"}
 
 
 @router.post("/upload", response_model=UploadResponse)
