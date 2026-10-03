@@ -771,7 +771,7 @@ export default function StudentDashboard() {
   }
 
   const generatedCertificatesCount = (certs || []).filter((c) => ['generated', 'emailed'].includes((c?.status || '').toLowerCase())).length
-  const visibleCertificates = (certs || []).filter((c) => c?.status === 'emailed')
+  const visibleCertificates = (certs || []).filter((c) => ['emailed', 'verified'].includes((c?.status || '').toLowerCase()))
   const uploadedVerifiedCount = (manualSubmissions || []).filter((s) => s?.status === 'verified').length
   const totalCerts   = generatedCertificatesCount + uploadedVerifiedCount
   const totalCredits = credits?.total_credits ?? 0
@@ -907,7 +907,7 @@ export default function StudentDashboard() {
       render: (_, row) => {
         const certNumber = row?.cert_number
         const isDownloading = downloadingId === row._id
-        const canDownload = ['generated', 'emailed'].includes(String(row?.status || '').toLowerCase())
+        const canDownload = ['generated', 'emailed', 'verified'].includes(String(row?.status || '').toLowerCase())
         const viewUrl = row?.png_url
           ? (String(row.png_url).startsWith('http') ? row.png_url : `${BACKEND_URL}${row.png_url}`)
           : null

@@ -159,7 +159,7 @@ export default function App() {
         <Route
           path="/faculty"
           element={
-            <ProtectedRoute allowedRoles={[ROLES.FACULTY, ROLES.TUTOR, ROLES.SUPER_ADMIN]}>
+            <ProtectedRoute allowedRoles={[ROLES.FACULTY, ROLES.TUTOR, ROLES.HOD, ROLES.SUPER_ADMIN]}>
               <FacultyDashboard />
             </ProtectedRoute>
           }
@@ -167,7 +167,7 @@ export default function App() {
         <Route
           path="/faculty/history"
           element={
-            <ProtectedRoute allowedRoles={[ROLES.FACULTY, ROLES.TUTOR, ROLES.SUPER_ADMIN]}>
+            <ProtectedRoute allowedRoles={[ROLES.FACULTY, ROLES.TUTOR, ROLES.HOD, ROLES.SUPER_ADMIN]}>
               <FacultyDashboard />
             </ProtectedRoute>
           }

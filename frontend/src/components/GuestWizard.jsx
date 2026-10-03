@@ -410,17 +410,50 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
 
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n))
 
+  const numericLimits = {
+    x_percent: [0, 100],
+    y_percent: [0, 100],
+    font_size: [8, 120],
+  }
+
+  const numericDefaults = {
+    x_percent: 50,
+    y_percent: 50,
+    font_size: 24,
+  }
+
   const updateProp = (col, prop, val) => {
+    if (val === '') {
+      setPositions((prev) => ({ ...prev, [col]: { ...prev[col], [prop]: '' } }))
+      return
+    }
+
     const parsed = parseFloat(val)
     if (Number.isNaN(parsed)) return
-    const limits = {
-      x_percent: [0, 100],
-      y_percent: [0, 100],
-      font_size: [8, 120],
-    }
-    const [min, max] = limits[prop] || [0, 9999]
+    const [min, max] = numericLimits[prop] || [0, 9999]
     const nextVal = Number(clamp(parsed, min, max).toFixed(2))
     setPositions((prev) => ({ ...prev, [col]: { ...prev[col], [prop]: nextVal } }))
+  }
+
+  const restoreEmptyValue = (col, prop) => {
+    setPositions((prev) => {
+      if (prev[col]?.[prop] !== '') return prev
+
+      return {
+        ...prev,
+        [col]: { ...prev[col], [prop]: numericDefaults[prop] ?? 0 },
+      }
+    })
+  }
+
+  const getSafeValue = (position, prop) => {
+    if (position?.[prop] === '') return numericDefaults[prop] ?? 0
+
+    const parsed = Number(position?.[prop])
+    if (!Number.isFinite(parsed)) return numericDefaults[prop] ?? 0
+
+    const [min, max] = numericLimits[prop] || [0, 9999]
+    return Number(clamp(parsed, min, max).toFixed(2))
   }
 
   const savePositions = async () => {
@@ -429,9 +462,9 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
       const columnPositions = {}
       selectedColumns.forEach((col) => {
         columnPositions[col] = {
-          x_percent:         positions[col].x_percent,
-          y_percent:         positions[col].y_percent,
-          font_size:         positions[col].font_size,
+          x_percent:         getSafeValue(positions[col], 'x_percent'),
+          y_percent:         getSafeValue(positions[col], 'y_percent'),
+          font_size:         getSafeValue(positions[col], 'font_size'),
         }
       })
       const rect = canvasRef.current?.getBoundingClientRect()
@@ -555,6 +588,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
                           value={pos[key] ?? ''}
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => updateProp(col, key, e.target.value)}
+                          onBlur={() => restoreEmptyValue(col, key)}
                         />
                         {key === 'font_size' && (
                           <input
@@ -562,7 +596,7 @@ function Step3({ templateUrl, templateBlobUrl, selectedColumns, initialPositions
                             min={8}
                             max={120}
                             step={1}
-                            value={pos.font_size ?? 24}
+                            value={pos.font_size || numericDefaults.font_size}
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => updateProp(col, 'font_size', e.target.value)}
                             className="mt-1 w-full accent-indigo-600"

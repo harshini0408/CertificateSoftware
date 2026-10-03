@@ -23,6 +23,7 @@ import {
   useBulkImportTutors,
   useDownloadTutorImportSample,
   useReassignTutorStudents,
+  useAssignUnassignedStudentsTutor,
   useAddTutorClass,
   useRemoveTutorClass,
   useTutorMappingSummary,
@@ -759,17 +760,42 @@ function NewUserModal({ isOpen, onClose }) {
 // EDIT USER MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 function EditUserModal({ isOpen, onClose, user }) {
-  const [form, setForm] = useState({ name: '', email: '' })
+  const [form, setForm] = useState({ name: '', email: '', departments: [], departmentToAdd: '' })
   const updateUser = useUpdateUser()
+  const { data: departmentsList } = useDepartments({ is_active: true })
 
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
     if (user) {
-      setForm({ name: user.name, email: user.email })
+      setForm({
+        name: user.name,
+        email: user.email,
+        departments: user.role === 'hod'
+          ? (user.departments?.length ? user.departments : (user.department ? [user.department] : []))
+          : [],
+        departmentToAdd: '',
+      })
       setErrors({})
     }
   }, [user])
+
+  const addDepartment = () => {
+    const department = form.departmentToAdd.trim()
+    if (!department || form.departments.includes(department)) return
+    setForm((current) => ({
+      ...current,
+      departments: [...current.departments, department],
+      departmentToAdd: '',
+    }))
+  }
+
+  const removeDepartment = (department) => {
+    setForm((current) => ({
+      ...current,
+      departments: current.departments.filter((item) => item !== department),
+    }))
+  }
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -777,7 +803,18 @@ function EditUserModal({ isOpen, onClose, user }) {
       setErrors({ email: 'Only @psgitech.ac.in emails are allowed' })
       return
     }
-    updateUser.mutate({ userId: user.id, ...form, email: form.email.trim().toLowerCase() }, { onSuccess: onClose })
+    if (user.role === 'hod' && form.departments.length === 0) {
+      setErrors({ departments: 'Select at least one department.' })
+      return
+    }
+
+    const payload = {
+      userId: user.id,
+      name: form.name,
+      email: form.email.trim().toLowerCase(),
+    }
+    if (user.role === 'hod') payload.departments = form.departments
+    updateUser.mutate(payload, { onSuccess: onClose })
   }
 
   if (!user) return null
@@ -801,6 +838,54 @@ function EditUserModal({ isOpen, onClose, user }) {
           <input type="email" className={`form-input ${errors.email ? 'form-input-error' : ''}`} value={form.email} onChange={(e) => { setForm((f) => ({ ...f, email: e.target.value })); setErrors({}); }} />
           {errors.email && <p className="form-error">{errors.email}</p>}
         </div>
+        {user.role === 'hod' && (
+          <div>
+            <label className="form-label">Assigned Departments</label>
+            <div className="flex gap-2">
+              <select
+                className="form-input"
+                value={form.departmentToAdd}
+                onChange={(e) => setForm((current) => ({ ...current, departmentToAdd: e.target.value }))}
+              >
+                <option value="">Select department...</option>
+                {(departmentsList || []).map((department) => (
+                  <option key={department.id} value={department.slug}>
+                    {department.name} ({department.slug})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-secondary whitespace-nowrap"
+                onClick={addDepartment}
+                disabled={!form.departmentToAdd || form.departments.includes(form.departmentToAdd)}
+              >
+                Add
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {form.departments.map((department) => {
+                const details = (departmentsList || []).find(
+                  (item) => item.slug === department || item.name === department,
+                )
+                return (
+                  <span key={department} className="inline-flex items-center gap-2 rounded-full bg-cyan-50 px-3 py-1 text-xs text-cyan-800 ring-1 ring-cyan-200">
+                    {details ? `${details.name} (${details.slug})` : department}
+                    <button
+                      type="button"
+                      className="font-semibold text-cyan-900 hover:text-cyan-700"
+                      onClick={() => removeDepartment(department)}
+                      title={`Remove ${department}`}
+                    >
+                      x
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+            {errors.departments && <p className="form-error">{errors.departments}</p>}
+          </div>
+        )}
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary min-w-[120px]" disabled={updateUser.isPending}>
@@ -2033,6 +2118,75 @@ function FacultyBulkImportModal({ isOpen, onClose }) {
   )
 }
 
+function AssignUnassignedTutorModal({ isOpen, onClose, tutors, students, classContext }) {
+  const [tutorId, setTutorId] = useState('')
+  const assignTutorMutation = useAssignUnassignedStudentsTutor()
+
+  useEffect(() => {
+    if (isOpen) setTutorId('')
+  }, [isOpen])
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!tutorId || !students?.length) return
+
+    assignTutorMutation.mutate(
+      { tutorId, studentIds: students.map((student) => student.id).filter(Boolean) },
+      { onSuccess: onClose },
+    )
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Assign Tutor">
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-900">
+          <p className="font-semibold">
+            {classContext?.department || 'Department'} · Batch {classContext?.batch || '—'} · Section {classContext?.section || '—'}
+          </p>
+          <p className="mt-1 text-xs text-indigo-800">
+            Assign a tutor to {students?.length || 0} currently unassigned student{students?.length === 1 ? '' : 's'}.
+          </p>
+        </div>
+
+        <div>
+          <label className="form-label">Tutor *</label>
+          <select
+            className="form-input"
+            value={tutorId}
+            onChange={(e) => setTutorId(e.target.value)}
+            required
+          >
+            <option value="">Select tutor...</option>
+            {(tutors || []).map((tutor) => (
+              <option key={tutor.id} value={tutor.id}>
+                {tutor.name} ({tutor.username})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="max-h-36 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100">
+          {(students || []).map((student) => (
+            <div key={student.id} className="px-3 py-2 text-xs text-gray-700">
+              <span className="font-medium text-gray-900">{student.name}</span>
+              <span className="text-gray-500"> · {student.registration_number || student.email}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={assignTutorMutation.isPending}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={!tutorId || assignTutorMutation.isPending}>
+            {assignTutorMutation.isPending ? 'Assigning...' : 'Assign Tutor'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 function TutorSwitchModal({ isOpen, onClose, tutors, initialTutor, initialClass, students }) {
   const [fromTutorId, setFromTutorId] = useState('')
   const [toTutorId, setToTutorId] = useState('')
@@ -2644,7 +2798,8 @@ function AddTutorClassModal({ isOpen, onClose, tutor, departments }) {
 }
 
 // ── MAKE FACULTY TUTOR MODAL ────────────────────────────────────────────────
-function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
+function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments, hods }) {
+  const [role, setRole] = useState('tutor')
   const [department, setDepartment] = useState('')
   const [batch, setBatch] = useState('')
   const [section, setSection] = useState('')
@@ -2653,6 +2808,7 @@ function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
 
   useEffect(() => {
     if (!isOpen || !faculty) return
+    setRole('tutor')
     setDepartment(faculty.department || '')
     setBatch(faculty.batch || '')
     setSection(faculty.section || '')
@@ -2661,14 +2817,26 @@ function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!department || !batch || !section) return
+    if (!department || (role === 'tutor' && (!batch || !section))) return
+    const existingHod = (hods || []).find((hod) => (
+      (hod.departments || [hod.department]).some(
+        (hodDepartment) => hodDepartment?.toLowerCase() === department.toLowerCase(),
+      )
+    ))
+    const replaceExistingHod = role === 'hod' && existingHod && window.confirm(
+      `${existingHod.name} is already the HOD for ${department}. Do you want to replace them?`,
+    )
+    if (role === 'hod' && existingHod && !replaceExistingHod) return
+
     makeTutorMutation.mutate(
       {
         facultyId: faculty.id,
+        role,
         department,
-        batch: batch.trim(),
-        section: section.trim().toUpperCase(),
+        batch: role === 'tutor' ? batch.trim() : undefined,
+        section: role === 'tutor' ? section.trim().toUpperCase() : undefined,
         assignUnassigned,
+        replaceExistingHod,
       },
       {
         onSuccess: () => onClose(),
@@ -2679,13 +2847,26 @@ function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
   if (!faculty) return null
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Make as Tutor: ${faculty.name}`}>
+    <Modal isOpen={isOpen} onClose={onClose} title={`Make as: ${faculty.name}`}>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <div className="rounded-lg bg-indigo-50 p-3 border border-indigo-100 text-xs text-indigo-900 leading-relaxed">
           <p className="font-semibold mb-1">Assign Class to Faculty</p>
           <p>
-            Promote <span className="font-bold text-gray-900">{faculty.name}</span> (Faculty ID: <span className="font-mono font-bold text-gray-900">{faculty.username}</span>) as a class Tutor. They will retain full faculty certificate generation privileges and gain class mentoring rights.
+            Promote <span className="font-bold text-gray-900">{faculty.name}</span> (Faculty ID: <span className="font-mono font-bold text-gray-900">{faculty.username}</span>) to an additional faculty role.
           </p>
+        </div>
+
+        <div>
+          <label className="form-label">Make as *</label>
+          <select
+            className="form-input"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            required
+          >
+            <option value="tutor">Tutor</option>
+            <option value="hod">HOD</option>
+          </select>
         </div>
 
         <div>
@@ -2705,7 +2886,7 @@ function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
           </select>
         </div>
 
-        <div>
+        {role === 'tutor' && <div>
           <label className="form-label">Batch (e.g. 2024-2028) *</label>
           <input
             type="text"
@@ -2715,9 +2896,9 @@ function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
             onChange={(e) => setBatch(e.target.value)}
             required
           />
-        </div>
+        </div>}
 
-        <div>
+        {role === 'tutor' && <div>
           <label className="form-label">Section (e.g. A, B, C) *</label>
           <input
             type="text"
@@ -2728,9 +2909,9 @@ function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
             onChange={(e) => setSection(e.target.value.toUpperCase())}
             required
           />
-        </div>
+        </div>}
 
-        <div className="flex items-center gap-2 pt-1">
+        {role === 'tutor' && <div className="flex items-center gap-2 pt-1">
           <input
             type="checkbox"
             id="make-tutor-assign-unassigned"
@@ -2741,7 +2922,7 @@ function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
           <label htmlFor="make-tutor-assign-unassigned" className="text-xs text-gray-700 cursor-pointer select-none">
             Automatically map unassigned students of this class to this tutor
           </label>
-        </div>
+        </div>}
 
         <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
           <button
@@ -2755,9 +2936,9 @@ function MakeFacultyTutorModal({ isOpen, onClose, faculty, departments }) {
           <button
             type="submit"
             className="btn-primary text-sm bg-indigo-600 hover:bg-indigo-700"
-            disabled={makeTutorMutation.isPending || !department || !batch || !section}
+            disabled={makeTutorMutation.isPending || !department || (role === 'tutor' && (!batch || !section))}
           >
-            {makeTutorMutation.isPending ? 'Assigning...' : 'Confirm & Make as Tutor'}
+            {makeTutorMutation.isPending ? 'Assigning...' : `Confirm & Make as ${role === 'hod' ? 'HOD' : 'Tutor'}`}
           </button>
         </div>
       </form>
@@ -2772,6 +2953,7 @@ function StudentGroupedView({
   tutors,
   departments,
   onSwitchTutor,
+  onAssignTutor,
   onEditUser,
   onDeleteUser,
 }) {
@@ -3042,6 +3224,7 @@ function StudentGroupedView({
                                           t.id === tutorGroup.tutorId ||
                                           (tutorGroup.tutorEmail && t.email?.toLowerCase() === tutorGroup.tutorEmail.toLowerCase()),
                                       ) || null
+                                    const isUnassignedTutor = !tutorGroup.tutorId && !tutorGroup.tutorEmail
 
                                     return (
                                       <div
@@ -3063,10 +3246,16 @@ function StudentGroupedView({
                                           </div>
                                           <button
                                             type="button"
-                                            onClick={() => onSwitchTutor(tutorObj, { department: dept, batch, section })}
+                                            onClick={() => {
+                                              if (isUnassignedTutor) {
+                                                onAssignTutor(tutorGroup.students, { department: dept, batch, section })
+                                              } else {
+                                                onSwitchTutor(tutorObj, { department: dept, batch, section })
+                                              }
+                                            }}
                                             className="inline-flex items-center gap-1.5 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors border border-indigo-200"
                                           >
-                                            ⇄ Switch Tutor
+                                            {isUnassignedTutor ? 'Assign Tutor' : '⇄ Switch Tutor'}
                                           </button>
                                         </div>
 
@@ -3601,7 +3790,7 @@ function RoleUsersView({
               className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 transition-colors border border-indigo-200"
               title="Assign this faculty as a class tutor"
             >
-              <span>👨‍🏫</span> Make as Tutor
+              <span>👨‍🏫</span> Make as
             </button>
           )}
           <button
@@ -3682,6 +3871,7 @@ function UsersTab() {
   // Queries
   const { data: roleUsers, isLoading: roleUsersLoading } = useUsers({ role: activeRoleTab })
   const { data: tutors } = useUsers({ role: 'tutor' })
+  const { data: hods } = useUsers({ role: 'hod' })
   const { data: students } = useUsers({ role: 'student' })
   const { data: clubs } = useClubs()
   const { data: departments } = useDepartments()
@@ -3699,12 +3889,15 @@ function UsersTab() {
   const [showMakeFacultyTutor, setShowMakeFacultyTutor] = useState(false)
   const [selectedFacultyForTutor, setSelectedFacultyForTutor] = useState(null)
   const [showTutorSwitch, setShowTutorSwitch] = useState(false)
+  const [showAssignTutor, setShowAssignTutor] = useState(false)
   const [showTutorClassSwitch, setShowTutorClassSwitch] = useState(false)
   const [showAddTutorClass, setShowAddTutorClass] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [editUser, setEditUser] = useState(null)
   const [selectedTutorForSwitch, setSelectedTutorForSwitch] = useState(null)
   const [selectedClassForSwitch, setSelectedClassForSwitch] = useState(null)
+  const [selectedUnassignedStudents, setSelectedUnassignedStudents] = useState([])
+  const [selectedUnassignedClass, setSelectedUnassignedClass] = useState(null)
   const [selectedTutorForClass, setSelectedTutorForClass] = useState(null)
 
   const handleDeleteUser = async (user) => {
@@ -3824,6 +4017,11 @@ function UsersTab() {
             setSelectedClassForSwitch(classContext || null)
             setShowTutorSwitch(true)
           }}
+          onAssignTutor={(studentsForTutor, classContext) => {
+            setSelectedUnassignedStudents(studentsForTutor)
+            setSelectedUnassignedClass(classContext)
+            setShowAssignTutor(true)
+          }}
           onEditUser={(u) => setEditUser(u)}
           onDeleteUser={handleDeleteUser}
         />
@@ -3880,6 +4078,7 @@ function UsersTab() {
         }}
         faculty={selectedFacultyForTutor}
         departments={departments || []}
+        hods={hods || []}
       />
       <TutorSwitchModal
         isOpen={showTutorSwitch}
@@ -3892,6 +4091,17 @@ function UsersTab() {
         initialTutor={selectedTutorForSwitch}
         initialClass={selectedClassForSwitch}
         students={students || []}
+      />
+      <AssignUnassignedTutorModal
+        isOpen={showAssignTutor}
+        onClose={() => {
+          setShowAssignTutor(false)
+          setSelectedUnassignedStudents([])
+          setSelectedUnassignedClass(null)
+        }}
+        tutors={tutors || []}
+        students={selectedUnassignedStudents}
+        classContext={selectedUnassignedClass}
       />
       <SwitchTutorClassModal
         isOpen={showTutorClassSwitch}

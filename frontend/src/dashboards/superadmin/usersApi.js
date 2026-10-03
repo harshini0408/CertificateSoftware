@@ -292,6 +292,30 @@ export function useReassignTutorStudents() {
   })
 }
 
+export function useAssignUnassignedStudentsTutor() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ tutorId, studentIds }) =>
+      axiosInstance.post('/admin/students/assign-tutor', {
+        new_tutor_id: tutorId,
+        student_ids: studentIds,
+      }),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({
+        type: 'success',
+        message: `${data.assigned} student${data.assigned !== 1 ? 's' : ''} assigned to ${data.tutor}.`,
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to assign tutor.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
 export function useAddTutorClass() {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
@@ -340,18 +364,22 @@ export function useMakeFacultyTutor() {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: ({ facultyId, department, batch, section, assignUnassigned = true }) =>
-      axiosInstance.post(`/admin/faculty/${facultyId}/make-tutor`, {
+    mutationFn: ({ facultyId, role = 'tutor', department, batch, section, assignUnassigned = true, replaceExistingHod = false }) =>
+      axiosInstance.post(`/admin/faculty/${facultyId}/make-role`, {
+        role,
         department,
         batch,
         section,
         assign_unassigned_students: assignUnassigned,
+        replace_existing_hod: replaceExistingHod,
       }),
     onSuccess: ({ data }) => {
       qc.invalidateQueries({ queryKey: ['users'] })
       addToast({
         type: 'success',
-        message: `${data.name || 'Faculty'} is now assigned as Tutor for ${data.department} ${data.batch} ${data.section}!`,
+        message: data.role === 'hod'
+          ? `${data.name || 'Faculty'} is now the HOD for ${data.department}!`
+          : `${data.name || 'Faculty'} is now assigned as Tutor for ${data.department} ${data.batch} ${data.section}!`,
       })
     },
     onError: (err) => {
@@ -413,6 +441,5 @@ export function useDownloadFacultyImportSample() {
     },
   })
 }
-
 
 

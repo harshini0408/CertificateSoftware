@@ -42,11 +42,11 @@ async def get_current_user(
 
 def require_role(*roles: UserRole):
     """Dependency factory: 403 if authenticated user's role is not in *roles*.
-    All tutors are faculty by default, so UserRole.TUTOR automatically satisfies UserRole.FACULTY.
+    Tutors and HODs are faculty by default, so both satisfy UserRole.FACULTY.
     """
     async def _checker(current_user: User = Depends(get_current_user)) -> User:
         effective_roles = {current_user.role}
-        if current_user.role == UserRole.TUTOR:
+        if current_user.role in {UserRole.TUTOR, UserRole.HOD}:
             effective_roles.add(UserRole.FACULTY)
         if not any(r in roles for r in effective_roles):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
@@ -54,12 +54,13 @@ def require_role(*roles: UserRole):
     return _checker
 
 
-# ── Certificate Generator Gate (Guest, Faculty, Tutor, SuperAdmin) ───────────
+# ── Certificate Generator Gate (Guest, Faculty, Tutor, HOD, SuperAdmin) ──────
 
 CERT_GENERATOR_ROLES = {
     UserRole.GUEST,
     UserRole.FACULTY,
     UserRole.TUTOR,
+    UserRole.HOD,
     UserRole.SUPER_ADMIN,
 }
 
@@ -67,7 +68,7 @@ CERT_GENERATOR_ROLES = {
 async def require_cert_generator(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """Allow access to guest, faculty, tutor, and super_admin users for certificate wizard."""
+    """Allow access to active certificate-generator users."""
     if current_user.role not in CERT_GENERATOR_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Certificate generation access denied")
     return current_user

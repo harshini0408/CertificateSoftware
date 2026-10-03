@@ -33,7 +33,7 @@ from ...services.semester_service import get_current_semester, set_current_semes
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
 from ...schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
 from ...schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
-from ...schemas.user import UserCreate, UserUpdate, UserResponse, TutorClassRequest
+from ...schemas.user import UserCreate, UserUpdate, UserResponse, TutorClassRequest, FacultyRoleRequest
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -1338,6 +1338,84 @@ async def reassign_tutor_students(
     }
 
 
+@router.post("/students/assign-tutor")
+async def assign_unassigned_students_to_tutor(
+    body: TutorReassignRequest,
+    _user: User = _admin,
+):
+    """Assign selected, currently unassigned students to a tutor."""
+    tutor = await User.get(body.new_tutor_id)
+    if not tutor or tutor.role != UserRole.TUTOR:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tutor not found")
+
+    student_ids = []
+    for student_id in body.student_ids or []:
+        try:
+            student_ids.append(PydanticObjectId(student_id))
+        except Exception:
+            continue
+
+    if not student_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "At least one student is required")
+
+    students = await User.find({
+        "_id": {"$in": student_ids},
+        "role": UserRole.STUDENT,
+    }).to_list()
+
+    assigned = 0
+    skipped = 0
+    assigned_emails = []
+    now = datetime.utcnow()
+
+    for student in students:
+        email = (student.email or "").strip().lower()
+        if not email:
+            skipped += 1
+            continue
+
+        credit = await StudentCredit.find_one(StudentCredit.student_email == email)
+        if credit and credit.tutor_email:
+            skipped += 1
+            continue
+
+        if credit:
+            await credit.set({
+                "tutor_email": tutor.email,
+                "last_updated": now,
+            })
+        else:
+            await StudentCredit(
+                student_email=email,
+                tutor_email=tutor.email,
+                registration_number=student.registration_number or "",
+                student_name=student.name,
+                department=student.department,
+                batch=student.batch,
+                section=student.section,
+                total_credits=0,
+                credit_history=[],
+                last_updated=now,
+            ).insert()
+
+        assigned += 1
+        assigned_emails.append(email)
+
+    if assigned_emails:
+        import re
+        email_patterns = [re.compile(f"^{re.escape(email)}$", re.IGNORECASE) for email in assigned_emails]
+        await ManualCreditSubmission.find({
+            "student_email": {"$in": email_patterns},
+            "status": ManualSubmissionStatus.PENDING,
+        }).update_many({"$set": {"tutor_email": tutor.email}})
+
+    return {
+        "assigned": assigned,
+        "skipped": skipped,
+        "tutor": tutor.email,
+    }
+
+
 @router.post("/tutors/{tutor_id}/classes", response_model=UserResponse)
 async def add_tutor_class(
     tutor_id: PydanticObjectId,
@@ -1455,24 +1533,60 @@ async def remove_tutor_class(
     return _user_response(tutor)
 
 
-@router.post("/faculty/{faculty_id}/make-tutor", response_model=UserResponse)
+@router.post("/faculty/{faculty_id}/make-role", response_model=UserResponse)
 async def make_faculty_tutor(
     faculty_id: PydanticObjectId,
-    body: TutorClassRequest,
+    body: FacultyRoleRequest,
     _user: User = _admin,
 ):
     user = await User.get(faculty_id)
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Faculty user not found")
     if user.role not in (UserRole.FACULTY, UserRole.TUTOR):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"User with role '{user.role}' cannot be made a tutor")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"User with role '{user.role}' cannot be assigned this role")
 
     resolved_dept = await _resolve_department_name(body.department)
     if not resolved_dept:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Department is required")
 
-    batch = body.batch.strip()
-    section = body.section.strip().upper()
+    if body.role == "hod":
+        existing_hod = await User.find_one({
+            "$and": [
+                {"role": UserRole.HOD.value},
+                {"$or": [{"department": resolved_dept}, {"departments": resolved_dept}]},
+                {"_id": {"$ne": user.id}},
+            ]
+        })
+        if existing_hod and not body.replace_existing_hod:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"HOD already exists for department '{resolved_dept}'",
+            )
+        if existing_hod:
+            remaining_departments = [
+                dep for dep in (existing_hod.departments or [])
+                if dep.lower() != resolved_dept.lower()
+            ]
+            if remaining_departments:
+                existing_hod.departments = remaining_departments
+                existing_hod.department = remaining_departments[0]
+            else:
+                existing_hod.role = UserRole.FACULTY
+                existing_hod.departments = None
+                existing_hod.department = None
+            await existing_hod.save()
+
+        user.role = UserRole.HOD
+        user.department = resolved_dept
+        user.departments = [resolved_dept]
+        user.batch = None
+        user.section = None
+        user.assigned_classes = None
+        await user.save()
+        return _user_response(user)
+
+    batch = (body.batch or "").strip()
+    section = (body.section or "").strip().upper()
     if not batch or not section:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Batch and Section are required")
 
@@ -1549,10 +1663,10 @@ async def list_users(
 ):
     filters = []
     if role:
-        # Tutors inherit faculty permissions, so include them in the Faculty
-        # management view while preserving their stored tutor role and access.
+        # Tutors and HODs inherit faculty permissions, so include them in the
+        # Faculty management view while preserving their primary role.
         if role == UserRole.FACULTY.value:
-            filters.append({"role": {"$in": [UserRole.FACULTY.value, UserRole.TUTOR.value]}})
+            filters.append({"role": {"$in": [UserRole.FACULTY.value, UserRole.TUTOR.value, UserRole.HOD.value]}})
         else:
             filters.append({"role": role})
     if club_id:
@@ -1840,6 +1954,22 @@ async def update_user(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
 
     updates = body.model_dump(exclude_none=True)
+
+    if target.role == UserRole.HOD and "departments" in updates:
+        requested_departments = [str(department).strip() for department in updates["departments"] if str(department).strip()]
+        if not requested_departments:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "An HOD must be assigned to at least one department")
+
+        resolved_departments = []
+        for department in requested_departments:
+            resolved_department = await _resolve_department_name(department)
+            if not resolved_department:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Department '{department}' was not found")
+            if resolved_department not in resolved_departments:
+                resolved_departments.append(resolved_department)
+
+        updates["departments"] = resolved_departments
+        updates["department"] = resolved_departments[0]
 
     # Username uniqueness check
     if "username" in updates and updates["username"] != target.username:

@@ -131,6 +131,15 @@ class TutorClassRequest(BaseModel):
     assign_unassigned_students: bool = True
 
 
+class FacultyRoleRequest(BaseModel):
+    role: Literal["tutor", "hod"]
+    department: str
+    batch: Optional[str] = None
+    section: Optional[str] = None
+    assign_unassigned_students: bool = True
+    replace_existing_hod: bool = False
+
+
 class UserResponse(BaseModel):
     id: str
     username: str

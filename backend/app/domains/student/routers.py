@@ -31,6 +31,10 @@ def _norm_email(value: str | None) -> str:
     return (value or "").strip().lower()
 
 
+def _manual_submission_cert_number(submission: ManualCreditSubmission) -> str:
+    return f"STU-MANUAL-{str(submission.id)[-8:].upper()}"
+
+
 def is_temporary_reg_no(reg_no: Optional[str]) -> bool:
     if not reg_no:
         return True
@@ -340,7 +344,8 @@ async def get_credits_history(current_user: User = Depends(require_role(UserRole
 async def get_my_certificates(current_user: User = Depends(require_role(UserRole.STUDENT))):
     """Return all certificates belonging to the current student.
 
-    Includes both club and department certificates.
+    Includes club certificates, department certificates, and tutor-verified
+    student uploads.
     Matches by email since participants may not have a user_id link.
     """
     email = _norm_email(current_user.email)
@@ -382,6 +387,25 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
             "issued_at": dc.emailed_at or dc.created_at,
             "status": "emailed" if dc.emailed_at else "generated",
             "png_url": dc.png_url,
+            "pdf_url": None,
+        })
+
+    # A verified student upload is the student's original certificate image,
+    # rather than an event-generated Certificate document.
+    manual_submissions = await ManualCreditSubmission.find({
+        "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        "status": ManualSubmissionStatus.VERIFIED.value,
+    }).to_list()
+    for submission in manual_submissions:
+        results.append({
+            "_id": f"manual-{submission.id}",
+            "cert_number": _manual_submission_cert_number(submission),
+            "cert_type": submission.cert_type,
+            "event_name": "Student Certificate Submission",
+            "club_name": "Student Upload",
+            "issued_at": submission.reviewed_at or submission.submitted_at,
+            "status": ManualSubmissionStatus.VERIFIED.value,
+            "png_url": submission.certificate_image_url,
             "pdf_url": None,
         })
 
@@ -680,27 +704,35 @@ async def download_my_certificate(
     Verifies ownership by matching snapshot.email == current_user.email.
     Returns the PNG as a file attachment.
     """
-    # Find certificate by cert_number
+    # Find an event-generated certificate by cert_number first.
     cert = await Certificate.find_one(Certificate.cert_number == cert_number)
-    if not cert:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
-
-    # Ownership check — the certificate must belong to this student
-    if not cert.snapshot or cert.snapshot.email.lower() != current_user.email.lower():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
-
-    # Certificate must be in a downloadable state
-    if cert.status.value not in ("generated", "emailed"):
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            "Certificate has not been generated yet"
+    certificate_url = None
+    if cert:
+        # Ownership check — the certificate must belong to this student.
+        if not cert.snapshot or cert.snapshot.email.lower() != current_user.email.lower():
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+        if cert.status.value not in (CertStatus.GENERATED.value, CertStatus.EMAILED.value):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate has not been generated yet")
+        certificate_url = cert.png_url
+    else:
+        # Manual submissions keep the uploaded image in their own collection.
+        email = _norm_email(current_user.email)
+        manual_submissions = await ManualCreditSubmission.find({
+            "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            "status": ManualSubmissionStatus.VERIFIED.value,
+        }).to_list()
+        submission = next(
+            (item for item in manual_submissions if _manual_submission_cert_number(item) == cert_number),
+            None,
         )
+        if not submission:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+        certificate_url = submission.certificate_image_url
 
-    # Resolve the PNG file path from the stored /storage URL
-    if not cert.png_url:
+    if not certificate_url:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate file not available")
 
-    file_path = Path(storage_url_to_path(cert.png_url))
+    file_path = Path(storage_url_to_path(certificate_url))
     if not file_path.exists():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -709,9 +741,7 @@ async def download_my_certificate(
 
     return FileResponse(
         path=str(file_path),
-        media_type="image/png",
-        filename=f"{cert_number}.png",
-        headers={"Content-Disposition": f'attachment; filename="{cert_number}.png"'},
+        filename=f"{cert_number}{file_path.suffix.lower() or '.png'}",
     )
 
 
@@ -944,4 +974,3 @@ async def cancel_event_registration(
         await event.set({"participant_count": max(0, event.participant_count - 1)})
 
     return {"message": "Registration cancelled successfully"}
-
