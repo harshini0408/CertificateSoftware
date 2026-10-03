@@ -18,7 +18,8 @@ const authors = [
 
   {
     name: 'Adhithya J',
-    title: ' Full-Stack Developer',
+    title: 'Full-Stack Developer',
+    department: '3rd CSE, Department of Computer Science and Engineering',
     contactEmail: '24z108@psgitech.ac.in',
     /*handle: 'Adhithya',*/
     phone: '8807303793',
@@ -29,6 +30,7 @@ const authors = [
   {
     name: 'Harshini Y',
     title: 'Full-Stack Developer',
+    department: '3rd CSE, Department of Computer Science and Engineering',
     contactEmail: '24z158@psgitech.ac.in',
     /*handle: 'harshini',*/
     phone: '7845990817',

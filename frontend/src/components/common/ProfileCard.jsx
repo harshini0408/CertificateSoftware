@@ -3,6 +3,7 @@ import { useRef } from 'react'
 export default function ProfileCard({
   name,
   title,
+  department,
   contactEmail,
   handle,
   status,
@@ -123,11 +124,18 @@ export default function ProfileCard({
           color: #475569;
           font-size: 0.86rem;
           line-height: 1.5;
-          min-height: 44px;
+        }
+
+        .pc-dept {
+          margin: 0.25rem 0 0;
+          color: #475569;
+          font-size: 0.8rem;
+          line-height: 1.45;
+          font-weight: 500;
         }
 
         .pc-contact {
-          margin: 0.35rem 0 0;
+          margin: 0.45rem 0 0;
           font-size: 0.78rem;
           color: #334155;
         }
@@ -204,6 +212,7 @@ export default function ProfileCard({
         <div className="pc-body">
           <p className="pc-name">{name}</p>
           {showUserInfo ? <p className="pc-title">{title}</p> : null}
+          {department ? <p className="pc-dept">{department}</p> : null}
           {contactEmail ? (
             <p className="pc-contact">
               Reach out: <a href={`mailto:${contactEmail}`}>{contactEmail}</a>

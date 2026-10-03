@@ -1267,6 +1267,94 @@ export default function StudentDashboard() {
               </div>
             ) : activeTab === 'settings' ? (
               <StudentSettingsTab profile={profile} profileLoading={profileLoading} />
+            ) : activeTab === 'cert_verification' ? (
+              <div className="space-y-6">
+                <div>
+                  <h1 className="text-2xl font-bold text-foreground">Certificate Verification</h1>
+                  <p className="mt-0.5 text-sm text-gray-500">
+                    Submit your certificates from external or other events for credit verification by your tutor.
+                  </p>
+                </div>
+
+                <div className="card p-5">
+                  <h2 className="section-title mb-3">Submit Certificate For Credit Verification</h2>
+                  <p className="mb-3 text-sm text-gray-500">
+                    Upload your certificate, choose role and event date. Credits are added only after tutor verification.
+                  </p>
+
+                  <form className="grid grid-cols-1 gap-3 sm:grid-cols-4" onSubmit={handleManualSubmit}>
+                    <div>
+                      <label className="form-label">Role *</label>
+                      <select
+                        className="form-input"
+                        value={uploadForm.cert_type}
+                        onChange={(e) => setUploadForm((p) => ({ ...p, cert_type: e.target.value }))}
+                        disabled={rulesLoading}
+                      >
+                        <option value="">Select role</option>
+                        {(creditRules || []).map((r) => (
+                          <option key={r.cert_type} value={r.cert_type}>
+                            {r.cert_type} (+{r.points})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="form-label">Event Date *</label>
+                      <input
+                        type="date"
+                        className="form-input"
+                        value={uploadForm.event_date}
+                        onChange={(e) => setUploadForm((p) => ({ ...p, event_date: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="form-label">Certificate Image *</label>
+                      <input
+                        id="student-certificate-upload"
+                        type="file"
+                        accept="image/*"
+                        className="form-input"
+                        onChange={(e) => setUploadForm((p) => ({ ...p, certificate_image: e.target.files?.[0] || null }))}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-4 flex justify-end">
+                      <button
+                        type="submit"
+                        className="btn-primary"
+                        disabled={createSubmission.isPending || !uploadForm.cert_type || !uploadForm.event_date || !uploadForm.certificate_image}
+                      >
+                        {createSubmission.isPending ? 'Submitting...' : 'Submit For Verification'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <div>
+                  <h2 className="section-title mb-3">My Verification Requests</h2>
+                  <DataTable
+                    columns={[
+                      { key: 'cert_type', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
+                      { key: 'semester', header: 'Semester', render: (v) => <span className="text-xs text-gray-500">{v || 'Unknown'}</span> },
+                      { key: 'event_date', header: 'Event Date', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
+                      { key: 'certificate_image_url', header: 'Certificate', render: (v) => (
+                        v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View Image</a> : '—'
+                      ) },
+                      { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+                      { key: 'points_awarded', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
+                      { key: 'review_comment', header: 'Tutor Remarks', render: (v) => v || '—' },
+                      { key: 'submitted_at', header: 'Submitted', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
+                    ]}
+                    data={manualSubmissions || []}
+                    isLoading={submissionsLoading}
+                    emptyMessage="No verification requests yet."
+                    rowKey="id"
+                  />
+                </div>
+              </div>
             ) : (
               <>
 
@@ -1433,98 +1521,6 @@ export default function StudentDashboard() {
               })()}
             </div>
 
-            {activeTab === 'cert_verification' && (
-              <div className="space-y-6">
-                <div>
-                  <h1 className="text-2xl font-bold text-foreground">Certificate Verification</h1>
-                  <p className="mt-0.5 text-sm text-gray-500">
-                    Submit your certificates from external or other events for credit verification by your tutor.
-                  </p>
-                </div>
-
-                <div className="card p-5">
-                  <h2 className="section-title mb-3">Submit Certificate For Credit Verification</h2>
-                  <p className="mb-3 text-sm text-gray-500">
-                    Upload your certificate, choose role and event date. Credits are added only after tutor verification.
-                  </p>
-
-                  <form className="grid grid-cols-1 gap-3 sm:grid-cols-4" onSubmit={handleManualSubmit}>
-                    <div>
-                      <label className="form-label">Role *</label>
-                      <select
-                        className="form-input"
-                        value={uploadForm.cert_type}
-                        onChange={(e) => setUploadForm((p) => ({ ...p, cert_type: e.target.value }))}
-                        disabled={rulesLoading}
-                      >
-                        <option value="">Select role</option>
-                        {(creditRules || []).map((r) => (
-                          <option key={r.cert_type} value={r.cert_type}>
-                            {r.cert_type} (+{r.points})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="form-label">Event Date *</label>
-                      <input
-                        type="date"
-                        className="form-input"
-                        value={uploadForm.event_date}
-                        onChange={(e) => setUploadForm((p) => ({ ...p, event_date: e.target.value }))}
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="form-label">Certificate Image *</label>
-                      <input
-                        id="student-certificate-upload"
-                        type="file"
-                        accept="image/*"
-                        className="form-input"
-                        onChange={(e) => setUploadForm((p) => ({ ...p, certificate_image: e.target.files?.[0] || null }))}
-                      />
-                    </div>
-
-                    <div className="sm:col-span-4 flex justify-end">
-                      <button
-                        type="submit"
-                        className="btn-primary"
-                        disabled={createSubmission.isPending || !uploadForm.cert_type || !uploadForm.event_date || !uploadForm.certificate_image}
-                      >
-                        {createSubmission.isPending ? 'Submitting...' : 'Submit For Verification'}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-
-                <div>
-                  <h2 className="section-title mb-3">My Verification Requests</h2>
-                  <DataTable
-                    columns={[
-                      { key: 'cert_type', header: 'Role', render: (v) => <span className="capitalize">{(v || '').replace(/_/g, ' ')}</span> },
-                      { key: 'semester', header: 'Semester', render: (v) => <span className="text-xs text-gray-500">{v || 'Unknown'}</span> },
-                      { key: 'event_date', header: 'Event Date', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
-                      { key: 'certificate_image_url', header: 'Certificate', render: (v) => (
-                        v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View Image</a> : '—'
-                      ) },
-                      { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
-                      { key: 'points_awarded', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
-                      { key: 'review_comment', header: 'Tutor Remarks', render: (v) => v || '—' },
-                      { key: 'submitted_at', header: 'Submitted', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
-                    ]}
-                    data={manualSubmissions || []}
-                    isLoading={submissionsLoading}
-                    emptyMessage="No verification requests yet."
-                    rowKey="id"
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeTab !== 'cert_verification' && (
-              <>
             <div>
               <h2 className="section-title mb-3">Credit History</h2>
               <DataTable
@@ -1605,8 +1601,6 @@ export default function StudentDashboard() {
                 rowKey="_id"
               />
             </div>
-              </>
-            )}
             </>
           )}
           </>
