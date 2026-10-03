@@ -8,7 +8,7 @@ const app = express();
 const CLIENT_DIST = path.join(__dirname, 'frontend', 'dist');
 const INDEX_HTML = path.join(CLIENT_DIST, 'index.html');
 
-const BASE_PATH = (process.env.VITE_BASE_PATH || process.env.BASE_PATH || '/CreditPoints').replace(/\/+$/, '') || '/';
+const BASE_PATH = (process.env.VITE_BASE_PATH || process.env.BASE_PATH || '/SAMS').replace(/\/+$/, '') || '/';
 const BACKEND_ORIGIN = (
   process.env.BACKEND_ORIGIN ||
   process.env.VITE_DEV_BACKEND_ORIGIN ||

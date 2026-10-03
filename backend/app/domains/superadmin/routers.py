@@ -804,8 +804,10 @@ async def bulk_import_students(
             created += 1
 
         except ValueError as ve:
+            skipped += 1
             errors.append({"row": row_idx, "reason": str(ve)})
         except Exception as exc:
+            skipped += 1
             errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
 
     return {"created": created, "skipped": skipped, "errors": errors}
@@ -938,8 +940,10 @@ async def bulk_import_tutors(
             created += 1
 
         except ValueError as ve:
+            skipped += 1
             errors.append({"row": row_idx, "reason": str(ve)})
         except Exception as exc:
+            skipped += 1
             errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
 
     return {"created": created, "skipped": skipped, "errors": errors}
@@ -1052,12 +1056,22 @@ async def bulk_import_faculty(
         faculty_id = get_cell(row_vals, fac_id_idx)
         email = get_cell(row_vals, email_idx).lower()
         department = get_cell(row_vals, dept_idx)
-        username = get_cell(row_vals, user_idx) or faculty_id
-        password = get_cell(row_vals, pass_idx) or username or faculty_id
+        username = get_cell(row_vals, user_idx)
+        password = get_cell(row_vals, pass_idx)
 
         try:
-            if not name or not faculty_id or not email or not department:
-                raise ValueError("Missing required fields: name, faculty id, email, and department are all required")
+            missing_fields = [
+                field for field, value in [
+                    ("name", name),
+                    ("faculty id", faculty_id),
+                    ("email", email),
+                    ("department", department),
+                    ("username (faculty id)", username),
+                    ("password (faculty id)", password),
+                ] if not value
+            ]
+            if missing_fields:
+                raise ValueError(f"Missing: {', '.join(missing_fields)}")
 
             if not email.endswith("@psgitech.ac.in"):
                 raise ValueError(f"Faculty email '{email}' must be a @psgitech.ac.in address")
@@ -1076,7 +1090,6 @@ async def bulk_import_faculty(
                 errors.append({"row": row_idx, "reason": f"Email '{email}' already exists — skipped"})
                 continue
 
-            # Default password is set to password (faculty id) with mandatory OTP reset on first login
             faculty = User(
                 username=username,
                 name=name,
@@ -1091,8 +1104,10 @@ async def bulk_import_faculty(
             created += 1
 
         except ValueError as ve:
+            skipped += 1
             errors.append({"row": row_idx, "reason": str(ve)})
         except Exception as exc:
+            skipped += 1
             errors.append({"row": row_idx, "reason": f"Unexpected error: {exc}"})
 
     return {"created": created, "skipped": skipped, "errors": errors}
@@ -1534,7 +1549,12 @@ async def list_users(
 ):
     filters = []
     if role:
-        filters.append({"role": role})
+        # Tutors inherit faculty permissions, so include them in the Faculty
+        # management view while preserving their stored tutor role and access.
+        if role == UserRole.FACULTY.value:
+            filters.append({"role": {"$in": [UserRole.FACULTY.value, UserRole.TUTOR.value]}})
+        else:
+            filters.append({"role": role})
     if club_id:
         filters.append({"club_id": PydanticObjectId(club_id)})
     if department:

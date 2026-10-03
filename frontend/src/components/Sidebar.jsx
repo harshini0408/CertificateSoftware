@@ -245,11 +245,11 @@ export default function Sidebar() {
             <p className="text-xs text-gray-400 leading-tight">
               PSG iTech
               <br />
-              <span className="font-medium text-navy/60">Activity Points Management Software</span>
+              <span className="font-medium text-navy/60">Students Activity Management Software</span>
             </p>
           </div>
         ) : (
-          <div className="border-t border-gray-100 py-3 flex justify-center" title="PSG iTech Activity Points Management Software">
+          <div className="border-t border-gray-100 py-3 flex justify-center" title="PSG iTech Students Activity Management Software">
             <span className="text-[10px] font-bold text-navy/60">SDC</span>
           </div>
         )}

@@ -79,9 +79,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_BASE_PATH: ${VITE_BASE_PATH:-/CreditPoints/}
-        VITE_API_URL: ${VITE_API_URL:-/CreditPoints/api}
-        VITE_BACKEND_BASE_URL: ${VITE_BACKEND_BASE_URL:-/CreditPoints}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/SAMS/}
+        VITE_API_URL: ${VITE_API_URL:-/SAMS/api}
+        VITE_BACKEND_BASE_URL: ${VITE_BACKEND_BASE_URL:-/SAMS}
         VITE_DEV_BACKEND_ORIGIN: ${VITE_DEV_BACKEND_ORIGIN:-http://backend:2849}
     container_name: certsoftware-frontend
     restart: unless-stopped

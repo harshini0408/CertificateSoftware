@@ -3,7 +3,6 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import ToastProvider from './components/ToastProvider'
 import AuthSessionSync from './components/AuthSessionSync'
-import { FirstLoginPasswordGate } from './components/Navbar'
 import { useAuthStore } from './store/authStore'
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
@@ -40,17 +39,13 @@ const ROLES = {
 }
 
 export default function App() {
-  const requiresPasswordChange = useAuthStore((state) => state.requires_password_change)
-  const role = useAuthStore((state) => state.role)
-  const mustChangePassword = requiresPasswordChange && ['faculty', 'tutor', 'hod', 'principal'].includes(role)
-
   return (
     <>
       {/* Global toast portal */}
       <ToastProvider />
       <AuthSessionSync />
 
-      {mustChangePassword ? <FirstLoginPasswordGate /> : <Routes>
+      <Routes>
         {/* ── Public routes ──────────────────────────────────────────────── */}
         <Route path="/login" element={<Login />} />
         <Route path="/verify/:cert_number" element={<VerifyPage />} />
@@ -209,7 +204,7 @@ export default function App() {
         {/* ── Fallback ───────────────────────────────────────────────────── */}
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>}
+      </Routes>
       <Footer />
     </>
   )

@@ -1954,7 +1954,7 @@ function FacultyBulkImportModal({ isOpen, onClose }) {
               ))}
             </div>
             <p className="mt-2 text-[11px] text-indigo-600">
-              Note: Both username and initial password will be set from the file (default: Faculty ID). Department is strictly required. Upon first login, faculty will be prompted to change their password via email OTP.
+              Every field is required. Rows with missing data or a duplicate username/email are skipped and reported below. Upon first login, faculty will be prompted to change their password via email OTP.
             </p>
             <div className="mt-3">
               <button
@@ -3594,7 +3594,7 @@ function RoleUsersView({
       searchKey: false,
       render: (_, row) => (
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          {role === 'faculty' && (
+          {role === 'faculty' && row.role === 'faculty' && (
             <button
               type="button"
               onClick={() => onMakeTutor && onMakeTutor(row)}
