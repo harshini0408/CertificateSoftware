@@ -48,6 +48,49 @@ class StudentUpdateRegNoRequest(BaseModel):
 async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT))):
     is_temp = is_temporary_reg_no(current_user.registration_number)
     can_update = is_temp and (getattr(current_user, "student_reg_no_change_count", 0) or 0) == 0
+
+    tutor_email = None
+    tutor_name = None
+
+    email = _norm_email(current_user.email)
+    reg_no = (current_user.registration_number or "").strip()
+    query = {"$or": [{"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}]}
+    if reg_no:
+        query["$or"].append({"registration_number": reg_no})
+
+    credit_doc = await StudentCredit.find_one(query)
+    if credit_doc and credit_doc.tutor_email:
+        tutor_email = credit_doc.tutor_email
+
+    # Fallback to assigned_classes or class matching if not mapped in StudentCredit
+    if not tutor_email and current_user.department and current_user.batch and current_user.section:
+        tutor_user = await User.find_one({
+            "role": {"$in": [UserRole.TUTOR, UserRole.FACULTY]},
+            "assigned_classes": {
+                "$elemMatch": {
+                    "department": current_user.department,
+                    "batch": current_user.batch,
+                    "section": current_user.section,
+                }
+            }
+        })
+        if not tutor_user:
+            tutor_user = await User.find_one({
+                "role": {"$in": [UserRole.TUTOR, UserRole.FACULTY]},
+                "department": current_user.department,
+                "batch": current_user.batch,
+                "section": current_user.section,
+            })
+        if tutor_user:
+            tutor_email = tutor_user.email
+
+    if tutor_email:
+        tutor_user = await User.find_one({"email": {"$regex": f"^{re.escape(tutor_email.strip())}$", "$options": "i"}})
+        if tutor_user:
+            tutor_name = tutor_user.name
+        else:
+            tutor_name = tutor_email
+
     return {
         "id": str(current_user.id),
         "name": current_user.name,
@@ -57,6 +100,8 @@ async def get_profile(current_user: User = Depends(require_role(UserRole.STUDENT
         "batch": current_user.batch,
         "department": current_user.department,
         "section": current_user.section,
+        "tutor_name": tutor_name,
+        "tutor_email": tutor_email,
         "is_temporary_reg_no": is_temp,
         "can_update_reg_no": can_update,
         "student_reg_no_change_count": getattr(current_user, "student_reg_no_change_count", 0) or 0,
@@ -150,9 +195,18 @@ async def _filter_emailed_credit_entries(entries: list):
             filtered.append(entry)
             continue
 
+        # If it's a student manual upload, direct tutor award, department cert, or not an event Certificate document, keep it
+        if (
+            cert_number.startswith("STU-MANUAL-")
+            or cert_number.startswith("MANUAL-")
+            or cert_number.startswith("DPT-")
+            or cert_number not in cert_status_map
+        ):
+            filtered.append(entry)
+            continue
+
         status_value = (cert_status_map.get(cert_number) or "").lower()
-        if status_value == CertStatus.EMAILED.value or cert_number.startswith("DPT-"):
-            # Allow department certificates (DPT-) regardless of email status if they were awarded
+        if status_value == CertStatus.EMAILED.value:
             filtered.append(entry)
 
     return filtered
@@ -351,8 +405,35 @@ async def get_my_manual_credit_submissions(current_user: User = Depends(require_
         "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
     }).sort("-submitted_at").to_list()
 
-    return [
-        {
+    tutor_emails = list({s.tutor_email for s in submissions if s.tutor_email})
+    reviewer_ids = list({s.reviewed_by for s in submissions if s.reviewed_by})
+    users_by_email = {}
+    users_by_id = {}
+    if tutor_emails:
+        t_users = await User.find({"email": {"$in": tutor_emails}}).to_list()
+        for u in t_users:
+            users_by_email[u.email.lower()] = u.name
+    if reviewer_ids:
+        r_oids = []
+        for rid in reviewer_ids:
+            try:
+                r_oids.append(PydanticObjectId(rid))
+            except Exception:
+                pass
+        if r_oids:
+            r_users = await User.find({"_id": {"$in": r_oids}}).to_list()
+            for u in r_users:
+                users_by_id[str(u.id)] = u.name
+
+    result = []
+    for s in submissions:
+        reviewer_name = s.reviewed_by_name
+        if not reviewer_name and s.reviewed_by and str(s.reviewed_by) in users_by_id:
+            reviewer_name = users_by_id[str(s.reviewed_by)]
+        if not reviewer_name and s.status in [ManualSubmissionStatus.VERIFIED, ManualSubmissionStatus.REJECTED] and s.tutor_email:
+            reviewer_name = users_by_email.get(s.tutor_email.lower()) or s.tutor_email
+
+        result.append({
             "id": str(s.id),
             "cert_type": s.cert_type,
             "event_date": s.event_date,
@@ -361,11 +442,11 @@ async def get_my_manual_credit_submissions(current_user: User = Depends(require_
             "points_awarded": int(s.points_awarded or 0),
             "review_comment": s.review_comment,
             "reviewed_at": s.reviewed_at,
+            "reviewed_by_name": reviewer_name,
             "submitted_at": s.submitted_at,
             "semester": s.semester,
-        }
-        for s in submissions
-    ]
+        })
+    return result
 
 
 @router.post("/students/me/manual-credit-submissions")

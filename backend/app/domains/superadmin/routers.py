@@ -1286,6 +1286,12 @@ async def reassign_tutor_students(
                     last_updated=now,
                 ).insert()
                 moved += 1
+
+        # Reassign pending verification submissions of moved students to the new tutor
+        await ManualCreditSubmission.find({
+            "student_email": {"$in": email_patterns},
+            "status": ManualSubmissionStatus.PENDING,
+        }).update_many({"$set": {"tutor_email": to_tutor.email}})
     else:
         tutor_pattern = re.compile(f"^{re.escape(from_tutor.email.strip())}$", re.IGNORECASE)
         mapped = await StudentCredit.find({"tutor_email": tutor_pattern}).to_list()
@@ -1303,6 +1309,12 @@ async def reassign_tutor_students(
 
             await doc.set(updates)
             moved += 1
+
+        # Reassign all pending submissions of from_tutor to the new tutor
+        await ManualCreditSubmission.find({
+            "tutor_email": tutor_pattern,
+            "status": ManualSubmissionStatus.PENDING,
+        }).update_many({"$set": {"tutor_email": to_tutor.email}})
 
     return {
         "moved": moved,

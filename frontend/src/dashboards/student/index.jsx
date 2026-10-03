@@ -553,6 +553,14 @@ function StudentSettingsTab({ profile, profileLoading }) {
               {(profile?.batch || '')} {profile?.section ? `(${profile.section})` : ''}
             </dd>
           </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase text-gray-400">Tutor Name</dt>
+            <dd className="text-sm font-medium text-foreground mt-0.5">{profile?.tutor_name || '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase text-gray-400">Tutor Email</dt>
+            <dd className="text-sm font-medium text-foreground mt-0.5">{profile?.tutor_email || '—'}</dd>
+          </div>
         </dl>
       </div>
 
@@ -1345,6 +1353,7 @@ export default function StudentDashboard() {
                       ) },
                       { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
                       { key: 'points_awarded', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
+                      { key: 'reviewed_by_name', header: 'Verified/Reviewed By', render: (v, row) => v ? v : (row.status === 'pending' ? '—' : 'Tutor') },
                       { key: 'review_comment', header: 'Tutor Remarks', render: (v) => v || '—' },
                       { key: 'submitted_at', header: 'Submitted', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
                     ]}

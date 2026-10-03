@@ -385,6 +385,8 @@ function VerificationTab() {
             },
           },
           { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
+          { key: 'points_awarded', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
+          { key: 'reviewed_by_name', header: 'Verified/Reviewed By', render: (v, row) => v ? v : (row.status === 'pending' ? '—' : 'Tutor') },
           { key: 'submitted_at', header: 'Submitted', render: (v) => fmtDate(v) },
           {
             key: 'id',
