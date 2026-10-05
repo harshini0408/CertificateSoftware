@@ -896,6 +896,7 @@ function ManualEntryTab({ clubId, eventId, event }) {
   const UI_CERT_ROLES = [
     'non_technical_participant',
     'technical_participant',
+    'volunteer',
     'first_place',
     'second_place',
     'third_place',
@@ -1096,6 +1097,7 @@ function ParticipantListTab({ clubId, eventId }) {
   const UI_CERT_ROLES = [
     'non_technical_participant',
     'technical_participant',
+    'volunteer',
     'first_place',
     'second_place',
     'third_place',

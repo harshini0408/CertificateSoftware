@@ -181,6 +181,7 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
         academic_year=acad_year_str,
         academic_years=acad_years,
         template_map=tmap, assets=inherited_assets,
+        volunteers_required=body.volunteers_required,
         is_published=body.is_published,
     )
     await event.insert()
