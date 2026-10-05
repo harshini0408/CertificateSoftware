@@ -395,7 +395,7 @@ export default function Navbar({ onBrandClick, brandAriaLabel = 'Go back' }) {
 
             {/* Dropdown panel */}
             {dropdownOpen && (
-              <div className="absolute right-0 mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-modal z-50">
+              <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-1rem)] rounded-lg border border-gray-200 bg-white shadow-modal z-50">
                 {/* User info header */}
                 <div className="border-b border-gray-100 px-4 py-3">
                   <p className="text-sm font-semibold text-foreground">{user ?? 'User'}</p>

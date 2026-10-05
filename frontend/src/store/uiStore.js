@@ -6,7 +6,8 @@ import { create } from 'zustand'
 
 const useUiStore = create((set) => ({
   // ── Sidebar ────────────────────────────────────────────────────────────────
-  sidebarOpen: true,
+  // Default closed on mobile (<1024px), open on desktop
+  sidebarOpen: typeof window !== 'undefined' && window.innerWidth >= 1024,
 
   toggleSidebar: () =>
     set((state) => ({ sidebarOpen: !state.sidebarOpen })),

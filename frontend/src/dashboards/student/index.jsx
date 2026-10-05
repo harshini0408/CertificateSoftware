@@ -1369,7 +1369,7 @@ export default function StudentDashboard() {
 
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h1 className="text-2xl font-bold text-foreground">
+                <h1 className="text-xl sm:text-2xl font-bold text-foreground break-words">
                   {profileLoading ? (
                     <span className="inline-block h-7 w-48 animate-pulse rounded bg-gray-200" />
                   ) : (

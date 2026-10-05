@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { NavLink, useLocation, useParams } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useUiStore } from '../store/uiStore'
@@ -69,7 +70,7 @@ const icons = {
 }
 
 // ── Nav item component ────────────────────────────────────────────────────────
-function NavItem({ to, icon, label, end = false, sidebarOpen }) {
+function NavItem({ to, icon, label, end = false, sidebarOpen, onNavigate }) {
   const location = useLocation()
   const [toPath, toQuery = ''] = to.split('?')
   const isPathMatch = end ? location.pathname === toPath : location.pathname.startsWith(toPath)
@@ -84,6 +85,7 @@ function NavItem({ to, icon, label, end = false, sidebarOpen }) {
       to={to}
       end={end}
       title={label}
+      onClick={onNavigate}
       className={() =>
         `flex items-center rounded-lg py-2.5 text-sm font-medium transition-all duration-150 ${
           sidebarOpen
@@ -207,28 +209,55 @@ export default function Sidebar() {
   const sidebarOpen = useUiStore((s) => s.sidebarOpen)
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen)
   const navItems = useNavItems()
+  const location = useLocation()
+
+  // Auto-close sidebar on route change on mobile
+  useEffect(() => {
+    if (window.innerWidth < 1024) {
+      setSidebarOpen(false)
+    }
+  }, [location.pathname, location.search, setSidebarOpen])
+
+  // Handle nav item click: close sidebar on mobile
+  const handleNavClick = () => {
+    if (window.innerWidth < 1024) {
+      setSidebarOpen(false)
+    }
+  }
 
   return (
     <>
-      {/* Mobile overlay */}
+      {/* Mobile backdrop overlay — only shown on small screens when open */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-20 bg-black/30 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
         />
       )}
 
+      {/*
+        Desktop (lg+): sticky sidebar, always visible, collapses to icon-only (w-16)
+        Mobile (<lg):  fixed overlay, slides in from left when open, hidden off-screen when closed
+      */}
       <aside
-        className={`
-          fixed top-14 left-0 z-20 flex h-[calc(100dvh-3.5rem)] flex-col
-          border-gray-200 bg-white shadow-card
-          transition-all duration-300 ease-in-out
-          lg:sticky lg:top-14 lg:self-start lg:shrink-0 lg:shadow-none min-h-0 border-r
-          ${sidebarOpen ? 'w-60 translate-x-0' : 'w-16 translate-x-0'}
-        `}
+        className={[
+          // Base styles (shared)
+          'flex h-[calc(100dvh-3.5rem)] flex-col bg-white border-r border-gray-200 min-h-0 transition-all duration-300 ease-in-out',
+          // Mobile: fixed overlay, slides in/out from left
+          'fixed top-14 left-0 z-40 shadow-xl w-72',
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+          // Desktop override: sticky in flex flow, no shadow, correct width
+          sidebarOpen ? 'lg:sticky lg:top-14 lg:self-start lg:shrink-0 lg:translate-x-0 lg:w-60 lg:shadow-none lg:z-auto'
+                      : 'lg:sticky lg:top-14 lg:self-start lg:shrink-0 lg:translate-x-0 lg:w-16 lg:shadow-none lg:z-auto',
+        ].join(' ')}
       >
         {/* Nav links */}
-        <nav className={`flex-1 overflow-y-auto py-4 space-y-1 scrollbar-hide ${sidebarOpen ? 'px-3' : 'px-2'}`}>
+        <nav className={`flex-1 overflow-y-auto py-4 space-y-1 scrollbar-hide ${
+          // On desktop, use icon-only padding when collapsed
+          // On mobile, sidebar is always full-width when visible
+          sidebarOpen ? 'px-3' : 'lg:px-2 px-3'
+        }`}>
           {navItems.map((item) => (
             <NavItem
               key={item.to}
@@ -237,6 +266,7 @@ export default function Sidebar() {
               label={item.label}
               end={item.end}
               sidebarOpen={sidebarOpen}
+              onNavigate={handleNavClick}
             />
           ))}
         </nav>
