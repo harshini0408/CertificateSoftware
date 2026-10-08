@@ -60,6 +60,7 @@ class Event(Document):
     template_filename: Optional[str] = None
     assets: EventAssets = Field(default_factory=EventAssets)
     mapping_confirmed: bool = False
+    max_participants: Optional[int] = None
     participant_count: int = 0
     volunteers_required: int = 0
     qr_generations_count: int = 0

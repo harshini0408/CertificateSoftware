@@ -720,6 +720,16 @@ export default function StudentDashboard() {
   const [cancellingEventId, setCancellingEventId] = useState(null)
   const [eventSearch, setEventSearch] = useState('')
   const [eventCategoryFilter, setEventCategoryFilter] = useState('')
+  const [expandedPoster, setExpandedPoster] = useState(null)
+
+  useEffect(() => {
+    if (!expandedPoster) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setExpandedPoster(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [expandedPoster])
 
   // ── Attendance scanner state ──────────────────────────────────────────────
   // 'idle' | 'scanning' | 'scan_error'
@@ -1109,11 +1119,28 @@ export default function StudentDashboard() {
                                     </a>
                                   </div>
                                 ) : (
-                                  <img
-                                    src={ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url}
-                                    alt={ev.name}
-                                    className="w-full h-full object-cover"
-                                  />
+                                  <div
+                                    className="relative w-full h-full cursor-pointer group"
+                                    onClick={() => setExpandedPoster({
+                                      url: ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url,
+                                      title: ev.name
+                                    })}
+                                    title="Click to view full poster"
+                                  >
+                                    <img
+                                      src={ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url}
+                                      alt={ev.name}
+                                      className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                                    />
+                                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                      <span className="bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium shadow-md">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+                                        </svg>
+                                        Click to expand
+                                      </span>
+                                    </div>
+                                  </div>
                                 )}
                               </div>
                             ) : (
@@ -1154,7 +1181,7 @@ export default function StudentDashboard() {
                                 )}
                                 <div className="flex items-center gap-1.5 text-[11px] text-gray-400 pt-1">
                                   <span>👥</span>
-                                  <span>{ev.registered_count || 0} student(s) registered</span>
+                                  
                                 </div>
                                 {(ev.volunteers_required || 0) > 0 && (
                                   <div className="flex items-center gap-1.5 text-[11px] text-teal-600 font-medium">
@@ -1222,7 +1249,7 @@ export default function StudentDashboard() {
                                     : 'Cancel Registration'}
                                 </button>
                               </div>
-                            ) : ev.registration_stopped ? (
+                            ) : (ev.registration_stopped || (ev.max_participants != null && ev.participant_count >= ev.max_participants)) ? (
                               <div className="w-full flex flex-col items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 text-center space-y-1">
                                 <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-amber-700">
                                   <span>⚠️</span> Max Participants Reached
@@ -1617,6 +1644,46 @@ export default function StudentDashboard() {
           </div>
         </main>
       </div>
+
+      {/* Expanded Poster Lightbox Modal */}
+      {expandedPoster && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setExpandedPoster(null)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-800 truncate pr-4">
+                {expandedPoster.title || 'Event Poster'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setExpandedPoster(null)}
+                className="rounded-lg p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors flex items-center justify-center"
+                aria-label="Close"
+                title="Close (Esc)"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Complete Image */}
+            <div className="p-4 flex items-center justify-center overflow-auto max-h-[calc(90vh-60px)] bg-neutral-900/5">
+              <img
+                src={expandedPoster.url}
+                alt={expandedPoster.title || 'Event Poster'}
+                className="max-h-[78vh] w-auto max-w-full object-contain rounded shadow select-none"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -90,12 +90,14 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [editDate, setEditDate] = useState('')
   const [editTime, setEditTime] = useState('')
   const [editVenue, setEditVenue] = useState('')
+  const [editMaxParticipants, setEditMaxParticipants] = useState('')
 
   const handleStartEdit = () => {
     setEditName(event?.name || '')
     setEditDate(event?.event_date ? String(event.event_date).split('T')[0] : '')
     setEditTime(event?.event_time || '')
     setEditVenue(event?.venue || '')
+    setEditMaxParticipants(event?.max_participants != null ? String(event.max_participants) : '')
     setIsEditing(true)
   }
 
@@ -252,6 +254,19 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                   className="form-input text-sm"
                   placeholder="e.g. Lab 3 / Auditorium"
                 />
+              </div>
+              <div>
+                <label className="form-label text-xs font-semibold">Max Participants (Optional)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={editMaxParticipants}
+                  onChange={(e) => setEditMaxParticipants(e.target.value)}
+                  onWheel={(e) => e.target.blur()}
+                  className="form-input text-sm"
+                  placeholder="No limit"
+                />
+                <p className="text-xs text-gray-400 mt-1">Leave blank for no limit. Students will see &ldquo;Maximum participants reached&rdquo; when full.</p>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
@@ -641,6 +656,7 @@ function VolunteerRequestsTab({ clubId, eventId, event }) {
                 min="0"
                 value={countInput}
                 onChange={(e) => setCountInput(e.target.value)}
+                onWheel={(e) => e.target.blur()}
                 className="form-input text-lg font-bold py-1 px-2 w-24 h-auto"
                 autoFocus
               />
@@ -1147,8 +1163,30 @@ function ParticipantListTab({ clubId, eventId }) {
     }
   ]
 
+  const handleExport = async () => {
+    try {
+      const response = await axiosInstance.get(`/clubs/${clubId}/events/${eventId}/participants/export`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `participants_${eventId}.xlsx`)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode.removeChild(link)
+    } catch (err) {
+      console.error("Export failed", err)
+      alert("Failed to export participants")
+    }
+  }
+
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={handleExport} className="btn-secondary text-sm flex items-center gap-2">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+          Export to Excel
+        </button>
+      </div>
       <DataTable
         columns={columns}
         data={participants || []}

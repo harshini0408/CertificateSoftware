@@ -2027,9 +2027,11 @@ async def delete_user(user_id: PydanticObjectId, _user: User = _admin):
 
     user_email = (target.email or "").strip().lower()
 
-    # Remove student credit profile when deleting a student account.
+    # Remove student credit profile, club memberships and manual submissions when deleting a student account.
     if target.role == UserRole.STUDENT and user_email:
         await StudentCredit.find(StudentCredit.student_email == user_email).delete()
+        await StudentClubMembership.find(StudentClubMembership.student_email == user_email).delete()
+        await ManualCreditSubmission.find(ManualCreditSubmission.student_email == user_email).delete()
 
     # Detach tutor mappings when deleting a tutor account.
     if target.role == UserRole.TUTOR and user_email:
@@ -2044,6 +2046,56 @@ async def delete_user(user_id: PydanticObjectId, _user: User = _admin):
 
     await target.delete()
     return {"message": "User deleted successfully"}
+
+
+class BulkDeleteUsersRequest(BaseModel):
+    user_ids: List[PydanticObjectId]
+
+
+@router.post("/users/bulk-delete")
+async def bulk_delete_users(payload: BulkDeleteUsersRequest, _user: User = _admin):
+    if not payload.user_ids:
+        return {"message": "No users provided", "deleted_count": 0}
+
+    targets = await User.find({"_id": {"$in": payload.user_ids}}).to_list()
+    deletable = [u for u in targets if u.role != UserRole.SUPER_ADMIN]
+    if not deletable:
+        return {"message": "No eligible users to delete", "deleted_count": 0}
+
+    student_emails = [
+        (u.email or "").strip().lower()
+        for u in deletable
+        if u.role == UserRole.STUDENT and u.email
+    ]
+    tutor_emails = [
+        (u.email or "").strip().lower()
+        for u in deletable
+        if u.role == UserRole.TUTOR and u.email
+    ]
+
+    if student_emails:
+        await StudentCredit.find({"student_email": {"$in": student_emails}}).delete()
+        await StudentClubMembership.find({"student_email": {"$in": student_emails}}).delete()
+        await ManualCreditSubmission.find({"student_email": {"$in": student_emails}}).delete()
+
+    if tutor_emails:
+        await StudentCredit.find({"tutor_email": {"$in": tutor_emails}}).update_many(
+            {
+                "$set": {
+                    "tutor_email": None,
+                    "last_updated": datetime.utcnow(),
+                }
+            }
+        )
+
+    deletable_ids = [u.id for u in deletable]
+    await User.find({"_id": {"$in": deletable_ids}}).delete()
+
+    return {
+        "message": f"Successfully deleted {len(deletable_ids)} users",
+        "deleted_count": len(deletable_ids),
+    }
+
 
 
 @router.post("/users/purge-inactive")

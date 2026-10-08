@@ -64,3 +64,15 @@ if (document.readyState === 'loading') {
 } else {
   renderApp()
 }
+
+// Prevent mouse wheel from accidentally incrementing/decrementing number inputs
+if (typeof window !== "undefined") {
+  window.addEventListener("wheel", (e) => {
+    if (document.activeElement?.type === "number") {
+      document.activeElement.blur()
+    }
+    if (e.target?.tagName === "INPUT" && e.target?.type === "number") {
+      e.target.blur()
+    }
+  }, { passive: true })
+}

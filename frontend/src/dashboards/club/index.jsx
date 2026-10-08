@@ -436,6 +436,22 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   </select>
                 </div>
                 <div>
+                  <label className="form-label" htmlFor="dash-max-participants">Max Participants (Optional)</label>
+                  <input
+                    id="dash-max-participants"
+                    type="number"
+                    min="0"
+                    className={`form-input ${errors.max_participants ? "form-input-error" : ""}`}
+                    placeholder="No limit"
+                    onWheel={(e) => e.target.blur()}
+                    {...register("max_participants", {
+                      setValueAs: v => (v === "" || isNaN(v)) ? null : parseInt(v, 10),
+                      min: { value: 0, message: "Cannot be negative" }
+                    })}
+                  />
+                  {errors.max_participants && <p className="form-error">{errors.max_participants.message}</p>}
+                </div>
+                <div>
                   <label className="form-label" htmlFor="dash-volunteers-required">Volunteers Required</label>
                   <input
                     id="dash-volunteers-required"
@@ -443,6 +459,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                     min="0"
                     className={`form-input ${errors.volunteers_required ? 'form-input-error' : ''}`}
                     placeholder="0"
+                    onWheel={(e) => e.target.blur()}
                     {...register('volunteers_required', {
                       valueAsNumber: true,
                       min: { value: 0, message: 'Cannot be negative' }

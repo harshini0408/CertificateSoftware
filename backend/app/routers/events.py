@@ -90,6 +90,7 @@ def _event_response(e: Event, cert_count: int = 0, volunteers_registered: int = 
         status=e.status.value, template_map={k: str(v) if v else None for k, v in e.template_map.items()},
         assets=e.assets.model_dump(),
         mapping_confirmed=e.mapping_confirmed,
+        max_participants=getattr(e, "max_participants", None),
         participant_count=e.participant_count,
         volunteers_required=getattr(e, "volunteers_required", 0) or 0,
         volunteers_registered=volunteers_registered,
@@ -182,6 +183,7 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
         academic_years=acad_years,
         template_map=tmap, assets=inherited_assets,
         volunteers_required=body.volunteers_required,
+        max_participants=body.max_participants,
         is_published=body.is_published,
     )
     await event.insert()
