@@ -19,6 +19,8 @@ import {
   useTutorStudents,
   useTutorVerifyCreditPoint,
   useTutorUpdateStudentRegNo,
+  useTutorUpdateVerification,
+  useTutorDeleteVerification,
   downloadTutorAllAssignedCertificates,
   downloadTutorStudentCertificates,
 } from './api'
@@ -359,8 +361,14 @@ function DetailModal({ email, onClose }) {
 
 function VerificationTab() {
   const { data, isLoading } = useTutorCreditPointVerifications()
+  const { data: creditRules } = useTutorCreditRules()
   const verifyMutation = useTutorVerifyCreditPoint()
   const rejectMutation = useTutorRejectCreditPoint()
+  const updateMutation = useTutorUpdateVerification()
+  const deleteMutation = useTutorDeleteVerification()
+
+  const [editingRow, setEditingRow] = useState(null)
+  const [editForm, setEditForm] = useState({ cert_type: '', points_awarded: '', review_comment: '', status: '' })
 
   return (
     <div>
@@ -394,24 +402,50 @@ function VerificationTab() {
             align: 'center',
             searchKey: false,
             render: (id, row) => {
-              if (row.status !== 'pending') {
-                return <span className="text-xs text-gray-500">Reviewed</span>
-              }
               return (
-                <div className="flex items-center justify-center gap-2">
+                <div className="flex items-center justify-center flex-wrap gap-1.5">
+                  {row.status === 'pending' && (
+                    <>
+                      <button
+                        className="rounded bg-green-100 px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-200"
+                        disabled={verifyMutation.isPending || rejectMutation.isPending}
+                        onClick={() => verifyMutation.mutate(id)}
+                      >
+                        Verify
+                      </button>
+                      <button
+                        className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                        disabled={verifyMutation.isPending || rejectMutation.isPending}
+                        onClick={() => rejectMutation.mutate({ submissionId: id })}
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
                   <button
-                    className="rounded bg-green-100 px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-200"
-                    disabled={verifyMutation.isPending || rejectMutation.isPending}
-                    onClick={() => verifyMutation.mutate(id)}
+                    className="rounded bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                    onClick={() => {
+                      setEditingRow(row)
+                      setEditForm({
+                        cert_type: row.cert_type || '',
+                        points_awarded: String(row.points_awarded ?? ''),
+                        review_comment: row.review_comment || '',
+                        status: row.status || 'pending',
+                      })
+                    }}
                   >
-                    Verify
+                    Edit
                   </button>
                   <button
-                    className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
-                    disabled={verifyMutation.isPending || rejectMutation.isPending}
-                    onClick={() => rejectMutation.mutate({ submissionId: id })}
+                    className="rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm('Delete this submission? Credits will be reversed if it was verified.')) {
+                        deleteMutation.mutate(id)
+                      }
+                    }}
                   >
-                    Reject
+                    Delete
                   </button>
                 </div>
               )
@@ -425,6 +459,85 @@ function VerificationTab() {
         searchPlaceholder="Search student, email, role..."
         rowKey="id"
       />
+
+      {/* Edit Verification Modal */}
+      {editingRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Edit Submission</h3>
+            <p className="text-xs text-gray-500 mb-4">{editingRow.student_name} — {editingRow.student_email}</p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                await updateMutation.mutateAsync({
+                  submissionId: editingRow.id,
+                  cert_type: editForm.cert_type || undefined,
+                  points_awarded: editForm.points_awarded !== '' ? parseInt(editForm.points_awarded, 10) : undefined,
+                  review_comment: editForm.review_comment || undefined,
+                  status: editForm.status || undefined,
+                })
+                setEditingRow(null)
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="form-label">Role</label>
+                <select
+                  className="form-input"
+                  value={editForm.cert_type}
+                  onChange={(e) => setEditForm((p) => ({ ...p, cert_type: e.target.value }))}
+                >
+                  <option value="">No change</option>
+                  {(creditRules || []).map((r) => (
+                    <option key={r.cert_type} value={r.cert_type}>
+                      {r.cert_type.replace(/_/g, ' ')} ({r.points} pts)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Points Awarded</label>
+                <input
+                  type="number"
+                  min="0"
+                  className="form-input"
+                  value={editForm.points_awarded}
+                  onChange={(e) => setEditForm((p) => ({ ...p, points_awarded: e.target.value }))}
+                  placeholder="Leave blank for no change"
+                />
+              </div>
+              <div>
+                <label className="form-label">Remarks</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editForm.review_comment}
+                  onChange={(e) => setEditForm((p) => ({ ...p, review_comment: e.target.value }))}
+                  placeholder="Optional remark"
+                />
+              </div>
+              <div>
+                <label className="form-label">Status</label>
+                <select
+                  className="form-input"
+                  value={editForm.status}
+                  onChange={(e) => setEditForm((p) => ({ ...p, status: e.target.value }))}
+                >
+                  <option value="pending">Pending</option>
+                  <option value="verified">Verified</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" className="btn-secondary" onClick={() => setEditingRow(null)}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={updateMutation.isPending}>
+                  {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

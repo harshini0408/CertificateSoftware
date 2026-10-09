@@ -377,11 +377,12 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
     }).to_list()
 
     for dc in dept_certs:
+        is_faculty_cert = str(dc.cert_number or "").startswith("FAC-") or str(dc.department or "").lower().startswith("faculty event")
         is_guest_cert = str(dc.cert_number or "").startswith("GUEST-") or str(dc.department or "").lower().startswith("guest event")
         results.append({
             "_id": str(dc.id),
             "cert_number": dc.cert_number,
-            "cert_type": "guest" if is_guest_cert else (dc.contribution or "participant"),
+            "cert_type": "faculty" if is_faculty_cert else ("guest" if is_guest_cert else (dc.contribution or "participant")),
             "event_name": "",  # Department events don't have event_name in DeptCertificate
             "club_name": dc.department,
             "issued_at": dc.emailed_at or dc.created_at,
@@ -630,6 +631,104 @@ async def apply_for_club(
         "status": membership.status.value,
     }
 
+
+@router.delete("/students/me/clubs/{membership_id}")
+async def leave_club_membership(
+    membership_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Allow a student to withdraw their pending or approved club membership."""
+    membership = await StudentClubMembership.get(membership_id)
+    if not membership:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Membership not found")
+    if membership.student_id != current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This membership does not belong to you")
+    club_name = membership.club_name or "the club"
+    await membership.delete()
+    return {"message": f"Successfully withdrawn from {club_name}"}
+
+
+@router.put("/students/me/manual-credit-submissions/{submission_id}")
+async def update_manual_credit_submission(
+    submission_id: PydanticObjectId,
+    cert_type: str = Form(None),
+    event_date: str = Form(None),
+    certificate_image: UploadFile = File(None),
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Edit a pending manual credit submission. Only allowed while status is 'pending'."""
+    email = _norm_email(current_user.email)
+    submission = await ManualCreditSubmission.get(submission_id)
+    if not submission:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
+    if _norm_email(submission.student_email) != email:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This submission does not belong to you")
+    if submission.status == ManualSubmissionStatus.VERIFIED:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Verified submissions cannot be edited",
+        )
+
+    updates = {}
+    # If it was rejected, editing re-submits it to pending review
+    if submission.status == ManualSubmissionStatus.REJECTED:
+        updates["status"] = ManualSubmissionStatus.PENDING
+
+    if cert_type:
+        cert_type_clean = cert_type.strip()
+        rule = await _resolve_credit_rule(cert_type_clean)
+        if not rule:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid role selected")
+        updates["cert_type"] = rule.cert_type
+
+    if event_date:
+        try:
+            parsed_event_date = date.fromisoformat(event_date.strip())
+            updates["event_date"] = parsed_event_date
+        except Exception:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid event_date. Use YYYY-MM-DD")
+
+    if certificate_image and certificate_image.filename:
+        if not (certificate_image.content_type or "").lower().startswith("image/"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only image files are allowed")
+        settings_cfg = get_settings()
+        upload_dir = settings_cfg.storage_root / "manual_credit_uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(certificate_image.filename).suffix or ".png"
+        saved_name = f"{uuid4().hex}{suffix.lower()}"
+        target = upload_dir / saved_name
+        data = await certificate_image.read()
+        if not data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Uploaded file is empty")
+        target.write_bytes(data)
+        updates["certificate_image_url"] = f"/storage/manual_credit_uploads/{saved_name}"
+
+    if not updates:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No fields provided to update")
+
+    await submission.set(updates)
+    return {"message": "Submission updated successfully", "id": str(submission.id)}
+
+
+@router.delete("/students/me/manual-credit-submissions/{submission_id}")
+async def delete_manual_credit_submission(
+    submission_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Delete a manual credit submission. Only allowed until verified."""
+    email = _norm_email(current_user.email)
+    submission = await ManualCreditSubmission.get(submission_id)
+    if not submission:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
+    if _norm_email(submission.student_email) != email:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This submission does not belong to you")
+    if submission.status == ManualSubmissionStatus.VERIFIED:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Verified submissions cannot be deleted",
+        )
+    await submission.delete()
+    return {"message": "Submission deleted successfully"}
 
 
 @router.get("/students/{student_id}/credits")

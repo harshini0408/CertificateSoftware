@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 import io
 from pathlib import Path
 import re
@@ -892,6 +892,188 @@ async def reject_credit_point_submission(
     await submission.save()
 
     return {"message": "Submission rejected"}
+
+
+class TutorUpdateSubmissionRequest(BaseModel):
+    cert_type: Optional[str] = None
+    event_date: Optional[date] = None
+    points_awarded: Optional[int] = None
+    review_comment: Optional[str] = None
+    status: Optional[str] = None
+
+
+@router.put("/tutor/credit-point-verifications/{submission_id}")
+async def tutor_update_credit_submission(
+    submission_id: PydanticObjectId,
+    body: TutorUpdateSubmissionRequest,
+    current_user: User = Depends(require_role(UserRole.TUTOR)),
+):
+    """Allow a tutor to edit any submission's metadata, points, or status at any time."""
+    tutor_email = _norm_email(current_user.email)
+    submission = await ManualCreditSubmission.get(submission_id)
+    if not submission:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
+
+    # Verify tutor access
+    is_assigned = _norm_email(submission.tutor_email) == tutor_email
+    if not is_assigned:
+        mapped_credit = await StudentCredit.find_one({
+            "student_email": {"$regex": f"^{re.escape(_norm_email(submission.student_email))}$", "$options": "i"},
+            "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+        })
+        if not mapped_credit and submission.registration_number:
+            mapped_credit = await StudentCredit.find_one({
+                "registration_number": submission.registration_number,
+                "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+            })
+        if mapped_credit:
+            is_assigned = True
+    if not is_assigned:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This submission is not assigned to you")
+
+    updates: dict = {}
+    was_verified = submission.status == ManualSubmissionStatus.VERIFIED
+    old_points = int(submission.points_awarded or 0)
+
+    if body.cert_type is not None:
+        normalized = _norm_cert_type(body.cert_type)
+        rule = await CreditRule.find_one({"cert_type": {"$regex": f"^{re.escape(normalized)}$", "$options": "i"}})
+        if not rule:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid cert_type")
+        updates["cert_type"] = rule.cert_type
+
+    if body.event_date is not None:
+        updates["event_date"] = body.event_date
+
+    if body.review_comment is not None:
+        updates["review_comment"] = body.review_comment
+
+    target_status = body.status if body.status is not None else submission.status
+    target_points = body.points_awarded if body.points_awarded is not None else old_points
+
+    if body.status is not None:
+        allowed_statuses = {s.value for s in ManualSubmissionStatus}
+        if body.status not in allowed_statuses:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid status. Must be one of: {allowed_statuses}")
+        updates["status"] = body.status
+        updates["reviewed_at"] = datetime.utcnow()
+        updates["reviewed_by"] = str(current_user.id)
+        updates["reviewed_by_name"] = current_user.name
+        updates["reviewed_by_email"] = current_user.email
+
+    if body.points_awarded is not None:
+        updates["points_awarded"] = target_points
+
+    cert_number = f"STU-MANUAL-{str(submission.id)[-8:].upper()}"
+    student_doc = await StudentCredit.find_one({
+        "student_email": {"$regex": f"^{re.escape(_norm_email(submission.student_email))}$", "$options": "i"},
+        "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+    })
+    if not student_doc and submission.registration_number:
+        student_doc = await StudentCredit.find_one({
+            "registration_number": submission.registration_number,
+            "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+        })
+
+    if student_doc:
+        # Case 1: transitioning to verified from non-verified
+        if target_status == ManualSubmissionStatus.VERIFIED.value and not was_verified:
+            semester = await get_current_semester() or "Unknown"
+            entry = CreditHistoryEntry(
+                cert_number=cert_number,
+                event_name="External/Manual Certificate Verification",
+                club_name="Manual Verification",
+                cert_type=updates.get("cert_type", submission.cert_type),
+                points_awarded=target_points,
+                semester=semester,
+                awarded_at=datetime.utcnow(),
+            )
+            student_doc.credit_history.append(entry)
+            student_doc.total_credits = int(student_doc.total_credits or 0) + target_points
+            student_doc.last_updated = datetime.utcnow()
+            await student_doc.save()
+
+        # Case 2: transitioning from verified to non-verified
+        elif target_status != ManualSubmissionStatus.VERIFIED.value and was_verified:
+            orig_len = len(student_doc.credit_history)
+            student_doc.credit_history = [e for e in student_doc.credit_history if e.cert_number != cert_number]
+            if len(student_doc.credit_history) < orig_len:
+                student_doc.total_credits = max(0, int(student_doc.total_credits or 0) - old_points)
+                student_doc.last_updated = datetime.utcnow()
+                await student_doc.save()
+
+        # Case 3: remains verified, but points or cert_type changed
+        elif target_status == ManualSubmissionStatus.VERIFIED.value and was_verified:
+            for entry in student_doc.credit_history:
+                if entry.cert_number == cert_number:
+                    diff = target_points - int(entry.points_awarded or 0)
+                    entry.points_awarded = target_points
+                    if "cert_type" in updates:
+                        entry.cert_type = updates["cert_type"]
+                    student_doc.total_credits = max(0, int(student_doc.total_credits or 0) + diff)
+                    student_doc.last_updated = datetime.utcnow()
+                    await student_doc.save()
+                    break
+
+    if not updates:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No fields provided to update")
+
+    await submission.set(updates)
+    return {"message": "Submission updated successfully", "id": str(submission.id)}
+
+
+@router.delete("/tutor/credit-point-verifications/{submission_id}")
+async def tutor_delete_credit_submission(
+    submission_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.TUTOR)),
+):
+    """Allow a tutor to delete any submission. If it was verified, credits are reversed."""
+    tutor_email = _norm_email(current_user.email)
+    submission = await ManualCreditSubmission.get(submission_id)
+    if not submission:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
+
+    is_assigned = _norm_email(submission.tutor_email) == tutor_email
+    if not is_assigned:
+        mapped_credit = await StudentCredit.find_one({
+            "student_email": {"$regex": f"^{re.escape(_norm_email(submission.student_email))}$", "$options": "i"},
+            "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+        })
+        if not mapped_credit and submission.registration_number:
+            mapped_credit = await StudentCredit.find_one({
+                "registration_number": submission.registration_number,
+                "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+            })
+        if mapped_credit:
+            is_assigned = True
+    if not is_assigned:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This submission is not assigned to you")
+
+    # If the submission was verified, reverse the credit entry
+    if submission.status == ManualSubmissionStatus.VERIFIED:
+        cert_number = f"STU-MANUAL-{str(submission.id)[-8:].upper()}"
+        student_doc = await StudentCredit.find_one({
+            "student_email": {"$regex": f"^{re.escape(_norm_email(submission.student_email))}$", "$options": "i"},
+            "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+        })
+        if not student_doc and submission.registration_number:
+            student_doc = await StudentCredit.find_one({
+                "registration_number": submission.registration_number,
+                "tutor_email": {"$regex": f"^{re.escape(tutor_email)}$", "$options": "i"},
+            })
+        if student_doc:
+            original_count = len(student_doc.credit_history)
+            student_doc.credit_history = [
+                e for e in student_doc.credit_history if e.cert_number != cert_number
+            ]
+            if len(student_doc.credit_history) < original_count:
+                points_to_deduct = int(submission.points_awarded or 0)
+                student_doc.total_credits = max(0, int(student_doc.total_credits or 0) - points_to_deduct)
+                student_doc.last_updated = datetime.utcnow()
+                await student_doc.save()
+
+    await submission.delete()
+    return {"message": "Submission deleted and credits reversed (if applicable)"}
 
 
 @router.post("/tutor/certificates/manual")

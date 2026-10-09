@@ -27,6 +27,9 @@ import {
   useAttendanceSession,
   useSubmitAttendance,
   useUpdateStudentRegNo,
+  useUpdateManualCreditSubmission,
+  useDeleteManualCreditSubmission,
+  useLeaveClubMembership,
 } from './api'
 import { useChangePassword } from '../auth/api'
 
@@ -372,6 +375,7 @@ const Icons = {
 
 // ── Credit type badge colours ─────────────────────────────────────────────────
 const TYPE_COLORS = {
+  faculty:     'bg-indigo-100 text-indigo-700',
   guest:       'bg-violet-100 text-violet-700',
   participant: 'bg-blue-100 text-blue-700',
   coordinator: 'bg-gray-100 text-gray-600',
@@ -710,10 +714,17 @@ export default function StudentDashboard() {
   const { data: availableClubs } = useAvailableClubs()
   const { data: upcomingEvents, isLoading: upcomingLoading } = useStudentUpcomingEvents()
   const applyForClub = useApplyForClub()
+  const leaveClubMembership = useLeaveClubMembership()
   const createSubmission = useCreateManualCreditSubmission()
+  const updateSubmission = useUpdateManualCreditSubmission()
+  const deleteSubmission = useDeleteManualCreditSubmission()
   const registerForEvent = useRegisterForEvent()
   const cancelEventRegistration = useCancelEventRegistration()
   const validateQR = useValidateAttendanceQR()
+
+  const [editingSubmission, setEditingSubmission] = useState(null)
+  const [editForm, setEditForm] = useState({ cert_type: '', event_date: '', certificate_image: null })
+  const [leavingMembershipId, setLeavingMembershipId] = useState(null)
 
   const [selectedClubId, setSelectedClubId] = useState('')
   const [registeringEventId, setRegisteringEventId] = useState(null)
@@ -1376,13 +1387,46 @@ export default function StudentDashboard() {
                       { key: 'semester', header: 'Semester', render: (v) => <span className="text-xs text-gray-500">{v || 'Unknown'}</span> },
                       { key: 'event_date', header: 'Event Date', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
                       { key: 'certificate_image_url', header: 'Certificate', render: (v) => (
-                        v ? <a href={v} target="_blank" rel="noreferrer" className="text-navy hover:underline">View Image</a> : '—'
+                        v ? <a href={String(v).startsWith('http') ? v : `${BACKEND_URL}${v}`} target="_blank" rel="noreferrer" className="text-navy hover:underline">View Image</a> : '—'
                       ) },
                       { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
                       { key: 'points_awarded', header: 'Points', align: 'right', render: (v) => <span className="font-bold text-green-700">{v || 0}</span> },
                       { key: 'reviewed_by_name', header: 'Verified/Reviewed By', render: (v, row) => v ? v : (row.status === 'pending' ? '—' : 'Tutor') },
                       { key: 'review_comment', header: 'Tutor Remarks', render: (v) => v || '—' },
                       { key: 'submitted_at', header: 'Submitted', render: (v) => (v ? new Date(v).toLocaleDateString('en-IN') : '—') },
+                      {
+                        key: 'id',
+                        header: 'Actions',
+                        align: 'center',
+                        searchKey: false,
+                        render: (id, row) => {
+                          if (row.status === 'verified') return <span className="text-xs text-gray-400">—</span>
+                          return (
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                className="rounded bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                                onClick={() => {
+                                  setEditingSubmission(row)
+                                  setEditForm({ cert_type: row.cert_type || '', event_date: row.event_date ? new Date(row.event_date).toISOString().slice(0,10) : '', certificate_image: null })
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+                                disabled={deleteSubmission.isPending}
+                                onClick={() => {
+                                  if (window.confirm('Delete this submission? This action cannot be undone.')) {
+                                    deleteSubmission.mutate(id)
+                                  }
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )
+                        },
+                      },
                     ]}
                     data={manualSubmissions || []}
                     isLoading={submissionsLoading}
@@ -1390,6 +1434,70 @@ export default function StudentDashboard() {
                     rowKey="id"
                   />
                 </div>
+
+                {/* Edit Submission Modal */}
+                {editingSubmission && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                    <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+                      <h3 className="text-lg font-bold text-gray-900 mb-4">Edit Submission</h3>
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault()
+                          await updateSubmission.mutateAsync({
+                            id: editingSubmission.id,
+                            cert_type: editForm.cert_type || undefined,
+                            event_date: editForm.event_date || undefined,
+                            certificate_image: editForm.certificate_image || undefined,
+                          })
+                          setEditingSubmission(null)
+                        }}
+                        className="space-y-4"
+                      >
+                        <div>
+                          <label className="form-label">Role *</label>
+                          <select
+                            className="form-input"
+                            value={editForm.cert_type}
+                            onChange={(e) => setEditForm((p) => ({ ...p, cert_type: e.target.value }))}
+                            required
+                          >
+                            <option value="">Select role…</option>
+                            {(creditRules || []).map((r) => (
+                              <option key={r.cert_type} value={r.cert_type}>
+                                {r.cert_type.replace(/_/g, ' ')} ({r.points} pts)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="form-label">Event Date *</label>
+                          <input
+                            type="date"
+                            className="form-input"
+                            value={editForm.event_date}
+                            onChange={(e) => setEditForm((p) => ({ ...p, event_date: e.target.value }))}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="form-label">Replace Certificate Image (optional)</label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="form-input"
+                            onChange={(e) => setEditForm((p) => ({ ...p, certificate_image: e.target.files?.[0] || null }))}
+                          />
+                        </div>
+                        <div className="flex justify-end gap-3 pt-2">
+                          <button type="button" className="btn-secondary" onClick={() => setEditingSubmission(null)}>Cancel</button>
+                          <button type="submit" className="btn-primary" disabled={updateSubmission.isPending}>
+                            {updateSubmission.isPending ? 'Saving…' : 'Save Changes'}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <>
@@ -1497,13 +1605,29 @@ export default function StudentDashboard() {
                           {m.review_note ? ` • ${m.review_note}` : ''}
                         </p>
                       </div>
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${
-                        m.status === 'approved' ? 'bg-green-100 text-green-700' :
-                        m.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                        'bg-amber-100 text-amber-700'
-                      }`}>
-                        {m.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${
+                          m.status === 'approved' ? 'bg-green-100 text-green-700' :
+                          m.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                          'bg-amber-100 text-amber-700'
+                        }`}>
+                          {m.status}
+                        </span>
+                        {(m.status === 'pending' || m.status === 'approved') && (
+                          <button
+                            className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100"
+                            disabled={leavingMembershipId === m.id || leaveClubMembership.isPending}
+                            onClick={() => {
+                              if (window.confirm(`Withdraw from ${m.club_name}? You can apply for a new club after this.`)) {
+                                setLeavingMembershipId(m.id)
+                                leaveClubMembership.mutate(m.id, { onSettled: () => setLeavingMembershipId(null) })
+                              }
+                            }}
+                          >
+                            {leavingMembershipId === m.id ? '…' : 'Leave'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

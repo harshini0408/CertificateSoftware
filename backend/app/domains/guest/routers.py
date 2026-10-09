@@ -176,6 +176,8 @@ async def _award_guest_credits(
     student_name: str,
     points: int,
     event_name: str,
+    club_name: str = "Guest Event",
+    cert_type: str = "Guest Certificate",
 ) -> None:
     email = student_email.strip().lower()
     if not email or points <= 0:
@@ -186,8 +188,8 @@ async def _award_guest_credits(
     entry = CreditHistoryEntry(
         cert_number=cert_number,
         event_name=event_name,
-        club_name="Guest Event",
-        cert_type="Guest Certificate",
+        club_name=club_name,
+        cert_type=cert_type,
         points_awarded=points,
         semester=semester,
         awarded_at=datetime.utcnow(),
@@ -642,7 +644,13 @@ async def generate_guest_certificates(
             "Points per certificate must be greater than 0 when credit allocation is enabled.",
         )
 
-    department_label = f"Guest Event - {session.event_name}" if session.event_name else "Guest Event"
+    is_faculty_session = current_user.role in (UserRole.FACULTY, UserRole.TUTOR)
+    if is_faculty_session:
+        department_label = f"Faculty Event - {session.event_name}" if session.event_name else "Faculty Event"
+        cert_prefix = f"FAC-{str(session.id)[-6:]}"
+    else:
+        department_label = f"Guest Event - {session.event_name}" if session.event_name else "Guest Event"
+        cert_prefix = f"GUEST-{str(session.id)[-6:]}"
 
     for idx, row in enumerate(rows):
         safe_name = f"cert_{idx+1:04d}_{uuid.uuid4().hex[:6]}.png"
@@ -657,7 +665,7 @@ async def generate_guest_certificates(
             )
             generated.append(str(out_path))
 
-            cert_number = f"GUEST-{str(session.id)[-6:]}-{idx + 1:04d}"
+            cert_number = f"{cert_prefix}-{idx + 1:04d}"
             participant_email = _normalize_guest_email(row.get(email_col) if email_col else "")
             student_name = _pick_row_value(row, ("Name", "name", "Full Name", "full_name", "Student Name")) or "Unknown"
             class_name = _pick_row_value(row, ("Class", "Department", "Semester", "Year", "Section")) or "-"
@@ -889,6 +897,11 @@ async def _send_guest_emails_for_session(
     failed = 0
     errors: List[str] = []
 
+    is_faculty_session = current_user.role in (UserRole.FACULTY, UserRole.TUTOR)
+    cert_prefix = f"FAC-{str(session.id)[-6:]}" if is_faculty_session else f"GUEST-{str(session.id)[-6:]}"
+    club_label = "Faculty Event" if is_faculty_session else "Guest Event"
+    cert_type_label = "Faculty Certificate" if is_faculty_session else "Guest Certificate"
+
     for idx, row in enumerate(rows):
         if target_indexes is not None and idx not in target_indexes:
             continue
@@ -914,14 +927,14 @@ async def _send_guest_emails_for_session(
             continue
 
         recipient_name = entry.get("recipient_name") or recipient_email.split("@")[0]
-        cert_number = f"GUEST-{str(session.id)[-6:]}-{idx + 1:04d}"
+        cert_number = f"{cert_prefix}-{idx + 1:04d}"
         try:
             success = await send_certificate_email(
                 recipient_email=recipient_email,
                 recipient_name=recipient_name,
                 cert_number=cert_number,
                 event_name=session.event_name,
-                club_name="Guest Event",
+                club_name=club_label,
                 png_path=cert_path,
             )
             if success:
@@ -938,6 +951,8 @@ async def _send_guest_emails_for_session(
                             student_name=recipient_name,
                             points=session.guest_points_per_cert,
                             event_name=session.event_name,
+                            club_name=club_label,
+                            cert_type=cert_type_label,
                         )
                     except Exception as exc:
                         logger.error("Failed to award credits for %s after email: %s", recipient_email, exc)
@@ -1152,6 +1167,10 @@ async def get_guest_session_detail(
     email_statuses = session.guest_email_statuses or []
     rows = session.guest_excel_data or []
 
+    creator = await User.get(session.user_id) if session.user_id else current_user
+    is_faculty_session = (creator and creator.role in (UserRole.FACULTY, UserRole.TUTOR)) or current_user.role in (UserRole.FACULTY, UserRole.TUTOR)
+    cert_prefix = f"FAC-{str(session.id)[-6:]}" if is_faculty_session else f"GUEST-{str(session.id)[-6:]}"
+
     certificates = []
     for idx, cert_path_str in enumerate(cert_paths):
         cert_path = Path(cert_path_str)
@@ -1170,7 +1189,7 @@ async def get_guest_session_detail(
         )
         certificates.append({
             "index": idx,
-            "cert_number": f"GUEST-{str(session.id)[-6:]}-{idx + 1:04d}",
+            "cert_number": f"{cert_prefix}-{idx + 1:04d}",
             "recipient_email": recipient_email,
             "recipient_name": recipient_name,
             "status": (email_entry.get("status") or ("emailed" if session.guest_emails_sent else "generated")).replace("sent", "emailed"),

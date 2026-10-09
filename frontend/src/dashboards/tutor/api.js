@@ -154,3 +154,46 @@ export function useTutorUpdateStudentRegNo() {
     },
   })
 }
+
+export function useTutorUpdateVerification() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ submissionId, ...payload }) => {
+      const { data } = await axiosInstance.put(
+        `/tutor/credit-point-verifications/${submissionId}`,
+        payload,
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tutor', 'credit-point-verifications'] })
+      qc.invalidateQueries({ queryKey: ['tutor', 'students'] })
+      addToast({ type: 'success', message: 'Submission updated successfully.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to update submission.' })
+    },
+  })
+}
+
+export function useTutorDeleteVerification() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (submissionId) => {
+      const { data } = await axiosInstance.delete(`/tutor/credit-point-verifications/${submissionId}`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tutor', 'credit-point-verifications'] })
+      qc.invalidateQueries({ queryKey: ['tutor', 'students'] })
+      addToast({ type: 'success', message: 'Submission deleted.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to delete submission.' })
+    },
+  })
+}

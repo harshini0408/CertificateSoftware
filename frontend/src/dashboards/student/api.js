@@ -184,6 +184,89 @@ export function useApplyForClub() {
 }
 
 /**
+ * PUT /students/me/manual-credit-submissions/:id — edit a pending submission
+ */
+export function useUpdateManualCreditSubmission() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ id, cert_type, event_date, certificate_image }) => {
+      const formData = new FormData()
+      if (cert_type) formData.append('cert_type', cert_type)
+      if (event_date) formData.append('event_date', event_date)
+      if (certificate_image) formData.append('certificate_image', certificate_image)
+      const { data } = await axiosInstance.put(
+        `/students/me/manual-credit-submissions/${id}`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: creditKeys.manualSubmissions() })
+      addToast({ type: 'success', message: 'Submission updated successfully.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to update submission.',
+      })
+    },
+  })
+}
+
+/**
+ * DELETE /students/me/manual-credit-submissions/:id — delete a pending submission
+ */
+export function useDeleteManualCreditSubmission() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (id) => {
+      const { data } = await axiosInstance.delete(`/students/me/manual-credit-submissions/${id}`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: creditKeys.manualSubmissions() })
+      addToast({ type: 'success', message: 'Submission deleted.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to delete submission.',
+      })
+    },
+  })
+}
+
+/**
+ * DELETE /students/me/clubs/:membershipId — withdraw from a club
+ */
+export function useLeaveClubMembership() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (membershipId) => {
+      const { data } = await axiosInstance.delete(`/students/me/clubs/${membershipId}`)
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: clubMembershipKeys.myMemberships() })
+      addToast({ type: 'success', message: 'Successfully withdrawn from the club.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to withdraw from club.',
+      })
+    },
+  })
+}
+
+/**
  * GET /student/upcoming-events — published club events for this week
  */
 export function useStudentUpcomingEvents() {

@@ -2530,17 +2530,25 @@ async def platform_stats(_user: User = _admin):
             bucket["mailed_count"] += 1
 
     recent_guest_sessions = await GuestSession.find_all().sort("-created_at").limit(600).to_list()
+    session_user_ids = [s.user_id for s in recent_guest_sessions if s.user_id]
+    session_users = await User.find({"_id": {"$in": session_user_ids}}).to_list() if session_user_ids else []
+    session_user_role_map = {str(u.id): u.role for u in session_users}
+
     for session in recent_guest_sessions:
         generated_count = len(session.guest_generated_certs or [])
         if generated_count <= 0:
             continue
-        source_name = "Guest"
-        event_name = (session.event_name or "Guest Event").strip() or "Guest Event"
-        key = ("guest", source_name, event_name)
+        u_role = session_user_role_map.get(str(session.user_id)) if session.user_id else None
+        is_fac = u_role in (UserRole.FACULTY, UserRole.TUTOR)
+        source_type = "faculty" if is_fac else "guest"
+        source_name = "Faculty" if is_fac else "Guest"
+        default_event = "Faculty Event" if is_fac else "Guest Event"
+        event_name = (session.event_name or default_event).strip() or default_event
+        key = (source_type, source_name, event_name)
         bucket = grouped_recent.get(key)
         if not bucket:
             bucket = {
-                "source_type": "guest",
+                "source_type": source_type,
                 "source_name": source_name,
                 "event_name": event_name,
                 "generated_at": session.created_at,
