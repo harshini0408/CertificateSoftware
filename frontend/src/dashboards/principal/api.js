@@ -11,6 +11,8 @@ export const principalKeys = {
   students: (filters) => ['principal', 'students', filters],
   certificates: (studentId) => ['principal', 'student-certificates', studentId],
   eventsOverview: (filters) => ['principal', 'events-overview', filters],
+  leastPerformingClubs: (limit) => ['principal', 'least-performing-clubs', limit],
+  activeMembers: (filters) => ['principal', 'active-members', filters],
 }
 
 export function usePrincipalStats() {
@@ -111,6 +113,31 @@ export function usePrincipalStudentCertificates(studentId) {
       return data
     },
     enabled: !!studentId,
+  })
+}
+
+export function usePrincipalLeastPerformingClubs(limit = 10) {
+  return useQuery({
+    queryKey: principalKeys.leastPerformingClubs(limit),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/principal/least-performing-clubs', { params: { limit } })
+      return data
+    },
+  })
+}
+
+export function usePrincipalActiveMembers(filters = {}) {
+  return useQuery({
+    queryKey: principalKeys.activeMembers(filters),
+    queryFn: async () => {
+      const params = {}
+      if (filters.department) params.department = filters.department
+      if (filters.batch) params.batch = filters.batch
+      if (filters.className) params.class = filters.className
+      if (filters.search) params.search = filters.search
+      const { data } = await axiosInstance.get('/principal/active-members', { params })
+      return data
+    },
   })
 }
 

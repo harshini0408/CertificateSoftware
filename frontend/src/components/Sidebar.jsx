@@ -130,6 +130,7 @@ function useNavItems() {
         { to: '/principal?tab=recent-events', icon: icons.calendar, label: 'Recent Events' },
         { to: '/principal?tab=clubs', icon: icons.clubs, label: 'Clubs' },
         { to: '/principal?tab=departments', icon: icons.departments, label: 'Departments' },
+        { to: '/principal?tab=active-members', icon: icons.users, label: 'Active Members' },
         { to: '/principal?tab=student-search', icon: icons.student, label: 'Student Search' },
       ]
 

@@ -11,6 +11,21 @@ import StatusBadge from '../../components/StatusBadge'
 import { BACKEND_URL } from '../../utils/axiosInstance'
 
 import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ReferenceLine,
+  Cell,
+} from 'recharts'
+
+import {
   usePrincipalStats,
   usePrincipalRankings,
   usePrincipalClubs,
@@ -20,6 +35,8 @@ import {
   usePrincipalEventsOverview,
   usePrincipalStudents,
   usePrincipalStudentCertificates,
+  usePrincipalLeastPerformingClubs,
+  usePrincipalActiveMembers,
 } from './api'
 
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -129,8 +146,615 @@ function buildCreditPredicate(rawExpression) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 1. Dashboard Tab (Overview + Stats + Top 5 Rankings)
+// 1. Dashboard Tab (Overview + Stats + Top 5 Rankings + Graphs + Least Performing)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+function getShortClubName(name = '') {
+  if (!name) return ''
+  const trimmed = name.replace(/\s+Club$/i, '').replace(/^iTech\s+/i, '')
+  return trimmed.length > 13 ? trimmed.slice(0, 11) + '…' : trimmed
+}
+
+function getShortDeptName(name = '') {
+  if (!name) return ''
+  const map = {
+    'BE COMPUTER SCIENCE & ENGINEERING': 'CSE',
+    'BE ELECTRICAL & ELECTRONICS ENGINEERING': 'EEE',
+    'BE ELECTRONICS & COMMUNICATION ENGINEERING': 'ECE',
+    'BE MECHANICAL ENGINEERING': 'MECH',
+    'BE CIVIL ENGINEERING': 'CIVIL',
+    'BTECH ARTIFICIAL INTELLIGENCE AND DATA SCIENCE': 'AI & DS',
+    'BTECH ELECTRONICS ENGINEERING (VLSI DESIGN AND TECHNOLOGY)': 'VLSI',
+    'BE INSTRUMENTATION AND CONTROL ENGINEERING': 'ICE',
+    'HUMANITIES AND SCIENCE': 'H&S',
+  }
+  return map[name.trim()] || (name.length > 10 ? name.slice(0, 8) + '…' : name)
+}
+
+function ClubsAndDeptsGraphicalSection({ onSelectClub, onSelectDept }) {
+  const { data: clubs, isLoading: loadingClubs } = usePrincipalClubs()
+  const { data: depts, isLoading: loadingDepts } = usePrincipalDepartments()
+
+  const [clubMetric, setClubMetric] = useState('participants')
+  const [deptMetric, setDeptMetric] = useState('participants')
+
+  const clubChartData = useMemo(() => {
+    if (!clubs || !clubs.length) return []
+    return (clubs || [])
+      .slice(0, 8)
+      .map((c) => ({
+        id: c.club_id,
+        fullName: c.club_name,
+        shortName: getShortClubName(c.club_name),
+        participants: c.cumulative_participants || 0,
+        events: c.total_completed_events || c.events_this_semester || 0,
+      }))
+  }, [clubs])
+
+  const deptChartData = useMemo(() => {
+    if (!depts || !depts.length) return []
+    return (depts || [])
+      .slice(0, 8)
+      .map((d) => ({
+        fullName: d.department,
+        shortName: getShortDeptName(d.department),
+        participants: d.cumulative_participants || 0,
+        events: d.total_events || 0,
+        certs: d.total_certs || 0,
+      }))
+  }, [depts])
+
+  return (
+    <div className="space-y-4 pt-1">
+      <div>
+        <h2 className="text-base font-bold text-foreground">Graphical Analytics & Performance Comparisons</h2>
+        <p className="text-xs text-gray-500">Visual comparison of student engagement volume and activity across clubs and departments</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Left: Clubs Graphical Comparison */}
+        <div className="card p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-foreground">Clubs Engagement Chart</h3>
+              <p className="text-[11px] text-gray-400">Comparing active clubs by student participation & conducted events</p>
+            </div>
+            <div className="inline-flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setClubMetric('participants')}
+                className={`rounded-md px-2.5 py-1 transition-all ${
+                  clubMetric === 'participants'
+                    ? 'bg-white font-bold text-navy shadow-xs'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Participants
+              </button>
+              <button
+                type="button"
+                onClick={() => setClubMetric('events')}
+                className={`rounded-md px-2.5 py-1 transition-all ${
+                  clubMetric === 'events'
+                    ? 'bg-white font-bold text-navy shadow-xs'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Events
+              </button>
+            </div>
+          </div>
+
+          {loadingClubs ? (
+            <div className="flex justify-center py-16">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-navy border-t-transparent" />
+            </div>
+          ) : !clubChartData.length ? (
+            <div className="py-16 text-center text-xs text-gray-400">No club performance data to display</div>
+          ) : (
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={clubChartData} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
+                  <defs>
+                    <linearGradient id="clubBarBlue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.95} />
+                      <stop offset="100%" stopColor="#1e3a8a" stopOpacity={0.95} />
+                    </linearGradient>
+                    <linearGradient id="clubBarIndigo" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#818cf8" stopOpacity={0.95} />
+                      <stop offset="100%" stopColor="#4338ca" stopOpacity={0.95} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis
+                    dataKey="shortName"
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    interval={0}
+                    angle={-25}
+                    textAnchor="end"
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    allowDecimals={false}
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload || !payload.length) return null
+                      const item = payload[0].payload
+                      return (
+                        <div className="rounded-xl border border-gray-100 bg-white/95 backdrop-blur-sm p-3 shadow-xl text-xs space-y-1">
+                          <p className="font-bold text-gray-900 border-b border-gray-100 pb-1">{item.fullName}</p>
+                          <p className="text-navy font-semibold">
+                            {clubMetric === 'participants' ? `${item.participants} Participants` : `${item.events} Events Completed`}
+                          </p>
+                          <p className="text-[11px] text-gray-400">
+                            {clubMetric === 'participants' ? `${item.events} completed events` : `${item.participants} total participants`}
+                          </p>
+                        </div>
+                      )
+                    }}
+                  />
+                  <Bar
+                    dataKey={clubMetric === 'participants' ? 'participants' : 'events'}
+                    fill={clubMetric === 'participants' ? 'url(#clubBarBlue)' : 'url(#clubBarIndigo)'}
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={40}
+                    cursor="pointer"
+                    onClick={(entry) => onSelectClub && onSelectClub(entry.id)}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1">
+            <span>Showing top 8 active clubs</span>
+            <span>Click any bar to view full club events</span>
+          </div>
+        </div>
+
+        {/* Right: Departments Graphical Comparison */}
+        <div className="card p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-foreground">Departments Engagement Chart</h3>
+              <p className="text-[11px] text-gray-400">Cumulative participant reach across academic branches</p>
+            </div>
+            <div className="inline-flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setDeptMetric('participants')}
+                className={`rounded-md px-2.5 py-1 transition-all ${
+                  deptMetric === 'participants'
+                    ? 'bg-white font-bold text-green-800 shadow-xs'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Participants
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeptMetric('events')}
+                className={`rounded-md px-2.5 py-1 transition-all ${
+                  deptMetric === 'events'
+                    ? 'bg-white font-bold text-green-800 shadow-xs'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Events
+              </button>
+            </div>
+          </div>
+
+          {loadingDepts ? (
+            <div className="flex justify-center py-16">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-navy border-t-transparent" />
+            </div>
+          ) : !deptChartData.length ? (
+            <div className="py-16 text-center text-xs text-gray-400">No department data to display</div>
+          ) : (
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={deptChartData} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
+                  <defs>
+                    <linearGradient id="deptBarGreen" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.95} />
+                      <stop offset="100%" stopColor="#047857" stopOpacity={0.95} />
+                    </linearGradient>
+                    <linearGradient id="deptBarTeal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.95} />
+                      <stop offset="100%" stopColor="#0f766e" stopOpacity={0.95} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis
+                    dataKey="shortName"
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    interval={0}
+                    angle={-25}
+                    textAnchor="end"
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    allowDecimals={false}
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload || !payload.length) return null
+                      const item = payload[0].payload
+                      return (
+                        <div className="rounded-xl border border-gray-100 bg-white/95 backdrop-blur-sm p-3 shadow-xl text-xs space-y-1">
+                          <p className="font-bold text-gray-900 border-b border-gray-100 pb-1">{item.fullName}</p>
+                          <p className="text-green-700 font-semibold">
+                            {deptMetric === 'participants' ? `${item.participants} Participants` : `${item.events} Events Conducted`}
+                          </p>
+                          <p className="text-[11px] text-gray-400">
+                            {deptMetric === 'participants' ? `${item.events} events conducted` : `${item.participants} total participants`}
+                          </p>
+                        </div>
+                      )
+                    }}
+                  />
+                  <Bar
+                    dataKey={deptMetric === 'participants' ? 'participants' : 'events'}
+                    fill={deptMetric === 'participants' ? 'url(#deptBarGreen)' : 'url(#deptBarTeal)'}
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={40}
+                    cursor="pointer"
+                    onClick={(entry) => onSelectDept && onSelectDept(entry.fullName)}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1">
+            <span>Departments sorted by engagement</span>
+            <span>Click any bar to drill down department events</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LeastPerformingClubsSection({ onSelectClub }) {
+  const [limit, setLimit] = useState(10)
+  const { data, isLoading } = usePrincipalLeastPerformingClubs(limit)
+  const [activeMetric, setActiveMetric] = useState('participants')
+  const [hoveredClubId, setHoveredClubId] = useState(null)
+
+  const summary = data?.summary || {
+    total_clubs: 23,
+    inactive_clubs_count: 0,
+    avg_participants_per_club: 0,
+    avg_events_per_club: 0,
+    benchmark_target: 30,
+  }
+
+  const leastClubs = data?.least_performing_clubs || []
+
+  const chartData = useMemo(() => {
+    return leastClubs.map((club, idx) => ({
+      index: idx + 1,
+      clubId: club.club_id,
+      fullName: club.club_name,
+      shortName: getShortClubName(club.club_name),
+      participants: club.total_participants || 0,
+      events: club.event_count || 0,
+      gap: club.participant_gap || 0,
+      target: club.benchmark_target || summary.benchmark_target || 30,
+      status: club.status || 'Inactive',
+    }))
+  }, [leastClubs, summary.benchmark_target])
+
+  const focusedClub = useMemo(() => {
+    if (!hoveredClubId) return leastClubs[0] || null
+    return leastClubs.find((c) => c.club_id === hoveredClubId) || leastClubs[0] || null
+  }, [hoveredClubId, leastClubs])
+
+  return (
+    <div className="card p-5 space-y-5 border-l-4 border-l-rose-500">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-gray-100 pb-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600 font-bold shadow-xs">
+            📉
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-foreground">Least Performing Clubs Analysis</h2>
+              <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
+                Action Required
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Interactive pinpoint analysis identifying clubs with low engagement against institutional benchmark targets.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-lg bg-gray-50 border border-gray-200 px-2.5 py-1 text-xs text-gray-600 font-medium">
+            🎯 Target: <strong className="text-indigo-700">{summary.benchmark_target} participants</strong>
+          </span>
+          <span className="rounded-lg bg-rose-50 border border-rose-200 px-2.5 py-1 text-xs text-rose-700 font-medium">
+            ⚠️ <strong className="text-rose-800">{summary.inactive_clubs_count}</strong> Inactive Club{summary.inactive_clubs_count !== 1 ? 's' : ''}
+          </span>
+          <div className="inline-flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => setLimit(5)}
+              className={`rounded-md px-2 py-0.5 transition-all ${
+                limit === 5 ? 'bg-white font-bold text-rose-700 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              Bottom 5
+            </button>
+            <button
+              type="button"
+              onClick={() => setLimit(10)}
+              className={`rounded-md px-2 py-0.5 transition-all ${
+                limit === 10 ? 'bg-white font-bold text-rose-700 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              Bottom 10
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-20">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-rose-500 border-t-transparent" />
+        </div>
+      ) : !leastClubs.length ? (
+        <div className="py-12 text-center text-xs text-gray-400">All clubs have met institutional engagement targets!</div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Side: Interactive Line Chart */}
+          <div className="lg:col-span-7 bg-slate-50/60 rounded-xl p-4 border border-slate-200/80 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+                <span>📍 Interactive Pinpoint Curve</span>
+                <span className="text-gray-400 font-normal">({leastClubs.length} clubs ranked lowest to highest)</span>
+              </div>
+              <div className="inline-flex rounded-md bg-white border border-gray-200 p-0.5 text-[11px] font-medium">
+                <button
+                  type="button"
+                  onClick={() => setActiveMetric('participants')}
+                  className={`rounded px-2 py-0.5 transition-all ${
+                    activeMetric === 'participants' ? 'bg-rose-500 text-white font-semibold' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Participants
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMetric('events')}
+                  className={`rounded px-2 py-0.5 transition-all ${
+                    activeMetric === 'events' ? 'bg-rose-500 text-white font-semibold' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Events
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMetric('gap')}
+                  className={`rounded px-2 py-0.5 transition-all ${
+                    activeMetric === 'gap' ? 'bg-rose-500 text-white font-semibold' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Deficit Gap
+                </button>
+              </div>
+            </div>
+
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 15, right: 15, left: -20, bottom: 25 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <XAxis
+                    dataKey="shortName"
+                    tick={{ fontSize: 10, fill: '#64748b' }}
+                    interval={0}
+                    angle={-25}
+                    textAnchor="end"
+                    tickLine={false}
+                    axisLine={{ stroke: '#cbd5e1' }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: '#64748b' }}
+                    allowDecimals={false}
+                    tickLine={false}
+                    axisLine={{ stroke: '#cbd5e1' }}
+                  />
+                  {activeMetric === 'participants' && (
+                    <ReferenceLine
+                      y={summary.benchmark_target || 30}
+                      stroke="#6366f1"
+                      strokeDasharray="4 4"
+                      strokeWidth={1.5}
+                      label={{
+                        value: `Target (${summary.benchmark_target})`,
+                        position: 'top',
+                        fill: '#4f46e5',
+                        fontSize: 10,
+                        fontWeight: 600,
+                      }}
+                    />
+                  )}
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload || !payload.length) return null
+                      const p = payload[0].payload
+                      return (
+                        <div className="rounded-xl border border-rose-100 bg-white/95 backdrop-blur-sm p-3 shadow-xl text-xs space-y-1.5 min-w-[200px]">
+                          <div className="flex items-center gap-1.5 text-rose-600 font-bold border-b border-gray-100 pb-1">
+                            <span>📍 Rank #{p.index}</span>
+                            <span className="text-gray-800 truncate">{p.fullName}</span>
+                          </div>
+                          <div className="flex justify-between text-gray-600">
+                            <span>Participants:</span>
+                            <strong className="text-gray-900">{p.participants}</strong>
+                          </div>
+                          <div className="flex justify-between text-gray-600">
+                            <span>Events Conducted:</span>
+                            <strong className="text-gray-900">{p.events}</strong>
+                          </div>
+                          <div className="flex justify-between text-gray-600">
+                            <span>Deficit to Target:</span>
+                            <strong className="text-rose-600">-{p.gap} participants</strong>
+                          </div>
+                          <div className="pt-1 border-t border-gray-100 flex justify-between items-center text-[11px]">
+                            <span className="text-gray-400">Classification:</span>
+                            <span className={`px-1.5 py-0.2 rounded font-semibold ${
+                              p.status === 'Inactive' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {p.status}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey={activeMetric}
+                    stroke="#f43f5e"
+                    strokeWidth={2.5}
+                    dot={(props) => {
+                      const { cx, cy, payload } = props
+                      const isHovered = hoveredClubId === payload.clubId
+                      return (
+                        <circle
+                          key={payload.clubId}
+                          cx={cx}
+                          cy={cy}
+                          r={isHovered ? 6.5 : 4}
+                          fill={isHovered ? '#f43f5e' : '#fff'}
+                          stroke={isHovered ? '#881337' : '#e11d48'}
+                          strokeWidth={isHovered ? 3 : 2}
+                          className="transition-all cursor-pointer"
+                          onClick={() => setHoveredClubId(payload.clubId)}
+                        />
+                      )
+                    }}
+                    activeDot={{ r: 7, stroke: '#881337', strokeWidth: 3, fill: '#fda4af' }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {focusedClub && (
+              <div className="rounded-lg bg-white border border-rose-200/80 p-3 shadow-2xs flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-rose-100 text-rose-700 font-bold text-xs">
+                    #{focusedClub.rank}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-foreground truncate">{focusedClub.club_name}</p>
+                    <p className="text-[11px] text-gray-500 truncate">
+                      {focusedClub.event_count} completed event{focusedClub.event_count !== 1 ? 's' : ''} · {focusedClub.total_participants} participants ·{' '}
+                      <span className="text-rose-600 font-semibold">{focusedClub.participant_gap} below target</span>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSelectClub && onSelectClub(focusedClub.club_id)}
+                  className="rounded-md bg-rose-50 border border-rose-200 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition-colors shrink-0"
+                >
+                  Inspect Club →
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right Side: Ranked List of Least Performing Clubs */}
+          <div className="lg:col-span-5 space-y-2">
+            <div className="flex items-center justify-between pb-1">
+              <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                Least Performing Rankings
+              </h3>
+              <span className="text-[11px] text-gray-400">Ranked lowest to highest</span>
+            </div>
+
+            <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+              {leastClubs.map((club) => {
+                const isSelected = hoveredClubId === club.club_id
+                return (
+                  <div
+                    key={club.club_id}
+                    onMouseEnter={() => setHoveredClubId(club.club_id)}
+                    onClick={() => setHoveredClubId(club.club_id)}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-200 shadow-2xs'
+                        : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
+                          club.rank === 1
+                            ? 'bg-red-600 text-white'
+                            : club.rank <= 3
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}
+                      >
+                        {club.rank}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-foreground truncate">{club.club_name}</p>
+                        <p className="text-[11px] text-gray-400">
+                          {club.event_count} events · {club.total_participants} participants
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          club.status === 'Inactive'
+                            ? 'bg-rose-100 text-rose-700'
+                            : club.status === 'Low Engagement'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {club.status}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onSelectClub && onSelectClub(club.club_id)
+                        }}
+                        className="rounded p-1 text-gray-400 hover:text-navy hover:bg-gray-100"
+                        title="View club details"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function DashboardOverviewTab({ onSelectClub, onSelectDept }) {
   const { data: stats, isLoading: loadingStats } = usePrincipalStats()
@@ -298,6 +922,12 @@ function DashboardOverviewTab({ onSelectClub, onSelectDept }) {
           )}
         </div>
       </div>
+
+      {/* Feature 1: Graphical format below Top 5 rankings for both clubs and departments */}
+      <ClubsAndDeptsGraphicalSection onSelectClub={onSelectClub} onSelectDept={onSelectDept} />
+
+      {/* Feature 3: Bottom feature pin-pointing least performing clubs with graphical line chart (left) & rankings (right) */}
+      <LeastPerformingClubsSection onSelectClub={onSelectClub} />
     </div>
   )
 }
@@ -1246,6 +1876,676 @@ function StudentDetailModal({ studentId, studentName, onClose }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// 6. Active Members Tab (Top 10 Active Students per Batch with Filters)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function PodiumCard({ student, rank, onSelect }) {
+  const isGold = rank === 1
+  const isSilver = rank === 2
+
+  const badgeConfig = isGold
+    ? {
+        border: 'border-amber-300 ring-2 ring-amber-100',
+        bg: 'from-amber-500/10 via-amber-500/5 to-white',
+        medal: '🥇',
+        rankLabel: '1st Place',
+        badgeBg: 'bg-amber-100 text-amber-900 border-amber-300',
+        barColor: 'bg-gradient-to-r from-amber-400 to-amber-600',
+      }
+    : isSilver
+    ? {
+        border: 'border-slate-300 ring-2 ring-slate-100',
+        bg: 'from-slate-400/10 via-slate-400/5 to-white',
+        medal: '🥈',
+        rankLabel: '2nd Place',
+        badgeBg: 'bg-slate-200 text-slate-800 border-slate-300',
+        barColor: 'bg-gradient-to-r from-slate-400 to-slate-600',
+      }
+    : {
+        border: 'border-amber-700/30 ring-2 ring-amber-50',
+        bg: 'from-amber-700/10 via-amber-700/5 to-white',
+        medal: '🥉',
+        rankLabel: '3rd Place',
+        badgeBg: 'bg-orange-100 text-orange-900 border-orange-200',
+        barColor: 'bg-gradient-to-r from-orange-400 to-amber-700',
+      }
+
+  return (
+    <div
+      onClick={onSelect}
+      className={`relative overflow-hidden rounded-2xl border bg-gradient-to-b ${badgeConfig.bg} ${badgeConfig.border} p-5 shadow-xs transition-all hover:shadow-md cursor-pointer flex flex-col justify-between`}
+    >
+      <div>
+        <div className="flex items-start justify-between gap-2">
+          <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-bold ${badgeConfig.badgeBg}`}>
+            <span>{badgeConfig.medal}</span>
+            <span>{badgeConfig.rankLabel}</span>
+          </span>
+          <span className="font-mono text-xs text-gray-500 font-semibold">
+            {student.registration_number || '—'}
+          </span>
+        </div>
+
+        <div className="mt-3">
+          <h4 className="text-base font-bold text-foreground line-clamp-1 hover:text-navy">
+            {student.name}
+          </h4>
+          <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">
+            {student.department} · {student.section ? `Sec ${student.section}` : ''}
+          </p>
+        </div>
+
+        {/* Credit score progress bar */}
+        <div className="mt-4 rounded-xl bg-white/80 p-3 border border-gray-100 shadow-2xs space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-gray-600">Credit Score</span>
+            <span className="font-black text-green-700">
+              {student.total_credits} <span className="font-normal text-gray-400 text-[10px]">/ 20 pts</span>
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-gray-100 overflow-hidden">
+            <div
+              className={`h-full rounded-full ${badgeConfig.barColor}`}
+              style={{ width: `${Math.min(100, Math.round(((student.total_credits || 0) / 20) * 100))}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Clubs & Leadership */}
+        <div className="mt-3 flex flex-wrap gap-1 min-h-[24px]">
+          {student.office_bearer && (
+            <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-800 ring-1 ring-purple-200">
+              ★ {student.office_bearer}
+            </span>
+          )}
+          {(student.clubs || []).slice(0, 2).map((club) => (
+            <span
+              key={club}
+              className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700 ring-1 ring-indigo-200 truncate max-w-[150px]"
+            >
+              {club}
+            </span>
+          ))}
+          {(student.clubs || []).length > 2 && (
+            <span className="text-[10px] text-gray-400 font-medium self-center">
+              +{(student.clubs || []).length - 2} more
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-gray-100/80 flex items-center justify-between">
+        <span className="text-[11px] text-gray-400">Batch {student.batch}</span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelect()
+          }}
+          className="text-xs font-bold text-navy hover:underline flex items-center gap-1"
+        >
+          View Record →
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ActiveMembersTab({ onSelectStudent }) {
+  const [department, setDepartment] = useState('')
+  const [batch, setBatch] = useState('')
+  const [className, setClassName] = useState('')
+  const [search, setSearch] = useState('')
+  const [viewMode, setViewMode] = useState('batch') // 'batch' or 'overall'
+
+  const debouncedSearch = useDebounce(search, 300)
+
+  const filters = useMemo(() => {
+    const f = {}
+    if (department) f.department = department
+    if (batch) f.batch = batch
+    if (className) f.className = className
+    if (debouncedSearch) f.search = debouncedSearch
+    return f
+  }, [department, batch, className, debouncedSearch])
+
+  const { data, isLoading } = usePrincipalActiveMembers(filters)
+
+  const batchGroups = data?.batches || []
+  const overallTop10 = data?.overall_top_10 || []
+  const stats = data?.stats || {
+    total_filtered_students: 0,
+    highest_credits: 0,
+    average_credits: 0,
+    total_batches_count: 0,
+  }
+  const filterOptions = data?.filter_options || {
+    departments: [],
+    batches: [],
+    classes: [],
+  }
+
+  const hasActiveFilters = Boolean(department || batch || className || search)
+
+  const resetFilters = () => {
+    setDepartment('')
+    setBatch('')
+    setClassName('')
+    setSearch('')
+  }
+
+  const studentColumns = [
+    {
+      key: 'rank',
+      header: 'Rank',
+      align: 'center',
+      render: (v) => {
+        if (v === 1) {
+          return (
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-900 font-bold text-xs ring-2 ring-amber-300">
+              🥇 1
+            </span>
+          )
+        }
+        if (v === 2) {
+          return (
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-800 font-bold text-xs ring-2 ring-slate-300">
+              🥈 2
+            </span>
+          )
+        }
+        if (v === 3) {
+          return (
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-50 text-amber-900 font-bold text-xs ring-2 ring-amber-200">
+              🥉 3
+            </span>
+          )
+        }
+        return (
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gray-100 text-gray-700 font-semibold text-xs">
+            {v}
+          </span>
+        )
+      },
+    },
+    {
+      key: 'name',
+      header: 'Student Name',
+      sortable: true,
+      searchKey: true,
+      render: (v, row) => (
+        <div>
+          <button
+            type="button"
+            className="text-left font-bold text-navy hover:underline text-sm"
+            onClick={() => onSelectStudent && onSelectStudent(row.id, v)}
+          >
+            {v}
+          </button>
+          <p className="text-[11px] text-gray-500 font-mono">{row.email || '—'}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'registration_number',
+      header: 'Reg No.',
+      render: (v) => <span className="font-mono text-xs font-medium text-gray-700 bg-gray-100 px-2 py-0.5 rounded">{v || '—'}</span>,
+    },
+    {
+      key: 'department',
+      header: 'Department',
+      sortable: true,
+      render: (v) => <span className="text-xs font-medium text-gray-700">{v || '—'}</span>,
+    },
+    {
+      key: 'batch',
+      header: 'Batch',
+      render: (v) => <span className="inline-flex rounded bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">{v || '—'}</span>,
+    },
+    {
+      key: 'section',
+      header: 'Class / Sec',
+      render: (v) => <span className="text-xs font-semibold text-gray-600">{v || '—'}</span>,
+    },
+    {
+      key: 'total_credits',
+      header: 'Credit Points',
+      align: 'right',
+      sortable: true,
+      render: (v) => (
+        <div className="flex flex-col items-end">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-black text-green-700">{v || 0}</span>
+            <span className="text-[10px] text-gray-400">/ 20 pts</span>
+          </div>
+          <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-0.5">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${
+                (v || 0) >= 20 ? 'bg-green-600' : (v || 0) >= 10 ? 'bg-emerald-500' : 'bg-blue-500'
+              }`}
+              style={{ width: `${Math.min(100, Math.round(((v || 0) / 20) * 100))}%` }}
+            />
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'clubs',
+      header: 'Club Affiliations',
+      render: (v) => {
+        const clubs = Array.isArray(v) ? v : []
+        if (!clubs.length) return <span className="text-xs text-gray-400 italic">None</span>
+        return (
+          <div className="flex flex-wrap gap-1 max-w-[200px]">
+            {clubs.map((c) => (
+              <span key={c} className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700 ring-1 ring-indigo-200">
+                {c}
+              </span>
+            ))}
+          </div>
+        )
+      },
+    },
+    {
+      key: 'office_bearer',
+      header: 'Leadership',
+      render: (v) => {
+        if (!v) return <span className="text-xs text-gray-400">—</span>
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700 ring-1 ring-purple-200">
+            ★ {v}
+          </span>
+        )
+      },
+    },
+    {
+      key: '_actions',
+      header: 'Action',
+      align: 'center',
+      render: (_, row) => (
+        <button
+          type="button"
+          className="rounded bg-navy/10 px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy/20 transition-colors"
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelectStudent && onSelectStudent(row.id, row.name)
+          }}
+        >
+          View Record
+        </button>
+      ),
+    },
+  ]
+
+  const overallColumns = [
+    {
+      key: 'overall_rank',
+      header: 'Overall Rank',
+      align: 'center',
+      render: (v) => {
+        if (v === 1) {
+          return (
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-900 font-bold text-xs ring-2 ring-amber-300">
+              🥇 1
+            </span>
+          )
+        }
+        if (v === 2) {
+          return (
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-800 font-bold text-xs ring-2 ring-slate-300">
+              🥈 2
+            </span>
+          )
+        }
+        if (v === 3) {
+          return (
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-50 text-amber-900 font-bold text-xs ring-2 ring-amber-200">
+              🥉 3
+            </span>
+          )
+        }
+        return (
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gray-100 text-gray-700 font-semibold text-xs">
+            {v}
+          </span>
+        )
+      },
+    },
+    ...studentColumns.slice(1),
+  ]
+
+  return (
+    <div className="space-y-6">
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold text-foreground">Active Members — Batch Rankings</h1>
+            <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-bold text-blue-800">
+              Top 10 per Batch
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-gray-500">
+            Evaluating the top 10 most active students per academic batch based on verified credit points and club contributions.
+          </p>
+        </div>
+
+        {/* View Mode Toggle */}
+        <div className="inline-flex rounded-xl bg-gray-100 p-1 text-xs font-semibold shrink-0">
+          <button
+            type="button"
+            onClick={() => setViewMode('batch')}
+            className={`rounded-lg px-3 py-1.5 transition-all ${
+              viewMode === 'batch'
+                ? 'bg-white text-navy shadow-xs font-bold'
+                : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            🏫 Grouped by Batch
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('overall')}
+            className={`rounded-lg px-3 py-1.5 transition-all ${
+              viewMode === 'overall'
+                ? 'bg-white text-navy shadow-xs font-bold'
+                : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            🏆 Overall Top 10
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard
+          label="Active Students Filtered"
+          value={stats.total_filtered_students}
+          icon={Icons.users}
+          accent="navy"
+          isLoading={isLoading}
+        />
+        <StatCard
+          label="Batches Tracked"
+          value={stats.total_batches_count}
+          icon={Icons.calendar}
+          accent="blue"
+          isLoading={isLoading}
+        />
+        <StatCard
+          label="Highest Credit Score"
+          value={`${stats.highest_credits} pts`}
+          icon={Icons.template}
+          accent="gold"
+          isLoading={isLoading}
+        />
+        <StatCard
+          label="Average Credit Score"
+          value={`${stats.average_credits} pts`}
+          icon={Icons.departments}
+          accent="teal"
+          isLoading={isLoading}
+        />
+        <StatCard
+          label="Institutional Goal"
+          value="20 pts"
+          icon={Icons.clubs}
+          accent="green"
+          isLoading={false}
+        />
+      </div>
+
+      {/* Filter Options Bar */}
+      <div className="card p-4 space-y-3 bg-white/95 backdrop-blur-sm border border-gray-200/80 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2.5">
+          <div className="flex items-center gap-2 text-xs font-bold text-gray-700 uppercase tracking-wider">
+            <span>🔍 Filter Active Members</span>
+            {hasActiveFilters && (
+              <span className="rounded-full bg-navy/10 px-2 py-0.5 text-[10px] font-bold text-navy">
+                Filters Active
+              </span>
+            )}
+          </div>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
+            >
+              Reset All Filters
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Department Filter */}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-600">Department</label>
+            <select
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="form-input text-xs w-full"
+            >
+              <option value="">All Departments</option>
+              {filterOptions.departments.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Batch Filter */}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-600">Batch</label>
+            <select
+              value={batch}
+              onChange={(e) => setBatch(e.target.value)}
+              className="form-input text-xs w-full"
+            >
+              <option value="">All Batches</option>
+              {filterOptions.batches.map((b) => (
+                <option key={b} value={b}>
+                  Batch {b}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Class / Section Filter */}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-600">Class / Section</label>
+            <select
+              value={className}
+              onChange={(e) => setClassName(e.target.value)}
+              className="form-input text-xs w-full"
+            >
+              <option value="">All Classes / Sections</option>
+              {filterOptions.classes.map((c) => (
+                <option key={c} value={c}>
+                  Section {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Search Input */}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-600">Search Student</label>
+            <input
+              type="search"
+              placeholder="Name, Reg No, or Email..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="form-input text-xs w-full"
+            >
+            </input>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      {isLoading ? (
+        <div className="py-20 flex justify-center">
+          <LoadingSpinner label="Loading active student records..." />
+        </div>
+      ) : viewMode === 'overall' ? (
+        /* Overall Top 10 View */
+        <div className="card p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+            <div>
+              <h2 className="text-base font-bold text-foreground">🏆 Institution-Wide Top 10 Active Students</h2>
+              <p className="text-xs text-gray-500">Highest credit point earners across all academic batches</p>
+            </div>
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+              Campus Champions
+            </span>
+          </div>
+
+          {/* Top 3 Podium Cards */}
+          {overallTop10.length >= 3 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+              <PodiumCard
+                student={overallTop10[0]}
+                rank={1}
+                onSelect={() => onSelectStudent && onSelectStudent(overallTop10[0].id, overallTop10[0].name)}
+              />
+              <PodiumCard
+                student={overallTop10[1]}
+                rank={2}
+                onSelect={() => onSelectStudent && onSelectStudent(overallTop10[1].id, overallTop10[1].name)}
+              />
+              <PodiumCard
+                student={overallTop10[2]}
+                rank={3}
+                onSelect={() => onSelectStudent && onSelectStudent(overallTop10[2].id, overallTop10[2].name)}
+              />
+            </div>
+          )}
+
+          <div className="pt-2">
+            <DataTable
+              columns={overallColumns}
+              data={overallTop10}
+              isLoading={false}
+              emptyMessage="No active students match the selected filters."
+              rowKey="id"
+              onRowClick={(row) => onSelectStudent && onSelectStudent(row.id, row.name)}
+            />
+          </div>
+        </div>
+      ) : batchGroups.length === 0 ? (
+        <div className="card p-12 text-center space-y-3">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-xl">
+            🔍
+          </div>
+          <h3 className="text-base font-bold text-foreground">No Active Students Found</h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto">
+            No students match the criteria for the specified department, batch, or class. Try adjusting or clearing your filters.
+          </p>
+          {hasActiveFilters && (
+            <button type="button" onClick={resetFilters} className="btn-secondary text-xs">
+              Clear All Filters
+            </button>
+          )}
+        </div>
+      ) : (
+        /* Batch-by-Batch Groups (Top 10 per batch) */
+        <div className="space-y-8">
+          {batchGroups.map((group) => {
+            const top3 = group.top_students.slice(0, 3)
+
+            return (
+              <div
+                key={group.batch}
+                className="card p-5 space-y-5 border border-gray-200/90 shadow-xs hover:border-gray-300 transition-colors"
+              >
+                {/* Batch Header Bar */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-navy text-white font-bold text-sm shadow-xs">
+                      {group.batch}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-lg font-bold text-foreground">Batch {group.batch}</h2>
+                        <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                          {group.total_students} student{group.total_students !== 1 ? 's' : ''} enrolled
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Top 10 active student leaders ranked by cumulative credit achievement.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1 text-amber-800 font-medium">
+                      ⭐ Top Score: <strong>{group.highest_credits} pts</strong>
+                    </span>
+                    <span className="rounded-lg bg-gray-50 border border-gray-200 px-2.5 py-1 text-gray-700 font-medium">
+                      📊 Batch Avg: <strong>{group.average_credits} pts</strong>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Top 3 Podium Highlights for this Batch */}
+                {top3.length >= 3 && (
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-3">
+                      🏅 Batch {group.batch} Podium Leaders
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <PodiumCard
+                        student={top3[0]}
+                        rank={1}
+                        onSelect={() => onSelectStudent && onSelectStudent(top3[0].id, top3[0].name)}
+                      />
+                      <PodiumCard
+                        student={top3[1]}
+                        rank={2}
+                        onSelect={() => onSelectStudent && onSelectStudent(top3[1].id, top3[1].name)}
+                      />
+                      <PodiumCard
+                        student={top3[2]}
+                        rank={3}
+                        onSelect={() => onSelectStudent && onSelectStudent(top3[2].id, top3[2].name)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Top 10 Table for this Batch */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider">
+                      📋 Top 10 Roster — Batch {group.batch}
+                    </h3>
+                    <span className="text-[11px] text-gray-400">
+                      Showing top {group.top_students.length} students
+                    </span>
+                  </div>
+
+                  <DataTable
+                    columns={studentColumns}
+                    data={group.top_students}
+                    isLoading={false}
+                    emptyMessage={`No active students found for Batch ${group.batch}.`}
+                    rowKey="id"
+                    onRowClick={(row) => onSelectStudent && onSelectStudent(row.id, row.name)}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Main Principal Dashboard Page
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1272,6 +2572,16 @@ export default function PrincipalDashboard() {
       case 'student-search':
         return (
           <StudentSearchTab
+            onSelectStudent={(id, name) => {
+              setSelectedStudentId(id)
+              setSelectedStudentName(name)
+            }}
+          />
+        )
+      case 'active-members':
+      case 'active_members':
+        return (
+          <ActiveMembersTab
             onSelectStudent={(id, name) => {
               setSelectedStudentId(id)
               setSelectedStudentName(name)

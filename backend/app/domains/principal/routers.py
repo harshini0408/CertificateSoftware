@@ -690,3 +690,204 @@ async def get_events_overview(
         "count": len(rows),
         "items": rows,
     }
+
+
+@router.get("/least-performing-clubs")
+async def get_least_performing_clubs(
+    limit: int = Query(10, ge=1, le=50),
+    _user: User = _principal,
+):
+    """Return clubs with the least performance (participants & events) for intervention analysis."""
+    clubs = await Club.find(Club.is_active == True).to_list()
+    completed_events = await Event.find({"status": EventStatus.COMPLETED.value}).to_list()
+
+    club_stats: dict[str, dict] = {}
+    for c in clubs:
+        cid = str(c.id)
+        club_stats[cid] = {
+            "club_id": cid,
+            "club_name": c.name,
+            "slug": getattr(c, "slug", "") or "",
+            "category": getattr(c, "category", "") or "General",
+            "event_count": 0,
+            "total_participants": 0,
+        }
+
+    for e in completed_events:
+        cid = str(e.club_id)
+        if cid in club_stats:
+            club_stats[cid]["event_count"] += 1
+            club_stats[cid]["total_participants"] += (e.participant_count or 0)
+
+    total_clubs = len(clubs) or 1
+    total_participants_all = sum(cs["total_participants"] for cs in club_stats.values())
+    total_events_all = sum(cs["event_count"] for cs in club_stats.values())
+    avg_participants = round(total_participants_all / total_clubs, 1)
+    avg_events = round(total_events_all / total_clubs, 1)
+
+    sorted_least = sorted(
+        club_stats.values(),
+        key=lambda x: (x["total_participants"], x["event_count"], x["club_name"].lower()),
+    )
+
+    results = []
+    target_benchmark = max(30, int(avg_participants))
+    for idx, item in enumerate(sorted_least):
+        gap = max(0, target_benchmark - item["total_participants"])
+        if item["event_count"] == 0:
+            status = "Inactive"
+        elif item["total_participants"] < 20:
+            status = "Low Engagement"
+        elif item["total_participants"] < target_benchmark:
+            status = "Below Average"
+        else:
+            status = "Active"
+
+        results.append({
+            "rank": idx + 1,
+            "club_id": item["club_id"],
+            "club_name": item["club_name"],
+            "slug": item["slug"],
+            "category": item["category"],
+            "event_count": item["event_count"],
+            "total_participants": item["total_participants"],
+            "benchmark_target": target_benchmark,
+            "participant_gap": gap,
+            "status": status,
+        })
+
+    return {
+        "summary": {
+            "total_clubs": len(clubs),
+            "inactive_clubs_count": sum(1 for cs in club_stats.values() if cs["event_count"] == 0),
+            "avg_participants_per_club": avg_participants,
+            "avg_events_per_club": avg_events,
+            "benchmark_target": target_benchmark,
+        },
+        "least_performing_clubs": results[:limit],
+        "all_ranked_clubs": results,
+    }
+
+
+@router.get("/active-members")
+async def get_active_members(
+    department: Optional[str] = None,
+    batch: Optional[str] = None,
+    class_name: Optional[str] = Query(default=None, alias="class"),
+    search: Optional[str] = None,
+    _user: User = _principal,
+):
+    """List the top 10 active students from each batch based on credit points with filter options."""
+    all_students = await User.find({
+        "role": UserRole.STUDENT,
+        "is_active": True,
+    }).to_list()
+
+    distinct_depts = sorted(list(set(s.department for s in all_students if s.department)))
+    distinct_batches = sorted(list(set(s.batch for s in all_students if s.batch)))
+    distinct_classes = sorted(list(set(s.section for s in all_students if s.section)))
+
+    filtered_students = all_students
+    if isinstance(department, str) and department.strip():
+        dept_norm = department.strip().lower()
+        filtered_students = [s for s in filtered_students if (s.department or "").strip().lower() == dept_norm]
+    if isinstance(batch, str) and batch.strip():
+        batch_norm = batch.strip().lower()
+        filtered_students = [s for s in filtered_students if (s.batch or "").strip().lower() == batch_norm]
+    if isinstance(class_name, str) and class_name.strip():
+        class_norm = class_name.strip().lower()
+        filtered_students = [s for s in filtered_students if (s.section or "").strip().lower() == class_norm]
+    if isinstance(search, str) and search.strip():
+        q = search.strip().lower()
+        filtered_students = [
+            s for s in filtered_students
+            if q in (s.name or "").lower() or q in (s.email or "").lower() or q in (s.registration_number or "").lower()
+        ]
+
+    emails = [(s.email or "").strip().lower() for s in filtered_students if s.email]
+    reg_nos = [(s.registration_number or "").strip() for s in filtered_students if s.registration_number]
+
+    credit_clauses = []
+    if emails:
+        credit_clauses.append({"student_email": {"$in": emails}})
+    if reg_nos:
+        credit_clauses.append({"registration_number": {"$in": reg_nos}})
+
+    credits_docs = await StudentCredit.find({"$or": credit_clauses}).to_list() if credit_clauses else []
+    credits_by_email = {(doc.student_email or "").strip().lower(): int(doc.total_credits or 0) for doc in credits_docs if doc.student_email}
+    credits_by_reg = {(doc.registration_number or "").strip(): int(doc.total_credits or 0) for doc in credits_docs if doc.registration_number}
+
+    s_ids = [s.id for s in filtered_students]
+    approved_memberships = await StudentClubMembership.find({
+        "student_id": {"$in": s_ids},
+        "status": MembershipStatus.APPROVED.value,
+    }).to_list() if s_ids else []
+
+    clubs_by_student: dict = {}
+    office_bearer_by_student: dict = {}
+    for m in approved_memberships:
+        clubs_by_student.setdefault(str(m.student_id), []).append(m.club_name or "")
+        if m.office_bearer_role:
+            office_bearer_by_student[str(m.student_id)] = f"{m.office_bearer_role} ({m.club_name or 'Club'})"
+
+    enriched_students = []
+    for s in filtered_students:
+        email_key = (s.email or "").strip().lower()
+        reg_key = (s.registration_number or "").strip()
+        credits = credits_by_email.get(email_key, credits_by_reg.get(reg_key, 0))
+        enriched_students.append({
+            "id": str(s.id),
+            "name": s.name,
+            "email": s.email,
+            "registration_number": s.registration_number or "—",
+            "department": s.department or "—",
+            "batch": s.batch or "—",
+            "section": s.section or "—",
+            "total_credits": credits,
+            "target_credits": 20,
+            "clubs": clubs_by_student.get(str(s.id), []),
+            "office_bearer": office_bearer_by_student.get(str(s.id)),
+        })
+
+    batches_to_process = sorted(list(set(s["batch"] for s in enriched_students if s["batch"] != "—")))
+    if not batches_to_process and distinct_batches:
+        batches_to_process = distinct_batches
+
+    batch_groups = []
+    for b in batches_to_process:
+        b_students = [s for s in enriched_students if s["batch"] == b]
+        b_students.sort(key=lambda x: (-x["total_credits"], x["name"].lower()))
+        top_10 = b_students[:10]
+        for idx, student in enumerate(top_10):
+            student["rank"] = idx + 1
+
+        batch_groups.append({
+            "batch": b,
+            "total_students": len(b_students),
+            "highest_credits": top_10[0]["total_credits"] if top_10 else 0,
+            "average_credits": round(sum(s["total_credits"] for s in b_students) / max(1, len(b_students)), 1),
+            "top_students": top_10,
+        })
+
+    all_sorted = sorted(enriched_students, key=lambda x: (-x["total_credits"], x["name"].lower()))
+    for idx, s in enumerate(all_sorted[:10]):
+        s["overall_rank"] = idx + 1
+
+    highest_overall = all_sorted[0]["total_credits"] if all_sorted else 0
+    avg_overall = round(sum(s["total_credits"] for s in enriched_students) / max(1, len(enriched_students)), 1)
+
+    return {
+        "batches": batch_groups,
+        "overall_top_10": all_sorted[:10],
+        "stats": {
+            "total_filtered_students": len(enriched_students),
+            "highest_credits": highest_overall,
+            "average_credits": avg_overall,
+            "total_batches_count": len(batch_groups),
+        },
+        "filter_options": {
+            "departments": distinct_depts,
+            "batches": distinct_batches,
+            "classes": distinct_classes,
+        },
+    }
