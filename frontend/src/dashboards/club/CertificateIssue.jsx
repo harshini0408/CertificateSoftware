@@ -10,7 +10,7 @@ import {
   useResendCert,
 } from './certificatesApi'
 import { BACKEND_URL } from '../../utils/axiosInstance'
-import { useParticipants } from './participantsApi'
+import { useParticipants, useDeleteParticipant } from './participantsApi'
 
 const IST_TIMEZONE = 'Asia/Kolkata'
 const HAS_TZ_RE = /(Z|[+\-]\d{2}:\d{2})$/i
@@ -142,7 +142,8 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
   const resendMutation    = useResendCert(clubId, eventId)
 
   // Preflight checks (derived from event prop or certs meta)
-  const hasParticipants = (certs?.length ?? 0) > 0 || (event?.participant_count ?? 0) > 0
+  const verifiedParticipantsCount = (participants ?? []).filter((p) => p.verified).length
+  const hasParticipants = verifiedParticipantsCount > 0 || (certs?.length ?? 0) > 0
   const hasAssets       = !!(event?.assets?.logo_url)
   const hasReport       = !!(event?.report_url) && event?.report_status !== 'not_submitted' && event?.report_status !== 'rejected'
   const allReady        = hasParticipants && hasAssets && hasReport
@@ -166,14 +167,68 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
     setPolling(false)
   }
 
+  const deleteParticipant = useDeleteParticipant(clubId, eventId)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+
   // ── Table columns ─────────────────────────────────────────────────────────
   const participantColumns = [
     { key: 'name', header: 'Name', searchKey: true, render: (_, row) => row.fields?.Name || '—' },
     { key: 'email', header: 'Email', searchKey: true },
     { key: 'registration_number', header: 'Reg No.', searchKey: true, render: (v) => v || '—' },
     { key: 'cert_type', header: 'Type', render: (v) => (v ?? 'participant').replace(/_/g, ' ') },
-    { key: 'source', header: 'Source' },
-    { key: 'verified', header: 'Verified', align: 'center', render: (v) => (v ? 'Yes' : 'No') },
+    { key: 'source', header: 'Source', render: (v) => <span className="capitalize">{v}</span> },
+    {
+      key: 'verified',
+      header: 'Eligible',
+      align: 'center',
+      render: (v, row) =>
+        v ? (
+          <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+            {row.source === 'registration' ? '✓ Attended' : 'Verified'}
+          </span>
+        ) : (
+          <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+            Pending
+          </span>
+        ),
+    },
+    {
+      key: '_delete',
+      header: '',
+      align: 'center',
+      searchKey: false,
+      render: (_, row) =>
+        confirmDeleteId === row.id ? (
+          <div className="flex items-center gap-1">
+            <button
+              className="text-xs text-red-600 font-semibold hover:underline"
+              onClick={() => {
+                deleteParticipant.mutate(row.id)
+                setConfirmDeleteId(null)
+              }}
+              disabled={deleteParticipant.isPending}
+            >
+              Confirm
+            </button>
+            <button
+              className="text-xs text-gray-400 hover:underline"
+              onClick={() => setConfirmDeleteId(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            title="Remove participant"
+            onClick={() => setConfirmDeleteId(row.id)}
+            className="rounded p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        ),
+    },
   ]
 
   const certColumns = [

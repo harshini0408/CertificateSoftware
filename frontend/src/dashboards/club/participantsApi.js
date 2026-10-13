@@ -221,3 +221,27 @@ export function useUpdateParticipantType(clubId, eventId) {
     },
   })
 }
+
+// ── useDeleteParticipant ──────────────────────────────────────────────────────
+/**
+ * DELETE /clubs/:club_id/events/:event_id/participants/:participant_id
+ */
+export function useDeleteParticipant(clubId, eventId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (participantId) =>
+      axiosInstance.delete(
+        `/clubs/${clubId}/events/${eventId}/participants/${participantId}`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) })
+      qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
+      addToast({ type: 'success', message: 'Participant removed.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: safeDetail(err, 'Failed to remove participant.') })
+    },
+  })
+}

@@ -262,3 +262,32 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
     }
+
+
+# ── Visitor Counter ──────────────────────────────────────────────────────────
+@app.get("/api/visitor-count")
+async def get_visitor_count():
+    try:
+        from .database import get_database
+        db = get_database()
+        doc = await db["system_counters"].find_one({"_id": "visitors"})
+        return {"count": doc.get("count", 0) if doc else 0}
+    except Exception:
+        return {"count": 0}
+
+
+@app.post("/api/visitor-count")
+async def increment_visitor_count():
+    try:
+        from .database import get_database
+        db = get_database()
+        res = await db["system_counters"].find_one_and_update(
+            {"_id": "visitors"},
+            {"$inc": {"count": 1}},
+            upsert=True,
+            return_document=True,
+        )
+        return {"count": res.get("count", 1) if res else 1}
+    except Exception:
+        return {"count": 1}
+

@@ -175,6 +175,7 @@ def _club_response(c: Club) -> ClubResponse:
         id=str(c.id),
         name=c.name,
         slug=c.slug,
+        slug_locked=getattr(c, "slug_locked", False) or False,
         contact_email=c.contact_email or "",
         is_active=c.is_active,
         created_at=c.created_at,
@@ -338,6 +339,21 @@ async def update_club(
 
     update_data = body.model_dump(exclude_none=True)
 
+    # One-time slug editing: only allow if slug hasn't already been confirmed (tracked by slug_locked flag)
+    if "slug" in update_data:
+        new_slug = update_data["slug"].upper()
+        if getattr(club, "slug_locked", False):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Club slug has already been edited once and cannot be changed again."
+            )
+        # Check uniqueness
+        existing_with_slug = await Club.find_one(Club.slug == new_slug)
+        if existing_with_slug and str(existing_with_slug.id) != str(club_id):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Slug already in use by another club.")
+        update_data["slug"] = new_slug
+        update_data["slug_locked"] = True  # mark as locked after first edit
+
     # If deactivating club, cascade to all users belonging to this club
     if update_data.get("is_active") is False and club.is_active is True:
         await User.find(
@@ -347,6 +363,7 @@ async def update_club(
 
     if update_data:
         await club.set(update_data)
+        club = await Club.get(club_id)
 
     return _club_response(club)
 
@@ -375,7 +392,29 @@ async def get_club_users(club_id: PydanticObjectId, _user: User = _admin):
     return [_user_response(u) for u in users]
 
 
-# ═══ DEPARTMENTS ═════════════════════════════════════════════════════════════
+@router.delete("/clubs/{club_id}", status_code=204)
+async def delete_club(club_id: PydanticObjectId, _user: User = _admin):
+    """Delete a club and cascade-delete its associated coordinator user(s)."""
+    club = await Club.get(club_id)
+    if not club:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+
+    # Delete associated club coordinator(s) to avoid orphan accounts
+    coordinator_users = await User.find(
+        User.club_id == club_id,
+        User.role == UserRole.CLUB_COORDINATOR,
+    ).to_list()
+    for cu in coordinator_users:
+        await cu.delete()
+
+    # Delete all users linked to this club (guests, etc.)
+    # Only delete coordinators to avoid accidentally removing students
+    # already handled above via CLUB_COORDINATOR filter
+
+    await club.delete()
+    return None
+
+
 
 
 @router.post("/departments", response_model=DepartmentResponse, status_code=201)

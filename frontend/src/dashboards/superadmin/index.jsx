@@ -13,7 +13,7 @@ import DataTable from '../../components/DataTable'
 import ConfirmModal from '../../components/ConfirmModal'
 import CertificateMappingTab from './CertificateMappingTab'
 
-import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub } from '../club/api'
+import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub, useDeleteClub } from '../club/api'
 import {
   useUsers,
   useCreateUser,
@@ -133,7 +133,7 @@ function Modal({ isOpen, onClose, title, children, wide = false }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // CLUB DETAIL SIDE PANEL
 // ═══════════════════════════════════════════════════════════════════════════════
-function ClubDetailPanel({ clubId, onClose, onEdit }) {
+function ClubDetailPanel({ clubId, onClose, onEdit, onDelete }) {
   const { data: club, isLoading } = useClub(clubId)
   const { data: members } = useClubUsers(clubId)
 
@@ -191,6 +191,15 @@ function ClubDetailPanel({ clubId, onClose, onEdit }) {
             )}
             <div className="flex gap-3 pt-2">
               <button className="btn-primary flex-1" onClick={() => onEdit(club)}>Edit Club</button>
+              {onDelete && (
+                <button
+                  type="button"
+                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100 transition-colors"
+                  onClick={() => onDelete(club)}
+                >
+                  Delete Club
+                </button>
+              )}
             </div>
           </div>
         ) : null}
@@ -269,7 +278,7 @@ function NewClubModal({ isOpen, onClose }) {
 // EDIT CLUB MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 function EditClubModal({ isOpen, onClose, club }) {
-  const [form, setForm] = useState({ name: '', contact_email: '', coordinator_username: '' })
+  const [form, setForm] = useState({ name: '', slug: '', contact_email: '', coordinator_username: '' })
   const updateClub = useUpdateClub()
   const updateUser = useUpdateUser()
   const { data: clubUsers } = useClubUsers(club?.id)
@@ -284,6 +293,7 @@ function EditClubModal({ isOpen, onClose, club }) {
       setForm((prev) => ({
         ...prev,
         name: club.name,
+        slug: club.slug || '',
         contact_email: club.contact_email || '',
       }))
     }
@@ -307,11 +317,18 @@ function EditClubModal({ isOpen, onClose, club }) {
       return
     }
     try {
-      await updateClub.mutateAsync({
+      const payload = {
         clubId: club.id,
         name: form.name,
         contact_email: form.contact_email ? form.contact_email.trim().toLowerCase() : '',
-      })
+      }
+
+      // One-time slug edit: only send if not locked and has changed
+      if (!club.slug_locked && form.slug && form.slug.trim().toUpperCase() !== club.slug) {
+        payload.slug = form.slug.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+      }
+
+      await updateClub.mutateAsync(payload)
 
       if (coordinator && form.coordinator_username && form.coordinator_username !== coordinator.username) {
         await updateUser.mutateAsync({
@@ -335,8 +352,29 @@ function EditClubModal({ isOpen, onClose, club }) {
           <input className="form-input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
         </div>
         <div>
-          <label className="form-label">Slug</label>
-          <input className="form-input font-mono bg-gray-50 cursor-not-allowed" value={club.slug} disabled title="Cannot be changed" />
+          <div className="flex items-center justify-between">
+            <label className="form-label">Slug</label>
+            {club.slug_locked ? (
+              <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Locked (already edited once)</span>
+            ) : (
+              <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Editable once</span>
+            )}
+          </div>
+          {club.slug_locked ? (
+            <input className="form-input font-mono bg-gray-50 cursor-not-allowed" value={club.slug} disabled title="Slug is locked and cannot be changed" />
+          ) : (
+            <input
+              className="form-input font-mono"
+              value={form.slug}
+              onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
+              placeholder="e.g. ACM"
+            />
+          )}
+          <p className="mt-1 text-xs text-gray-500">
+            {club.slug_locked
+              ? 'Club slug cannot be changed again.'
+              : 'Uppercase alphanumeric only. Note: slug can only be edited once.'}
+          </p>
         </div>
         <div>
           <label className="form-label">Contact Email</label>
@@ -1566,10 +1604,12 @@ function ClubsTab() {
     return f
   }, [debouncedSearch])
   const { data: clubs, isLoading } = useClubs(filters)
+  const deleteClub = useDeleteClub()
 
   const [showNew, setShowNew] = useState(false)
   const [editClub, setEditClub] = useState(null)
   const [detailClubId, setDetailClubId] = useState(null)
+  const [clubToDelete, setClubToDelete] = useState(null)
 
   const columns = [
     { key: 'name', header: 'Name', sortable: true, render: (v) => <span className="font-semibold">{v}</span> },
@@ -1578,9 +1618,18 @@ function ClubsTab() {
     { key: 'created_at', header: 'Created', sortable: true, render: (v) => fmtDate(v) },
     {
       key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <button title="Edit" onClick={() => setEditClub(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <button title="Edit Club" onClick={() => setEditClub(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          </button>
+          <button
+            title="Delete Club"
+            onClick={() => setClubToDelete(row)}
+            className="rounded p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
           </button>
         </div>
       )
@@ -1598,7 +1647,29 @@ function ClubsTab() {
       <DataTable columns={columns} data={clubs || []} isLoading={isLoading} emptyMessage="No clubs found. Create your first club." onRowClick={(row) => setDetailClubId(row.id)} />
       <NewClubModal isOpen={showNew} onClose={() => setShowNew(false)} />
       <EditClubModal isOpen={!!editClub} onClose={() => setEditClub(null)} club={editClub} />
-      {detailClubId && <ClubDetailPanel clubId={detailClubId} onClose={() => setDetailClubId(null)} onEdit={(c) => { setDetailClubId(null); setEditClub(c) }} />}
+      {detailClubId && (
+        <ClubDetailPanel
+          clubId={detailClubId}
+          onClose={() => setDetailClubId(null)}
+          onEdit={(c) => { setDetailClubId(null); setEditClub(c) }}
+          onDelete={(c) => { setDetailClubId(null); setClubToDelete(c) }}
+        />
+      )}
+      {clubToDelete && (
+        <ConfirmModal
+          isOpen={!!clubToDelete}
+          onClose={() => setClubToDelete(null)}
+          onConfirm={async () => {
+            await deleteClub.mutateAsync(clubToDelete.id)
+            setClubToDelete(null)
+          }}
+          title="Delete Club"
+          message={`Are you sure you want to delete "${clubToDelete.name}" (${clubToDelete.slug})? The associated club coordinator account will also be deleted.`}
+          confirmLabel={deleteClub.isPending ? 'Deleting…' : 'Delete Club'}
+          variant="danger"
+          isLoading={deleteClub.isPending}
+        />
+      )}
     </div>
   )
 }

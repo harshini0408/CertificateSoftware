@@ -952,6 +952,17 @@ async def register_for_event(
             "Registration has been stopped for this event. Max participants reached."
         )
 
+    # Max participants check
+    max_p = getattr(event, "max_participants", None)
+    if max_p and max_p > 0:
+        reg_count = await EventRegistration.find(EventRegistration.event_id == event_id).count()
+        current_count = max(event.participant_count or 0, reg_count)
+        if current_count >= max_p:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"This event has reached its maximum capacity of {max_p} participants."
+            )
+
     student_email = current_user.email.lower()
 
     # Check if already registered for this event
@@ -1027,8 +1038,9 @@ async def register_for_event(
                 "Department": current_user.department or "",
             },
             source=ParticipantSource.REGISTRATION,
-            verified=(type != "volunteer"),
-            status="pending" if type == "volunteer" else "accepted",
+            # Attendance-based: participant stays unverified until they mark attendance
+            verified=False,
+            status="pending" if type == "volunteer" else "registered",
         )
         await p.insert()
 

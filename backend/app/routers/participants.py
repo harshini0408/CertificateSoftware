@@ -71,6 +71,31 @@ async def delete_participant(
     p = await Participant.get(participant_id)
     if not p or p.event_id != event_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Participant not found")
+
+    from ..models.event_registration import EventRegistration
+    from ..models.certificate import Certificate
+
+    email = (p.email or "").strip().lower()
+    if email:
+        reg = await EventRegistration.find_one(
+            EventRegistration.event_id == event_id,
+            EventRegistration.student_email == email,
+        )
+        if reg:
+            await reg.delete()
+
+    event = await Event.get(event_id)
+    if event and event.participant_count > 0:
+        await event.set({"participant_count": max(0, event.participant_count - 1)})
+
+    certs = await Certificate.find(
+        Certificate.event_id == event_id,
+        Certificate.participant_id == str(p.id),
+    ).to_list()
+    for c in certs:
+        if getattr(c, "status", None) != "emailed":
+            await c.delete()
+
     await p.delete()
     return {"message": "Participant deleted"}
 

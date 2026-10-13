@@ -349,6 +349,41 @@ async def submit_attendance(
     )
     await attendance.insert()
 
+    # Mark the participant as verified (attendance confirmed) for certificate generation
+    from ..models.participant import Participant, ParticipantSource
+    user_email_lower = (current_user.email or "").strip().lower()
+    participant = await Participant.find_one(
+        Participant.event_id == event_id,
+        Participant.email == user_email_lower,
+    )
+    if not participant and current_user.email:
+        participant = await Participant.find_one(
+            Participant.event_id == event_id,
+            Participant.email == current_user.email,
+        )
+    if participant:
+        if not participant.verified:
+            await participant.set({"verified": True, "status": "accepted"})
+    else:
+        # Create verified participant for this attendee
+        participant = Participant(
+            event_id=event.id,
+            club_id=event.club_id,
+            email=user_email_lower,
+            registration_number=getattr(current_user, "registration_number", None),
+            cert_type="participant",
+            fields={
+                "Name": current_user.name or "",
+                "Email": user_email_lower,
+                "Registration Number": getattr(current_user, "registration_number", "") or "",
+                "Department": getattr(current_user, "department", "") or "",
+            },
+            source=ParticipantSource.REGISTRATION,
+            verified=True,
+            status="accepted",
+        )
+        await participant.insert()
+
     return SubmitAttendanceResponse(
         success=True,
         message="Attendance recorded successfully!",

@@ -18,7 +18,7 @@ import {
   useUpdateVolunteerCount,
   useUpdateEvent,
 } from './eventsApi'
-import { participantKeys, useParticipants, useUpdateParticipantType, useVerifyParticipant } from './participantsApi'
+import { participantKeys, useParticipants, useUpdateParticipantType, useVerifyParticipant, useDeleteParticipant } from './participantsApi'
 import { certKeys } from './certificatesApi'
 import { useToastStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
@@ -1108,7 +1108,10 @@ function ParticipantListTab({ clubId, eventId }) {
   const { data: participants, isLoading } = useParticipants(clubId, eventId)
   const updateType = useUpdateParticipantType(clubId, eventId)
   const verifyParticipant = useVerifyParticipant(clubId, eventId)
+  const deleteParticipant = useDeleteParticipant(clubId, eventId)
   const { data: creditRules } = useClubCreditRules(clubId)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+
   // UI dropdown is restricted to these 5 preset roles (Excel uploads are unrestricted).
   const UI_CERT_ROLES = [
     'non_technical_participant',
@@ -1147,16 +1150,55 @@ function ParticipantListTab({ clubId, eventId }) {
     {
       key: 'verified',
       header: 'Status',
-      render: (v, row) => (
-        v ? (
-          <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Verified</span>
+      render: (v, row) => {
+        // Excel/Manual: show verified badge OR allow manual verify override
+        if (row.source === 'excel' || row.source === 'manual') {
+          return v ? (
+            <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Verified</span>
+          ) : (
+            <button
+              className="btn-primary text-xs py-1 px-2 h-auto"
+              onClick={() => verifyParticipant.mutate(row.id)}
+              disabled={verifyParticipant.isPending}
+            >
+              Mark Verified
+            </button>
+          )
+        }
+        // Registration-sourced: attendance-based verification
+        return v ? (
+          <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">✓ Attended</span>
+        ) : (
+          <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Attendance Pending</span>
+        )
+      }
+    },
+    {
+      key: '_delete',
+      header: '',
+      align: 'center',
+      searchKey: false,
+      render: (_, row) => (
+        confirmDeleteId === row.id ? (
+          <div className="flex items-center gap-1">
+            <button
+              className="text-xs text-red-600 font-semibold hover:underline"
+              onClick={() => { deleteParticipant.mutate(row.id); setConfirmDeleteId(null) }}
+              disabled={deleteParticipant.isPending}
+            >
+              Confirm
+            </button>
+            <button className="text-xs text-gray-400 hover:underline" onClick={() => setConfirmDeleteId(null)}>Cancel</button>
+          </div>
         ) : (
           <button
-            className="btn-primary text-xs py-1 px-2 h-auto"
-            onClick={() => verifyParticipant.mutate(row.id)}
-            disabled={verifyParticipant.isPending}
+            title="Remove participant"
+            onClick={() => setConfirmDeleteId(row.id)}
+            className="rounded p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
           >
-            Accept Request
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
           </button>
         )
       )

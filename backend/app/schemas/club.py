@@ -34,6 +34,13 @@ class ClubCreate(BaseModel):
 
 class ClubUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
+    slug: Optional[str] = Field(
+        None,
+        min_length=2,
+        max_length=20,
+        pattern=r"^[A-Z0-9]+$",
+        description="Uppercase letters and digits only. Can only be set once.",
+    )
     contact_email: Optional[EmailStr] = None
     is_active: Optional[bool] = None
 
@@ -47,6 +54,7 @@ class ClubResponse(BaseModel):
     id: str
     name: str
     slug: str
+    slug_locked: bool = False
     contact_email: str
     is_active: bool
     created_at: datetime

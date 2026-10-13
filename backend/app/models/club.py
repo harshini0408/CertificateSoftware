@@ -31,6 +31,7 @@ class Club(Document):
 
     name: str
     slug: Indexed(str, unique=True)  # type: ignore[valid-type]
+    slug_locked: bool = False  # Becomes True after first slug edit
     contact_email: Optional[str] = None
     assets: ClubAssets = Field(default_factory=ClubAssets)
     office_bearer_positions: List[str] = Field(default_factory=lambda: list(DEFAULT_OFFICE_BEARER_POSITIONS))

@@ -183,6 +183,30 @@ export function useUpdateClub() {
   })
 }
 
+// ── useDeleteClub ─────────────────────────────────────────────────────────────
+/**
+ * DELETE /admin/clubs/{club_id}
+ */
+export function useDeleteClub() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (clubId) =>
+      axiosInstance.delete(`/admin/clubs/${clubId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['clubs'] })
+      qc.invalidateQueries({ queryKey: ['admin'] })
+      qc.invalidateQueries({ queryKey: ['users'] })
+      addToast({ type: 'success', message: 'Club and associated coordinator deleted successfully.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to delete club.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
 // ── useMembershipRequests (coordinator) ──────────────────────────────────────
 /**
  * GET /coordinator/memberships/requests
