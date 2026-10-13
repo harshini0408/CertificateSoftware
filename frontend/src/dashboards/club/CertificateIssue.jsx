@@ -145,7 +145,7 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
   const verifiedParticipantsCount = (participants ?? []).filter((p) => p.verified).length
   const hasParticipants = verifiedParticipantsCount > 0 || (certs?.length ?? 0) > 0
   const hasAssets       = !!(event?.assets?.logo_url)
-  const hasReport       = !!(event?.report_url) && event?.report_status !== 'not_submitted' && event?.report_status !== 'rejected'
+  const hasReport       = !!(event?.report_url) && event?.report_status === 'accepted'
   const allReady        = hasParticipants && hasAssets && hasReport
 
   const pendingCount    = (certs ?? []).filter((c) => c.status === 'pending').length
@@ -358,9 +358,20 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
               Pre-flight Checklist
             </p>
             <div className="space-y-2">
-              <PreflightItem ok={hasParticipants} label="Participants imported" />
+              <PreflightItem ok={hasParticipants} label="Participants imported & eligible" />
               <PreflightItem ok={hasAssets}       label="Logo & signature uploaded" />
-              <PreflightItem ok={hasReport}       label="Event report submitted (Mandatory)" />
+              <PreflightItem
+                ok={hasReport}
+                label={
+                  event?.report_status === 'accepted'
+                    ? 'Event report approved by Student Affairs'
+                    : event?.report_status === 'pending_review'
+                    ? 'Event report submitted (Pending Student Affairs approval)'
+                    : event?.report_status === 'rejected'
+                    ? 'Event report rejected by Student Affairs (Needs re-submission)'
+                    : 'Event report submitted & approved by Student Affairs (Mandatory)'
+                }
+              />
             </div>
           </div>
 
@@ -416,12 +427,64 @@ export default function CertificateIssue({ embedded = false, clubId: propClubId,
         </div>
 
         {!allReady && (
-          <div className="mt-4 rounded-lg bg-amber-50 border border-amber-100 px-4 py-2.5">
-            <p className="text-xs text-amber-700">
-              Complete all checklist items before generating certificates.
+          <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-2.5">
+            <p className="text-xs text-amber-800 font-medium">
+              {event?.report_status === 'pending_review' ? (
+                <>⚠️ <strong>Verification in progress:</strong> The event report has been submitted to Student Affairs and is awaiting verification. Certificates can be generated once approved.</>
+              ) : event?.report_status === 'rejected' ? (
+                <>⚠️ <strong>Report Rejected:</strong> Student Affairs has rejected the submitted report. Please re-submit an updated report for approval before certificate generation.</>
+              ) : !hasReport ? (
+                <>⚠️ <strong>Report Required:</strong> Event report must be submitted to Student Affairs and approved before certificate generation is allowed.</>
+              ) : (
+                <>⚠️ Complete all checklist items above before generating certificates.</>
+              )}
             </p>
           </div>
         )}
+      </div>
+
+      {/* ── Email Delivery Speed & Calculation Notice ─────────────────── */}
+      <div className="card p-5 border-l-4 border-l-blue-600 bg-gradient-to-r from-blue-50/60 via-white to-white">
+        <div className="flex items-start gap-3.5">
+          <div className="rounded-xl bg-blue-100 p-2.5 text-blue-700 shrink-0 mt-0.5 shadow-xs">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div className="space-y-3 flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                Note: Certificate Mailing Delivery Speed & Process
+              </h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
+                ⚡ Rate Throttled: 3 certs / minute
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="rounded-lg bg-white border border-gray-200/90 p-3 shadow-xs">
+                <span className="font-semibold text-foreground block mb-1">⏱️ Sending Rate Calculation</span>
+                <p className="text-gray-600 leading-relaxed">
+                  Due to institutional mail server limits and anti-spam protection, certificates are dispatched at a rate of <strong>3 certificates per minute</strong> (approx. 20 seconds per email).
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-blue-50/80 border border-blue-200/70 p-3">
+                <span className="font-semibold text-blue-950 block mb-1">📊 Example Estimation</span>
+                <p className="text-blue-900 leading-relaxed">
+                  For an event with <strong>80 certificates</strong>, the automated mailing process will take approximately <strong>~27 minutes</strong> (80 ÷ 3 ≈ 26.6 mins) to complete all deliveries.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-amber-50 border border-amber-200/90 p-3 flex items-start gap-2.5">
+              <span className="text-base shrink-0">⚠️</span>
+              <p className="text-xs font-medium text-amber-900 leading-relaxed">
+                <strong>Crucial:</strong> Please <strong>keep this browser tab open and active</strong> during the mailing process to ensure uninterrupted, seamless certificate delivery to all students.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ── Generation progress ─────────────────────────────────────────── */}

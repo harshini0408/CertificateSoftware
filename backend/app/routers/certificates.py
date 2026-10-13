@@ -247,11 +247,23 @@ async def generate_certificates(
     if not club:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
 
-    if not event.report_url or event.report_status in (None, "not_submitted"):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Event report submission is mandatory before certificates can be generated.",
-        )
+    if not event.report_url or event.report_status != "accepted":
+        if event.report_status == "pending_review":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Event report has been submitted to Student Affairs and is pending verification. Certificates can only be generated after the report is approved.",
+            )
+        elif event.report_status == "rejected":
+            reason = f": {event.report_rejection_reason}" if getattr(event, "report_rejection_reason", None) else ""
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Event report was rejected by Student Affairs{reason}. Please submit a revised report and await approval before generating certificates.",
+            )
+        else:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Event report must be submitted to Student Affairs and approved before certificates can be generated.",
+            )
 
     participants = await Participant.find(
         Participant.event_id == event_id,

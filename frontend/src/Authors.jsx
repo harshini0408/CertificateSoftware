@@ -50,29 +50,21 @@ export default function Authors() {
     window.scrollTo(0, 0)
     let isMounted = true
 
-    const trackVisit = async () => {
+    const fetchVisitorCount = async () => {
       try {
-        const hasTracked = sessionStorage.getItem('authors_visit_tracked')
-        let res
-        if (!hasTracked) {
-          res = await axiosInstance.post('/api/visitor-count')
-          sessionStorage.setItem('authors_visit_tracked', '1')
-        } else {
-          res = await axiosInstance.get('/api/visitor-count')
-        }
+        const res = await axiosInstance.get('/api/visitor-count')
         if (isMounted && res?.data?.count != null) {
           setVisitorCount(res.data.count)
         }
       } catch {
-        const cached = parseInt(localStorage.getItem('cached_visitor_count') || '1', 10) + 1
-        localStorage.setItem('cached_visitor_count', String(cached))
+        const cached = parseInt(localStorage.getItem('cached_visitor_count') || '1', 10)
         if (isMounted) setVisitorCount(cached)
       } finally {
         if (isMounted) setLoadingCount(false)
       }
     }
 
-    trackVisit()
+    fetchVisitorCount()
     return () => { isMounted = false }
   }, [])
 

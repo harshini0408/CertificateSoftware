@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import ToastProvider from './components/ToastProvider'
 import AuthSessionSync from './components/AuthSessionSync'
+import VisitorTracker from './components/VisitorTracker'
 import { useAuthStore } from './store/authStore'
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
@@ -44,6 +45,7 @@ export default function App() {
       {/* Global toast portal */}
       <ToastProvider />
       <AuthSessionSync />
+      <VisitorTracker />
 
       <Routes>
         {/* ── Public routes ──────────────────────────────────────────────── */}

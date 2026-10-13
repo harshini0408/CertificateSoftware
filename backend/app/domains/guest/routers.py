@@ -963,6 +963,18 @@ async def _send_guest_emails_for_session(
                         "emailed_at": entry["sent_at"],
                         "email_error": None,
                     })
+
+                try:
+                    from ...models.email_log import EmailLog, EmailStatus
+                    await EmailLog(
+                        certificate_id=session.id,
+                        recipient_email=recipient_email,
+                        status=EmailStatus.SENT,
+                        sent_at=entry["sent_at"],
+                    ).insert()
+                except Exception:
+                    pass
+
                 sent += 1
             else:
                 entry["status"] = "failed"
@@ -970,6 +982,16 @@ async def _send_guest_emails_for_session(
                 existing = await DeptCertificate.find_one({"cert_number": cert_number})
                 if existing:
                     await existing.set({"email_error": entry["error"]})
+                try:
+                    from ...models.email_log import EmailLog, EmailStatus
+                    await EmailLog(
+                        certificate_id=session.id,
+                        recipient_email=recipient_email,
+                        status=EmailStatus.FAILED,
+                        error_msg=entry["error"],
+                    ).insert()
+                except Exception:
+                    pass
                 failed += 1
                 errors.append(entry["error"])
         except Exception as exc:
@@ -978,6 +1000,16 @@ async def _send_guest_emails_for_session(
             existing = await DeptCertificate.find_one({"cert_number": cert_number})
             if existing:
                 await existing.set({"email_error": entry["error"]})
+            try:
+                from ...models.email_log import EmailLog, EmailStatus
+                await EmailLog(
+                    certificate_id=session.id,
+                    recipient_email=recipient_email,
+                    status=EmailStatus.FAILED,
+                    error_msg=entry["error"],
+                ).insert()
+            except Exception:
+                pass
             failed += 1
             errors.append(entry["error"])
 

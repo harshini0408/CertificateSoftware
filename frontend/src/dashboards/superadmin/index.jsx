@@ -1429,11 +1429,23 @@ function OverviewTab() {
     {
       key: 'source_type',
       header: 'Source',
-      render: (v, row) => (
-        <span className="text-xs text-gray-700 capitalize">
-          {v} {row.source_name ? `(${row.source_name})` : ''}
-        </span>
-      ),
+      render: (v, row) => {
+        const typeLabel = (v || '').toLowerCase() === 'club' ? 'Club'
+          : (v || '').toLowerCase() === 'department' ? 'Department'
+          : (v || '').toLowerCase() === 'faculty' ? 'Faculty'
+          : (v || '').toLowerCase() === 'guest' ? 'Guest'
+          : (v ? v.charAt(0).toUpperCase() + v.slice(1) : '')
+
+        const sName = (row.source_name || '').trim()
+        const showSource = sName && sName.toLowerCase() !== (v || '').toLowerCase()
+
+        return (
+          <span className="text-xs text-gray-700">
+            <span className="font-medium">{typeLabel}</span>
+            {showSource ? ` (${sName})` : ''}
+          </span>
+        )
+      },
     },
     { key: 'count', header: 'Count', align: 'right', render: (v) => <span className="font-semibold text-navy">{v ?? 0}</span> },
   ]

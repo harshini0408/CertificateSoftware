@@ -3,7 +3,7 @@ import string
 import io
 import re
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from decimal import Decimal
 
@@ -2441,8 +2441,11 @@ async def platform_stats(_user: User = _admin):
     """Return aggregated platform-wide statistics for the admin overview dashboard."""
     from datetime import time as _time
 
-    # Today 00:00:00 UTC — used as the lower bound for "today" counts
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # Today 00:00:00 — support both UTC and IST (UTC+5:30) bounds so today's emails are counted accurately
+    now_utc = datetime.utcnow()
+    ist_now = now_utc + timedelta(hours=5, minutes=30)
+    ist_today_start = ist_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=5, minutes=30)
+    today_start = min(now_utc.replace(hour=0, minute=0, second=0, microsecond=0), ist_today_start)
 
     # ── Simple counts ────────────────────────────────────────────────────
     total_clubs = await Club.find(Club.is_active == True).count()
@@ -2476,9 +2479,71 @@ async def platform_stats(_user: User = _admin):
     )
     certificates_today = club_certificates_today + dept_certificates_today + guest_certificates_today
 
-    emails_sent_today = await EmailLog.find(
+    # ── Count emails sent today across all modules (Clubs, Departments, Faculty/Guest) ──
+    # 1. Club emails sent today
+    club_emails_log = await EmailLog.find(
         {"sent_at": {"$gte": today_start}, "status": EmailStatus.SENT.value}
     ).count()
+    club_certs_emailed = await Certificate.find(
+        {"emailed_at": {"$gte": today_start}}
+    ).count()
+
+    # 2. Department emails sent today (genuine department events only)
+    dept_emails_today = await DeptCertificate.find({
+        "emailed_at": {"$gte": today_start},
+        "department": {"$not": {"$regex": r"^(Faculty|Guest)\s+Ev(e|a)nt", "$options": "i"}},
+    }).count()
+
+    # 3. Faculty and Guest session emails sent today
+    candidate_sessions = await GuestSession.find(
+        {"$or": [
+            {"guest_emails_sent": True},
+            {"created_at": {"$gte": today_start}},
+            {"guest_email_statuses": {"$elemMatch": {"status": {"$in": ["emailed", "sent"]}}}},
+        ]}
+    ).to_list()
+
+    candidate_session_ids = [s.id for s in candidate_sessions]
+    session_emails_in_log = 0
+    if candidate_session_ids:
+        session_emails_in_log = await EmailLog.find(
+            {"certificate_id": {"$in": candidate_session_ids}, "sent_at": {"$gte": today_start}, "status": EmailStatus.SENT.value}
+        ).count()
+
+    guest_faculty_emails_today = 0
+    for s in candidate_sessions:
+        if s.guest_email_statuses:
+            for entry in s.guest_email_statuses:
+                if entry.get("status") in ("emailed", "sent"):
+                    sent_at = entry.get("sent_at")
+                    if isinstance(sent_at, str):
+                        try:
+                            sent_at_dt = datetime.fromisoformat(sent_at.replace("Z", "+00:00"))
+                            if sent_at_dt.tzinfo:
+                                sent_at_dt = sent_at_dt.astimezone(timezone.utc).replace(tzinfo=None)
+                            if sent_at_dt >= today_start:
+                                guest_faculty_emails_today += 1
+                        except Exception:
+                            if s.created_at and s.created_at >= today_start:
+                                guest_faculty_emails_today += 1
+                    elif isinstance(sent_at, datetime):
+                        sent_dt = sent_at.replace(tzinfo=None) if sent_at.tzinfo else sent_at
+                        if sent_dt >= today_start:
+                            guest_faculty_emails_today += 1
+                    elif not sent_at and s.created_at and s.created_at >= today_start:
+                        guest_faculty_emails_today += 1
+        elif s.guest_emails_sent and s.created_at and s.created_at >= today_start:
+            guest_faculty_emails_today += len(s.guest_generated_certs or [])
+
+    guest_dept_certs_emailed = await DeptCertificate.find({
+        "emailed_at": {"$gte": today_start},
+        "department": {"$regex": r"^(Faculty|Guest)\s+Ev(e|a)nt", "$options": "i"},
+    }).count()
+
+    effective_guest_emails = max(session_emails_in_log, guest_faculty_emails_today, guest_dept_certs_emailed)
+    effective_club_emails = max(max(0, club_emails_log - session_emails_in_log), club_certs_emailed)
+
+    emails_sent_today = effective_club_emails + dept_emails_today + effective_guest_emails
 
     certs_by_source = [
         {"slug": "clubs", "name": "Clubs", "count": club_certificates},
@@ -2532,6 +2597,10 @@ async def platform_stats(_user: User = _admin):
     recent_dept_certs = await DeptCertificate.find_all().sort("-created_at").limit(1200).to_list()
     dept_event_ids: list[PydanticObjectId] = []
     for cert in recent_dept_certs:
+        dept_str = (cert.department or "").strip()
+        # Skip guest / faculty session certs stored in DeptCertificate
+        if re.match(r"^(Faculty|Guest)\s+Ev(e|a)nt", dept_str, re.IGNORECASE):
+            continue
         if cert.event_id:
             try:
                 dept_event_ids.append(PydanticObjectId(cert.event_id))
@@ -2544,8 +2613,11 @@ async def platform_stats(_user: User = _admin):
         dept_event_map = {str(evt.id): evt.name for evt in events}
 
     for cert in recent_dept_certs:
+        dept_str = (cert.department or "").strip()
+        if re.match(r"^(Faculty|Guest)\s+Ev(e|a)nt", dept_str, re.IGNORECASE):
+            continue
         generated_at = cert.created_at
-        source_name = (cert.department or "Department").strip() or "Department"
+        source_name = dept_str or "Department"
         event_name = dept_event_map.get(str(cert.event_id), "Department Event") if cert.event_id else "Department Event"
         key = ("department", source_name, event_name)
         bucket = grouped_recent.get(key)
@@ -2569,18 +2641,45 @@ async def platform_stats(_user: User = _admin):
             bucket["mailed_count"] += 1
 
     recent_guest_sessions = await GuestSession.find_all().sort("-created_at").limit(600).to_list()
-    session_user_ids = [s.user_id for s in recent_guest_sessions if s.user_id]
+    session_user_ids = []
+    for s in recent_guest_sessions:
+        if s.user_id:
+            try:
+                session_user_ids.append(PydanticObjectId(str(s.user_id)))
+            except Exception:
+                pass
     session_users = await User.find({"_id": {"$in": session_user_ids}}).to_list() if session_user_ids else []
-    session_user_role_map = {str(u.id): u.role for u in session_users}
+    session_user_map = {str(u.id): u for u in session_users}
 
     for session in recent_guest_sessions:
         generated_count = len(session.guest_generated_certs or [])
         if generated_count <= 0:
-            continue
-        u_role = session_user_role_map.get(str(session.user_id)) if session.user_id else None
-        is_fac = u_role in (UserRole.FACULTY, UserRole.TUTOR)
+            count_in_dept = await DeptCertificate.find(DeptCertificate.event_id == str(session.id)).count()
+            if count_in_dept > 0:
+                generated_count = count_in_dept
+            else:
+                continue
+
+        u = session_user_map.get(str(session.user_id)) if session.user_id else None
+        u_role = u.role if u else None
+        is_fac = u_role in (UserRole.FACULTY, UserRole.TUTOR, UserRole.HOD) if u else (
+            "faculty" in (session.event_name or "").lower()
+        )
         source_type = "faculty" if is_fac else "guest"
-        source_name = "Faculty" if is_fac else "Guest"
+        if is_fac:
+            fac_id = (u.username if u else "").strip()
+            fac_name = (u.name if u else "").strip()
+            if fac_id and fac_name and fac_id.lower() != fac_name.lower():
+                source_name = f"{fac_id} - {fac_name}"
+            elif fac_name:
+                source_name = fac_name
+            elif fac_id:
+                source_name = fac_id
+            else:
+                source_name = "Faculty Member"
+        else:
+            source_name = (u.name if u and u.name else (u.username if u else "Guest")).strip() or "Guest"
+
         default_event = "Faculty Event" if is_fac else "Guest Event"
         event_name = (session.event_name or default_event).strip() or default_event
         key = (source_type, source_name, event_name)
@@ -2599,9 +2698,22 @@ async def platform_stats(_user: User = _admin):
         if session.created_at > bucket["generated_at"]:
             bucket["generated_at"] = session.created_at
         bucket["count"] += generated_count
-        mailed_for_session = generated_count if session.guest_emails_sent else 0
+
+        if session.guest_email_statuses:
+            mailed_for_session = sum(
+                1 for e in session.guest_email_statuses
+                if e.get("status") in ("emailed", "sent")
+            )
+        elif session.guest_emails_sent:
+            mailed_for_session = generated_count
+        else:
+            mailed_for_session = await DeptCertificate.find(
+                DeptCertificate.event_id == str(session.id),
+                DeptCertificate.emailed_at != None,
+            ).count()
+
         bucket["mailed_count"] += mailed_for_session
-        status_key = "emailed" if session.guest_emails_sent else "generated"
+        status_key = "emailed" if (session.guest_emails_sent or (bucket["mailed_count"] >= bucket["count"] and bucket["count"] > 0)) else "generated"
         bucket["status_counts"][status_key] = bucket["status_counts"].get(status_key, 0) + generated_count
 
     recent_certificates = []
