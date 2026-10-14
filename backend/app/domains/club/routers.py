@@ -425,6 +425,109 @@ async def update_membership_status(
     }
 
 
+class BulkApproveMembershipBody(_BaseModel):
+    membership_ids: list[str]
+    review_note: str | None = None
+
+
+@coordinator_router.post("/memberships/bulk-approve")
+async def bulk_approve_memberships(
+    body: BulkApproveMembershipBody,
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Bulk approve pending membership requests."""
+    if not body.membership_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No membership IDs provided")
+
+    approved_count = 0
+    now = _datetime.utcnow()
+    reviewer_id = str(current_user.id)
+    note = (body.review_note or "").strip() or None
+
+    for m_id_str in body.membership_ids:
+        try:
+            m_id = _ObjId(m_id_str)
+        except Exception:
+            continue
+
+        membership = await StudentClubMembership.get(m_id)
+        if not membership:
+            continue
+
+        if current_user.role == UserRole.CLUB_COORDINATOR:
+            if not current_user.club_id or membership.club_id != current_user.club_id:
+                continue
+
+        if membership.status != MembershipStatus.PENDING:
+            continue
+
+        membership.status = MembershipStatus.APPROVED
+        membership.reviewed_by = reviewer_id
+        membership.review_note = note
+        membership.updated_at = now
+        await membership.save()
+        approved_count += 1
+
+    return {
+        "message": f"Successfully approved {approved_count} membership request(s)",
+        "approved_count": approved_count,
+    }
+
+
+@coordinator_router.delete("/members/{identifier}")
+async def remove_club_member(
+    identifier: str,
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Remove a student member from the coordinator's club by membership_id, student_id, or email."""
+    if not current_user.club_id and current_user.role == UserRole.CLUB_COORDINATOR:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to coordinator")
+
+    club_id = current_user.club_id
+    membership = None
+
+    # 1. Try by ObjectId as StudentClubMembership._id
+    try:
+        oid = _ObjId(identifier)
+        membership = await StudentClubMembership.get(oid)
+        if membership and current_user.role == UserRole.CLUB_COORDINATOR and membership.club_id != club_id:
+            membership = None
+    except Exception:
+        pass
+
+    # 2. Try by student_id
+    if not membership and club_id:
+        try:
+            sid = _ObjId(identifier)
+            membership = await StudentClubMembership.find_one({
+                "club_id": club_id,
+                "student_id": sid,
+                "status": MembershipStatus.APPROVED.value,
+            })
+        except Exception:
+            pass
+
+    # 3. Try by email
+    if not membership and club_id:
+        membership = await StudentClubMembership.find_one({
+            "club_id": club_id,
+            "student_email": identifier.strip().lower(),
+            "status": MembershipStatus.APPROVED.value,
+        })
+
+    if not membership:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Club membership not found")
+
+    if membership.status != MembershipStatus.APPROVED:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only approved members can be removed")
+
+    student_name = membership.student_name or "Student"
+    club_name = membership.club_name or "the club"
+    await membership.delete()
+
+    return {"message": f"Successfully removed {student_name} from {club_name}"}
+
+
 # ─── Office Bearers ─────────────────────────────────────────────────────────────
 
 from ...models.club import DEFAULT_OFFICE_BEARER_POSITIONS
@@ -765,6 +868,8 @@ async def get_active_members(
         events_participated = len(events_set)
 
         result.append({
+            "membership_id": str(m.id),
+            "student_id": str(m.student_id),
             "name": m.student_name or (u.name if u else ""),
             "registration_number": u.registration_number if u else None,
             "department": u.department if u else None,
@@ -790,6 +895,8 @@ async def get_active_members(
         events_participated = len(events_set)
 
         result.append({
+            "membership_id": None,
+            "student_id": str(u.id) if u else None,
             "name": u.name,
             "registration_number": u.registration_number,
             "department": u.department,

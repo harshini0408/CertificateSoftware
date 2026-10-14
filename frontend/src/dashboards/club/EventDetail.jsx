@@ -901,22 +901,26 @@ function ExcelUploadTab({ clubId, eventId }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Certificate Types / Role Presets (Requested Event Roles Only)
+// ─────────────────────────────────────────────────────────────────────────────
+export const EVENT_CERT_ROLES = [
+  { value: 'coordinator', label: 'Coordinator' },
+  { value: 'first_place', label: 'First Place' },
+  { value: 'non_technical_participant', label: 'Non-Technical Participant' },
+  { value: 'organizer', label: 'Organizer' },
+  { value: 'second_place', label: 'Second Place' },
+  { value: 'student_volunteer', label: 'Student Volunteer' },
+  { value: 'technical_participant', label: 'Technical Participant' },
+  { value: 'third_place', label: 'Third Place' },
+]
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Manual Entry Sub-tab
 // ─────────────────────────────────────────────────────────────────────────────
 function ManualEntryTab({ clubId, eventId, event }) {
   const addToast = useToastStore((s) => s.addToast)
   const qc = useQueryClient()
   const { data: creditRules } = useClubCreditRules(clubId)
-  // UI dropdown is restricted to these 5 preset roles.
-  // Excel uploads may contain any cert_type and are processed as-is.
-  const UI_CERT_ROLES = [
-    'non_technical_participant',
-    'technical_participant',
-    'volunteer',
-    'first_place',
-    'second_place',
-    'third_place',
-  ]
 
   const {
     register,
@@ -1020,9 +1024,9 @@ function ManualEntryTab({ clubId, eventId, event }) {
             className="form-input"
             {...register('cert_type')}
           >
-            {UI_CERT_ROLES.map((ct) => (
-              <option key={ct} value={ct}>
-                {ct.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            {EVENT_CERT_ROLES.map((ct) => (
+              <option key={ct.value} value={ct.value}>
+                {ct.label}
               </option>
             ))}
           </select>
@@ -1111,16 +1115,6 @@ function ParticipantListTab({ clubId, eventId }) {
   const deleteParticipant = useDeleteParticipant(clubId, eventId)
   const { data: creditRules } = useClubCreditRules(clubId)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
-
-  // UI dropdown is restricted to these 5 preset roles (Excel uploads are unrestricted).
-  const UI_CERT_ROLES = [
-    'non_technical_participant',
-    'technical_participant',
-    'volunteer',
-    'first_place',
-    'second_place',
-    'third_place',
-  ]
   
   const columns = [
     { key: 'name', header: 'Name', searchKey: true, sortable: true, render: (_, row) => row.fields?.Name || '—' },
@@ -1130,20 +1124,29 @@ function ParticipantListTab({ clubId, eventId }) {
       key: 'cert_type',
       header: 'Type',
       sortable: true,
-      render: (v, row) => (
-        <select
-          className="form-input text-xs py-1 h-auto"
-          value={v || 'participant'}
-          onChange={(e) => updateType.mutate({ participantId: row.id, cert_type: e.target.value })}
-          disabled={updateType.isPending}
-        >
-          {UI_CERT_ROLES.map((ct) => (
-            <option key={ct} value={ct}>
-              {ct.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-            </option>
-          ))}
-        </select>
-      )
+      render: (v, row) => {
+        const currentVal = v === 'volunteer' ? 'student_volunteer' : v
+        const hasMatch = EVENT_CERT_ROLES.some((r) => r.value === currentVal)
+        return (
+          <select
+            className="form-input text-xs py-1 h-auto"
+            value={hasMatch ? currentVal : ''}
+            onChange={(e) => updateType.mutate({ participantId: row.id, cert_type: e.target.value })}
+            disabled={updateType.isPending}
+          >
+            {!hasMatch && (
+              <option value="" disabled>
+                Select Type
+              </option>
+            )}
+            {EVENT_CERT_ROLES.map((ct) => (
+              <option key={ct.value} value={ct.value}>
+                {ct.label}
+              </option>
+            ))}
+          </select>
+        )
+      },
     },
     { key: 'source', header: 'Source', sortable: true, render: (v) => <span className="capitalize">{v}</span> },
     { key: 'registered_at', header: 'Added On', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-IN') : '—' },

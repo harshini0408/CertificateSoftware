@@ -24,6 +24,8 @@ import {
   useAddOfficeBearerPosition,
   useDeleteOfficeBearerPosition,
   useClubActiveMembers,
+  useBulkApproveMemberships,
+  useRemoveClubMember,
 } from './api'
 import { useCreateEvent, useDeleteEvent, useEvents } from './eventsApi'
 import { useGenerateAttendanceQR } from './attendanceApi'
@@ -677,29 +679,88 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 function MembersTab() {
   const { data: requests, isLoading } = useMembershipRequests()
   const updateStatus = useUpdateMembershipStatus()
+  const bulkApprove = useBulkApproveMemberships()
   const [notes, setNotes] = useState({})
+  const [selectedRequestIds, setSelectedRequestIds] = useState([])
+
+  const pending = (requests || []).filter((r) => r.status === 'pending')
+  const reviewed = (requests || []).filter((r) => r.status !== 'pending')
+  const pendingIds = pending.map((req) => req.id)
+  const selectedPendingIds = selectedRequestIds.filter((id) => pendingIds.includes(id))
+  const allPendingSelected = pending.length > 0 && selectedPendingIds.length === pending.length
+
+  const toggleRequestSelection = (membershipId) => {
+    setSelectedRequestIds((ids) => (
+      ids.includes(membershipId)
+        ? ids.filter((id) => id !== membershipId)
+        : [...ids, membershipId]
+    ))
+  }
+
+  const toggleSelectAll = () => {
+    setSelectedRequestIds(allPendingSelected ? [] : pendingIds)
+  }
+
+  const removeSelection = (membershipId) => {
+    setSelectedRequestIds((ids) => ids.filter((id) => id !== membershipId))
+  }
 
   if (isLoading) return <LoadingSpinner fullPage label="Loading membership requests…" />
-
-  const pending  = (requests || []).filter((r) => r.status === 'pending')
-  const reviewed = (requests || []).filter((r) => r.status !== 'pending')
 
   return (
     <div className="space-y-6">
       <div className="card p-5">
-        <h2 className="section-title mb-4">Pending Requests ({pending.length})</h2>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="section-title">Pending Requests ({pending.length})</h2>
+          {pending.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                onClick={toggleSelectAll}
+                disabled={updateStatus.isPending || bulkApprove.isPending}
+              >
+                {allPendingSelected ? 'Deselect all' : 'Select all'}
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={selectedPendingIds.length === 0 || updateStatus.isPending || bulkApprove.isPending}
+                onClick={() => {
+                  bulkApprove.mutate(
+                    { membershipIds: selectedPendingIds },
+                    { onSuccess: () => setSelectedRequestIds([]) },
+                  )
+                }}
+              >
+                {bulkApprove.isPending ? 'Approving…' : `Approve selected${selectedPendingIds.length ? ` (${selectedPendingIds.length})` : ''}`}
+              </button>
+            </div>
+          )}
+        </div>
         {pending.length === 0 ? (
           <p className="text-sm text-gray-400">No pending membership requests.</p>
         ) : (
           <div className="divide-y divide-gray-100">
             {pending.map((req) => (
               <div key={req.id} className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-foreground">{req.student_name || '—'}</p>
-                  <p className="text-xs text-gray-400">{req.student_email}</p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Applied {req.applied_at ? new Date(req.applied_at).toLocaleDateString('en-IN') : '—'}
-                  </p>
+                <div className="flex items-start gap-3">
+                  <input
+                    id={`select-request-${req.id}`}
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
+                    checked={selectedPendingIds.includes(req.id)}
+                    disabled={updateStatus.isPending || bulkApprove.isPending}
+                    onChange={() => toggleRequestSelection(req.id)}
+                    aria-label={`Select ${req.student_name || req.student_email || 'membership request'}`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground">{req.student_name || '—'}</p>
+                    <p className="text-xs text-gray-400">{req.student_email}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Applied {req.applied_at ? new Date(req.applied_at).toLocaleDateString('en-IN') : '—'}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 flex-col gap-1.5 sm:items-end">
                   <input
@@ -713,16 +774,22 @@ function MembersTab() {
                     <button
                       id={`approve-${req.id}`}
                       className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition-colors disabled:opacity-50"
-                      disabled={updateStatus.isPending}
-                      onClick={() => updateStatus.mutate({ membershipId: req.id, status: 'approved', review_note: notes[req.id] || undefined })}
+                      disabled={updateStatus.isPending || bulkApprove.isPending}
+                      onClick={() => updateStatus.mutate(
+                        { membershipId: req.id, status: 'approved', review_note: notes[req.id] || undefined },
+                        { onSuccess: () => removeSelection(req.id) },
+                      )}
                     >
                       Approve
                     </button>
                     <button
                       id={`reject-${req.id}`}
                       className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-                      disabled={updateStatus.isPending}
-                      onClick={() => updateStatus.mutate({ membershipId: req.id, status: 'rejected', review_note: notes[req.id] || undefined })}
+                      disabled={updateStatus.isPending || bulkApprove.isPending}
+                      onClick={() => updateStatus.mutate(
+                        { membershipId: req.id, status: 'rejected', review_note: notes[req.id] || undefined },
+                        { onSuccess: () => removeSelection(req.id) },
+                      )}
                     >
                       Reject
                     </button>
@@ -771,6 +838,8 @@ function MembersTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 function ActiveMembersTab() {
   const { data, isLoading } = useClubActiveMembers()
+  const removeMember = useRemoveClubMember()
+  const [memberToRemove, setMemberToRemove] = useState(null)
 
   if (isLoading) return <LoadingSpinner fullPage label="Loading active members…" />
 
@@ -822,6 +891,20 @@ function ActiveMembersTab() {
         )
       }
     },
+    { key: 'actions', header: 'Actions', sortable: false, searchKey: false, align: 'right',
+      render: (_, row) => row.membership_id ? (
+        <button
+          type="button"
+          className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => setMemberToRemove(row)}
+          disabled={removeMember.isPending}
+        >
+          Remove member
+        </button>
+      ) : (
+        <span className="text-xs text-gray-400">Not a member</span>
+      ),
+    },
   ]
 
   return (
@@ -854,6 +937,21 @@ function ActiveMembersTab() {
         rowKey="email"
         searchable
         searchPlaceholder="Search by name, register number, department, or email…"
+      />
+
+      <ConfirmModal
+        isOpen={!!memberToRemove}
+        onClose={() => setMemberToRemove(null)}
+        onConfirm={() => {
+          if (!memberToRemove?.membership_id) return
+          removeMember.mutate(memberToRemove.membership_id, {
+            onSuccess: () => setMemberToRemove(null),
+          })
+        }}
+        title="Remove club member?"
+        message={`Remove ${memberToRemove?.name || 'this student'} from this club? Their club membership will be removed from the student and related dashboards.`}
+        confirmLabel="Remove member"
+        isLoading={removeMember.isPending}
       />
     </div>
   )

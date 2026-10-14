@@ -98,7 +98,7 @@ async def seed_role_presets(_user: User = _admin):
         ("first_place", "First Place"),
         ("second_place", "Second Place"),
         ("third_place", "Third Place"),
-        ("technical_participant", "Technical Event"),
+        ("technical_participant", "Technical Participant"),
         ("non_technical_participant", "Non-Technical Participant"),
     ]
 

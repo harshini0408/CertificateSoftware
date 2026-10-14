@@ -235,7 +235,13 @@ export function useUpdateMembershipStatus() {
       axiosInstance.put(`/coordinator/memberships/${membershipId}/status`, { status, review_note }),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: clubKeys.membershipRequests() })
+      qc.invalidateQueries({ queryKey: ['coordinator', 'active-members'] })
       qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      qc.invalidateQueries({ queryKey: ['clubs', 'me', 'memberships'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'student-club-memberships'] })
+      qc.invalidateQueries({ queryKey: ['tutor'] })
+      qc.invalidateQueries({ queryKey: ['hod'] })
+      qc.invalidateQueries({ queryKey: ['principal'] })
       addToast({
         type: 'success',
         message: vars.status === 'approved' ? 'Membership approved.' : 'Membership rejected.',
@@ -376,3 +382,70 @@ export function useClubActiveMembers() {
   })
 }
 
+// ── useBulkApproveMemberships (coordinator) ──────────────────────────────────
+/**
+ * POST /coordinator/memberships/bulk-approve
+ * Body: { membership_ids: string[], review_note?: string }
+ */
+export function useBulkApproveMemberships() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ membershipIds, review_note }) =>
+      axiosInstance.post('/coordinator/memberships/bulk-approve', {
+        membership_ids: membershipIds,
+        review_note,
+      }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: clubKeys.membershipRequests() })
+      qc.invalidateQueries({ queryKey: ['coordinator', 'active-members'] })
+      qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      qc.invalidateQueries({ queryKey: ['clubs', 'me', 'memberships'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'student-club-memberships'] })
+      qc.invalidateQueries({ queryKey: ['tutor'] })
+      qc.invalidateQueries({ queryKey: ['hod'] })
+      qc.invalidateQueries({ queryKey: ['principal'] })
+      addToast({
+        type: 'success',
+        message: res.data?.message || 'Membership requests approved.',
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to approve membership requests.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── useRemoveClubMember (coordinator) ─────────────────────────────────────────
+/**
+ * DELETE /coordinator/members/:identifier
+ */
+export function useRemoveClubMember() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (identifier) =>
+      axiosInstance.delete(`/coordinator/members/${identifier}`),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['coordinator', 'active-members'] })
+      qc.invalidateQueries({ queryKey: clubKeys.membershipRequests() })
+      qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      qc.invalidateQueries({ queryKey: ['clubs', 'me', 'memberships'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'student-club-memberships'] })
+      qc.invalidateQueries({ queryKey: ['tutor'] })
+      qc.invalidateQueries({ queryKey: ['hod'] })
+      qc.invalidateQueries({ queryKey: ['principal'] })
+      addToast({
+        type: 'success',
+        message: res.data?.message || 'Member removed from club.',
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to remove club member.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
