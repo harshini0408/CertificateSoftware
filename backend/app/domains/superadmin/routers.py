@@ -17,6 +17,7 @@ from ...core.dependencies import require_role
 from ...core.security import hash_password, verify_password
 from ...models.user import User, UserRole
 from ...models.club import Club
+from ...models.professional_society import ProfessionalSociety
 from ...models.department import Department
 from ...models.event import Event
 from ...models.certificate import Certificate, CertStatus
@@ -31,6 +32,7 @@ from ...models.manual_credit_submission import ManualCreditSubmission, ManualSub
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...services.semester_service import get_current_semester, set_current_semester
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
+from ...schemas.professional_society import SocietyCreate, SocietyUpdate, SocietyResponse
 from ...schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
 from ...schemas.credit import CreditRuleSchema, CreditRulesUpdateRequest, CreditRuleResponse
 from ...schemas.user import UserCreate, UserUpdate, UserResponse, TutorClassRequest, FacultyRoleRequest
@@ -160,6 +162,7 @@ def _user_response(u: User) -> UserResponse:
         is_active=u.is_active,
         created_at=u.created_at,
         club_id=str(u.club_id) if u.club_id else None,
+        society_id=str(u.society_id) if getattr(u, "society_id", None) else None,
         event_id=str(u.event_id) if u.event_id else None,
         department=u.department,
         departments=user_departments,
@@ -167,6 +170,22 @@ def _user_response(u: User) -> UserResponse:
         batch=u.batch,
         section=u.section,
         assigned_classes=assigned_classes,
+    )
+
+
+def _society_response(s: ProfessionalSociety) -> SocietyResponse:
+    assets = getattr(s, "assets", None)
+    return SocietyResponse(
+        id=str(s.id),
+        name=s.name,
+        slug=s.slug,
+        slug_locked=getattr(s, "slug_locked", False) or False,
+        contact_email=s.contact_email or "",
+        is_active=s.is_active,
+        created_at=s.created_at,
+        logo_url=getattr(assets, "logo_url", None) if assets else None,
+        signature_url=getattr(assets, "signature_url", None) if assets else None,
+        signature2_url=getattr(assets, "signature2_url", None) if assets else None,
     )
 
 
@@ -415,6 +434,131 @@ async def delete_club(club_id: PydanticObjectId, _user: User = _admin):
     return None
 
 
+# ═══ PROFESSIONAL SOCIETIES ═════════════════════════════════════════════════
+
+
+@router.post("/professional-societies", response_model=SocietyResponse, status_code=201)
+async def create_professional_society(body: SocietyCreate, _user: User = _admin):
+    slug_upper = body.slug.upper()
+
+    if await ProfessionalSociety.find_one(ProfessionalSociety.slug == slug_upper):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Slug already exists")
+
+    society = ProfessionalSociety(
+        name=body.name,
+        slug=slug_upper,
+        contact_email=body.contact_email,
+    )
+    await society.insert()
+
+    return _society_response(society)
+
+
+@router.get("/professional-societies", response_model=List[SocietyResponse])
+async def list_professional_societies(
+    is_active: Optional[bool] = None,
+    search: Optional[str] = None,
+    _user: User = _admin,
+):
+    query = {}
+    if is_active is not None:
+        query["is_active"] = is_active
+    if search:
+        import re
+        pattern = re.compile(re.escape(search), re.IGNORECASE)
+        query["$or"] = [{"name": pattern}, {"slug": pattern}]
+
+    societies = await ProfessionalSociety.find(query).to_list()
+    return [_society_response(s) for s in societies]
+
+
+@router.get("/professional-societies/{society_id}", response_model=SocietyResponse)
+async def get_professional_society(society_id: PydanticObjectId, _user: User = _admin):
+    society = await ProfessionalSociety.get(society_id)
+    if not society:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional Society not found")
+    return _society_response(society)
+
+
+@router.patch("/professional-societies/{society_id}", response_model=SocietyResponse)
+async def update_professional_society(
+    society_id: PydanticObjectId,
+    body: SocietyUpdate,
+    _user: User = _admin,
+):
+    society = await ProfessionalSociety.get(society_id)
+    if not society:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional Society not found")
+
+    update_data = body.model_dump(exclude_none=True)
+
+    if "slug" in update_data:
+        new_slug = update_data["slug"].upper()
+        if getattr(society, "slug_locked", False):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Society slug has already been edited once and cannot be changed again."
+            )
+        existing_with_slug = await ProfessionalSociety.find_one(ProfessionalSociety.slug == new_slug)
+        if existing_with_slug and str(existing_with_slug.id) != str(society_id):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Slug already in use by another society.")
+        update_data["slug"] = new_slug
+        update_data["slug_locked"] = True
+
+    if update_data.get("is_active") is False and society.is_active is True:
+        await User.find(
+            User.society_id == society_id,
+            User.is_active == True,
+        ).update_many({"$set": {"is_active": False}})
+
+    if update_data:
+        await society.set(update_data)
+        society = await ProfessionalSociety.get(society_id)
+
+    return _society_response(society)
+
+
+@router.patch("/professional-societies/{society_id}/toggle-active", response_model=SocietyResponse)
+async def toggle_professional_society_active(society_id: PydanticObjectId, _user: User = _admin):
+    society = await ProfessionalSociety.get(society_id)
+    if not society:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional Society not found")
+
+    society.is_active = not society.is_active
+    if society.is_active is False:
+        await User.find(User.society_id == society_id).update_many({"$set": {"is_active": False}})
+
+    await society.save()
+    return _society_response(society)
+
+
+@router.get("/professional-societies/{society_id}/users", response_model=List[UserResponse])
+async def get_professional_society_users(society_id: PydanticObjectId, _user: User = _admin):
+    society = await ProfessionalSociety.get(society_id)
+    if not society:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional Society not found")
+
+    users = await User.find(User.society_id == society_id).to_list()
+    return [_user_response(u) for u in users]
+
+
+@router.delete("/professional-societies/{society_id}", status_code=204)
+async def delete_professional_society(society_id: PydanticObjectId, _user: User = _admin):
+    society = await ProfessionalSociety.get(society_id)
+    if not society:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional Society not found")
+
+    coordinator_users = await User.find(
+        User.society_id == society_id,
+        User.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR,
+    ).to_list()
+    for cu in coordinator_users:
+        await cu.delete()
+
+    await society.delete()
+    return None
+
+
 
 
 @router.post("/departments", response_model=DepartmentResponse, status_code=201)
@@ -584,6 +728,17 @@ async def create_user(body: UserCreate, _user: User = _admin):
                 "Club not found or inactive",
             )
 
+    # Professional society validation
+    society_oid = None
+    if body.society_id:
+        society_oid = PydanticObjectId(body.society_id)
+        society = await ProfessionalSociety.get(society_oid)
+        if not society or not society.is_active:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Professional Society not found or inactive",
+            )
+
     # Event validation
     event_oid = None
     if body.event_id and body.role != "guest":
@@ -665,15 +820,16 @@ async def create_user(body: UserCreate, _user: User = _admin):
         email=email,
         password_hash=hash_password(password_input),
         role=UserRole(body.role),
-        first_login_completed=(body.role not in {"faculty", "tutor", "hod", "principal", "club_coordinator"}),
+        first_login_completed=(body.role not in {"faculty", "tutor", "hod", "principal", "club_coordinator", "professional_society_coordinator"}),
         is_active=body.is_active,
         club_id=club_oid,
+        society_id=society_oid,
         event_id=event_oid,
         department=department_name,
         departments=department_names if body.role == "hod" else None,
-        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor", "faculty"] else None,
-        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod", "faculty"] else None,
-        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod", "faculty"] else None,
+        registration_number=body.registration_number.strip() if body.registration_number and body.role not in ["guest", "club_coordinator", "dept_coordinator", "tutor", "faculty", "professional_society_coordinator"] else None,
+        batch=body.batch.strip() if body.batch and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod", "faculty", "professional_society_coordinator"] else None,
+        section=body.section.strip() if body.section and body.role not in ["guest", "club_coordinator", "dept_coordinator", "hod", "faculty", "professional_society_coordinator"] else None,
     )
     await new_user.insert()
 
@@ -1695,6 +1851,7 @@ async def make_faculty_tutor(
 async def list_users(
     role: Optional[str] = None,
     club_id: Optional[str] = None,
+    society_id: Optional[str] = None,
     department: Optional[str] = None,
     is_active: Optional[bool] = None,
     search: Optional[str] = None,
@@ -1710,6 +1867,8 @@ async def list_users(
             filters.append({"role": role})
     if club_id:
         filters.append({"club_id": PydanticObjectId(club_id)})
+    if society_id:
+        filters.append({"society_id": PydanticObjectId(society_id)})
     if department:
         filters.append({"$or": [{"department": department}, {"departments": department}]})
     if is_active is not None:
@@ -2009,6 +2168,9 @@ async def update_user(
 
         updates["departments"] = resolved_departments
         updates["department"] = resolved_departments[0]
+
+    if "society_id" in updates:
+        updates["society_id"] = PydanticObjectId(updates["society_id"]) if updates["society_id"] else None
 
     # Username uniqueness check
     if "username" in updates and updates["username"] != target.username:

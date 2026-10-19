@@ -19,6 +19,7 @@ from ...models.manual_credit_submission import ManualCreditSubmission, ManualSub
 from ...models.dept_certificate import DeptCertificate
 from ...models.user import User, UserRole
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
+from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
 
@@ -211,16 +212,25 @@ async def list_tutor_students(current_user: User = Depends(require_role(UserRole
             "student_email": {"$in": student_emails_lower},
             "status": MembershipStatus.APPROVED.value,
         }).to_list()
+        approved_society_memberships = await StudentSocietyMembership.find({
+            "student_email": {"$in": student_emails_lower},
+            "status": SocietyMembershipStatus.APPROVED.value,
+        }).to_list()
         clubs_by_email: dict = {}
+        societies_by_email: dict = {}
         office_bearer_by_email: dict = {}
         for m in approved_memberships:
             email_key = _norm_email(m.student_email)
             clubs_by_email.setdefault(email_key, []).append(m.club_name or "")
             if m.office_bearer_role:
                 office_bearer_by_email[email_key] = f"{m.office_bearer_role} ({m.club_name or 'Club'})"
+        for sm in approved_society_memberships:
+            email_key = _norm_email(sm.student_email)
+            societies_by_email.setdefault(email_key, []).append(sm.society_name or "")
         for row in rows:
             email_key = _norm_email(row.get("student_email", ""))
             row["clubs"] = clubs_by_email.get(email_key, [])
+            row["society_memberships"] = societies_by_email.get(email_key, [])
             row["office_bearer"] = office_bearer_by_email.get(email_key, None)
             u = user_by_email.get(email_key)
             if u:
@@ -237,6 +247,7 @@ async def list_tutor_students(current_user: User = Depends(require_role(UserRole
     else:
         for row in rows:
             row["clubs"] = []
+            row["society_memberships"] = []
             row["office_bearer"] = None
             row["tutor_reg_no_change_count"] = 0
             row["can_tutor_edit_reg_no"] = True

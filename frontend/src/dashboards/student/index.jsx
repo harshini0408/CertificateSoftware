@@ -23,6 +23,9 @@ import {
   useStudentUpcomingEvents,
   useRegisterForEvent,
   useCancelEventRegistration,
+  useUpcomingSocietyEvents,
+  useRegisterSocietyEvent,
+  useCancelSocietyEventRegistration,
   useValidateAttendanceQR,
   useAttendanceSession,
   useSubmitAttendance,
@@ -713,6 +716,7 @@ export default function StudentDashboard() {
   const { data: clubMemberships, isLoading: membershipsLoading } = useMyClubMemberships()
   const { data: availableClubs } = useAvailableClubs()
   const { data: upcomingEvents, isLoading: upcomingLoading } = useStudentUpcomingEvents()
+  const { data: upcomingSocietyEvents, isLoading: upcomingSocietyLoading } = useUpcomingSocietyEvents()
   const applyForClub = useApplyForClub()
   const leaveClubMembership = useLeaveClubMembership()
   const createSubmission = useCreateManualCreditSubmission()
@@ -720,6 +724,8 @@ export default function StudentDashboard() {
   const deleteSubmission = useDeleteManualCreditSubmission()
   const registerForEvent = useRegisterForEvent()
   const cancelEventRegistration = useCancelEventRegistration()
+  const registerSocietyEvent = useRegisterSocietyEvent()
+  const cancelSocietyEventRegistration = useCancelSocietyEventRegistration()
   const validateQR = useValidateAttendanceQR()
 
   const [editingSubmission, setEditingSubmission] = useState(null)
@@ -787,6 +793,20 @@ export default function StudentDashboard() {
   const handleCancelRegistration = (eventId) => {
     setCancellingEventId(eventId)
     cancelEventRegistration.mutate(eventId, {
+      onSettled: () => setCancellingEventId(null),
+    })
+  }
+
+  const handleRegisterSociety = (eventId, type = 'participant') => {
+    setRegisteringEventId(eventId)
+    registerSocietyEvent.mutate({ eventId, type }, {
+      onSettled: () => setRegisteringEventId(null),
+    })
+  }
+
+  const handleCancelSocietyRegistration = (eventId) => {
+    setCancellingEventId(eventId)
+    cancelSocietyEventRegistration.mutate(eventId, {
       onSettled: () => setCancellingEventId(null),
     })
   }
@@ -997,6 +1017,216 @@ export default function StudentDashboard() {
     return true
   })
 
+  const filteredUpcomingSocietyEvents = (upcomingSocietyEvents || []).filter((ev) => {
+    if (eventCategoryFilter && ev.category !== eventCategoryFilter) return false
+    if (eventSearch) {
+      const q = eventSearch.toLowerCase()
+      const matchName = (ev.name || '').toLowerCase().includes(q)
+      const matchSociety = (ev.society_name || '').toLowerCase().includes(q)
+      const matchVenue = (ev.venue || '').toLowerCase().includes(q)
+      if (!matchName && !matchSociety && !matchVenue) return false
+    }
+    return true
+  })
+
+  const renderEventCard = (ev, isSociety = false) => {
+    const sessionLabel = ev.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'
+    const entityName = isSociety ? (ev.society_name || 'Professional Society') : (ev.club_name || 'Club')
+    const badgeColor = isSociety ? 'text-teal-700 bg-teal-50 ring-teal-200' : 'text-navy bg-navy/10 ring-navy/20'
+
+    return (
+      <div key={ev.id} className="card overflow-hidden flex flex-col justify-between hover:shadow-md transition-all border border-gray-200">
+        <div>
+          {/* Poster */}
+          {ev.poster_url ? (
+            <div className="aspect-[16/9] w-full overflow-hidden bg-gray-100 border-b border-gray-200">
+              {ev.poster_url.toLowerCase().endsWith('.pdf') ? (
+                <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-gray-50 text-navy">
+                  <span className="text-3xl">📄</span>
+                  <a
+                    href={`${BACKEND_URL}${ev.poster_url}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-navy hover:underline mt-1"
+                  >
+                    View Event PDF
+                  </a>
+                </div>
+              ) : (
+                <div
+                  className="relative w-full h-full cursor-pointer group"
+                  onClick={() => setExpandedPoster({
+                    url: ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url,
+                    title: ev.name
+                  })}
+                  title="Click to view full poster"
+                >
+                  <img
+                    src={ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url}
+                    alt={ev.name}
+                    className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span className="bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium shadow-md">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+                      </svg>
+                      Click to expand
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="aspect-[16/9] w-full bg-navy/5 border-b border-gray-200 flex items-center justify-center text-3xl text-navy/40">
+              {isSociety ? '🌐' : '📅'}
+            </div>
+          )}
+
+          <div className="p-4 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className={`text-xs font-bold uppercase tracking-wider ${isSociety ? 'text-teal-700' : 'text-navy'}`}>
+                {entityName}
+              </span>
+              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
+                {ev.category || 'Event'}
+              </span>
+            </div>
+
+            <h3 className="text-sm font-bold text-foreground line-clamp-1">{ev.name}</h3>
+            {ev.description && (
+              <p className="text-xs text-gray-600 line-clamp-2">{ev.description}</p>
+            )}
+
+            <div className="space-y-1 pt-2 text-xs text-gray-500 border-t border-gray-100">
+              <div className="flex items-center gap-1.5">
+                <span>📅</span>
+                <span className="font-medium text-gray-700">
+                  {ev.event_date ? new Date(ev.event_date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span>🕐</span>
+                <span className="font-semibold text-navy">{sessionLabel}</span>
+              </div>
+              {ev.venue && (
+                <div className="flex items-center gap-1.5 truncate">
+                  <span>📍</span>
+                  <span className="truncate">{ev.venue}</span>
+                </div>
+              )}
+              {(ev.volunteers_required || 0) > 0 && (
+                <div className="flex items-center gap-1.5 text-[11px] text-teal-600 font-medium">
+                  <span>🤝</span>
+                  <span>
+                    Volunteers: {ev.volunteers_registered || 0} / {ev.volunteers_required} filled
+                    {(ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) && ' (Full)'}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <div className="p-4 pt-0">
+          {ev.is_registered ? (
+            <div className="space-y-2">
+              {ev.registration_type === 'volunteer' ? (
+                ev.volunteer_status === 'accepted' ? (
+                  <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
+                    ✓ Volunteer Request Accepted ({sessionLabel})
+                  </div>
+                ) : ev.volunteer_status === 'rejected' ? (
+                  <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-red-50 text-red-700 font-semibold text-xs border border-red-200">
+                    ✕ Volunteer Request Rejected ({sessionLabel})
+                  </div>
+                ) : (
+                  <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-amber-50 text-amber-700 font-semibold text-xs border border-amber-200">
+                    ⏳ Volunteer Request Pending ({sessionLabel})
+                  </div>
+                )
+              ) : (
+                <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
+                  ✓ Registered for Event ({sessionLabel})
+                </div>
+              )}
+
+              {/* Mark Attendance button */}
+              {!isSociety && (ev.registration_type === 'participant' || (ev.registration_type === 'volunteer' && ev.volunteer_status === 'accepted')) && (
+                <button
+                  type="button"
+                  onClick={() => openScanner(ev)}
+                  className="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                  </svg>
+                  Mark Attendance
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => isSociety ? handleCancelSocietyRegistration(ev.id) : handleCancelRegistration(ev.id)}
+                disabled={(cancelEventRegistration.isPending || cancelSocietyEventRegistration.isPending) && cancellingEventId === ev.id}
+                className="w-full text-center text-xs text-red-600 hover:text-red-800 hover:underline py-1 font-medium disabled:opacity-50"
+              >
+                {cancellingEventId === ev.id
+                  ? 'Cancelling…'
+                  : ev.registration_type === 'volunteer'
+                  ? 'Cancel Volunteer Request'
+                  : 'Cancel Registration'}
+              </button>
+            </div>
+          ) : (ev.registration_stopped || (ev.max_participants != null && ev.participant_count >= ev.max_participants)) ? (
+            <div className="w-full flex flex-col items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 text-center space-y-1">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-amber-700">
+                <span>⚠️</span> Max Capacity Reached
+              </span>
+              <p className="text-xs font-medium text-amber-800 leading-snug">
+                Max participants reached for this event.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => isSociety ? handleRegisterSociety(ev.id, 'participant') : handleRegister(ev.id, 'participant')}
+                disabled={(registerForEvent.isPending || registerSocietyEvent.isPending) && registeringEventId === ev.id}
+                className="btn-primary w-full text-xs justify-center"
+              >
+                {registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
+              </button>
+
+              {(ev.volunteers_required || 0) > 0 && (
+                (ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="btn-secondary w-full text-xs justify-center opacity-60 cursor-not-allowed text-gray-500 bg-gray-100 border-gray-300 font-medium"
+                    title="Maximum volunteers already registered"
+                  >
+                    Maximum volunteers already registered
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => isSociety ? handleRegisterSociety(ev.id, 'volunteer') : handleRegister(ev.id, 'volunteer')}
+                    disabled={(registerForEvent.isPending || registerSocietyEvent.isPending) && registeringEventId === ev.id}
+                    className="btn-secondary w-full text-xs justify-center text-teal-700 border-teal-300 hover:bg-teal-50 font-semibold"
+                  >
+                    {registeringEventId === ev.id ? 'Submitting Request…' : 'Volunteer Register'}
+                  </button>
+                )
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <Navbar />
@@ -1073,9 +1303,9 @@ export default function StudentDashboard() {
             {activeTab === 'upcoming' && attendanceView === 'idle' ? (
               <div className="space-y-6">
                 <div>
-                  <h1 className="text-2xl font-bold text-foreground">Upcoming Club Events</h1>
+                  <h1 className="text-2xl font-bold text-foreground">Upcoming Events</h1>
                   <p className="mt-0.5 text-sm text-gray-500">
-                    Discover and register for upcoming events conducted by college clubs. Note: You can register for only one event per session (Morning / Afternoon) on the same date.
+                    Discover and register for upcoming events conducted by Professional Societies and College Clubs. Note: You can register for only one event per session (Morning / Afternoon) on the same date.
                   </p>
                 </div>
 
@@ -1100,216 +1330,64 @@ export default function StudentDashboard() {
                   </select>
                 </div>
 
-                {/* Events Grid */}
-                {upcomingLoading ? (
-                  <LoadingSpinner fullPage label="Loading upcoming events…" />
-                ) : filteredUpcomingEvents.length === 0 ? (
-                  <div className="card p-8 text-center text-gray-400">
-                    No upcoming events found.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                    {filteredUpcomingEvents.map((ev) => {
-                      const sessionLabel = ev.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'
-                      return (
-                        <div key={ev.id} className="card overflow-hidden flex flex-col justify-between hover:shadow-lg transition-all border border-gray-200">
-                          <div>
-                            {/* Poster */}
-                            {ev.poster_url ? (
-                              <div className="aspect-[16/9] w-full overflow-hidden bg-gray-100 border-b border-gray-200">
-                                {ev.poster_url.toLowerCase().endsWith('.pdf') ? (
-                                  <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-gray-50 text-navy">
-                                    <span className="text-3xl">📄</span>
-                                    <a
-                                      href={`${BACKEND_URL}${ev.poster_url}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-xs font-semibold text-navy hover:underline mt-1"
-                                    >
-                                      View Event PDF
-                                    </a>
-                                  </div>
-                                ) : (
-                                  <div
-                                    className="relative w-full h-full cursor-pointer group"
-                                    onClick={() => setExpandedPoster({
-                                      url: ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url,
-                                      title: ev.name
-                                    })}
-                                    title="Click to view full poster"
-                                  >
-                                    <img
-                                      src={ev.poster_url.startsWith('/') ? `${BACKEND_URL}${ev.poster_url}` : ev.poster_url}
-                                      alt={ev.name}
-                                      className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-                                    />
-                                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                      <span className="bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium shadow-md">
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
-                                        </svg>
-                                        Click to expand
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="aspect-[16/9] w-full bg-navy/5 border-b border-gray-200 flex items-center justify-center text-3xl text-navy/40">
-                                📅
-                              </div>
-                            )}
-
-                            <div className="p-5 space-y-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-bold text-navy uppercase tracking-wider">{ev.club_name}</span>
-                                <span className="inline-flex rounded-full bg-navy/10 px-2.5 py-0.5 text-[10px] font-semibold text-navy">
-                                  {ev.category || 'Event'}
-                                </span>
-                              </div>
-
-                              <h3 className="text-base font-bold text-foreground line-clamp-1">{ev.name}</h3>
-                              {ev.description && (
-                                <p className="text-xs text-gray-600 line-clamp-3">{ev.description}</p>
-                              )}
-
-                              <div className="space-y-1.5 pt-2 text-xs text-gray-500 border-t border-gray-100">
-                                <div className="flex items-center gap-1.5">
-                                  <span>📅</span>
-                                  <span className="font-medium text-gray-700">
-                                    {ev.event_date ? new Date(ev.event_date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <span>🕐</span>
-                                  <span className="font-semibold text-navy">{sessionLabel}</span>
-                                </div>
-                                {ev.venue && (
-                                  <div className="flex items-center gap-1.5">
-                                    <span>📍</span>
-                                    <span>{ev.venue}</span>
-                                  </div>
-                                )}
-                                <div className="flex items-center gap-1.5 text-[11px] text-gray-400 pt-1">
-                                  <span>👥</span>
-                                  
-                                </div>
-                                {(ev.volunteers_required || 0) > 0 && (
-                                  <div className="flex items-center gap-1.5 text-[11px] text-teal-600 font-medium">
-                                    <span>🤝</span>
-                                    <span>
-                                      Volunteers: {ev.volunteers_registered || 0} / {ev.volunteers_required} filled
-                                      {(ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) && ' (Full)'}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Action Button */}
-                          <div className="p-5 pt-0">
-                            {ev.is_registered ? (
-                              <div className="space-y-2">
-                                {ev.registration_type === 'volunteer' ? (
-                                  ev.volunteer_status === 'accepted' ? (
-                                    <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
-                                      ✓ Volunteer Request Accepted ({sessionLabel})
-                                    </div>
-                                  ) : ev.volunteer_status === 'rejected' ? (
-                                    <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-red-50 text-red-700 font-semibold text-xs border border-red-200">
-                                      ✕ Volunteer Request Rejected ({sessionLabel})
-                                    </div>
-                                  ) : (
-                                    <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-amber-50 text-amber-700 font-semibold text-xs border border-amber-200">
-                                      ⏳ Volunteer Request Pending ({sessionLabel})
-                                    </div>
-                                  )
-                                ) : (
-                                  <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
-                                    ✓ Registered for Event ({sessionLabel})
-                                  </div>
-                                )}
-
-                                {/* Mark Attendance button — for participant registrations or accepted volunteers */}
-                                {(ev.registration_type === 'participant' ||
-                                  (ev.registration_type === 'volunteer' && ev.volunteer_status === 'accepted')
-                                ) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => openScanner(ev)}
-                                    className="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition-colors"
-                                  >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-                                    </svg>
-                                    Mark Attendance
-                                  </button>
-                                )}
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancelRegistration(ev.id)}
-                                  disabled={cancelEventRegistration.isPending && cancellingEventId === ev.id}
-                                  className="w-full text-center text-xs text-red-600 hover:text-red-800 hover:underline py-1 font-medium disabled:opacity-50"
-                                >
-                                  {cancelEventRegistration.isPending && cancellingEventId === ev.id
-                                    ? 'Cancelling…'
-                                    : ev.registration_type === 'volunteer'
-                                    ? 'Cancel Volunteer Request'
-                                    : 'Cancel Registration'}
-                                </button>
-                              </div>
-                            ) : (ev.registration_stopped || (ev.max_participants != null && ev.participant_count >= ev.max_participants)) ? (
-                              <div className="w-full flex flex-col items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 text-center space-y-1">
-                                <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-amber-700">
-                                  <span>⚠️</span> Max Participants Reached
-                                </span>
-                                <p className="text-xs font-medium text-amber-800 leading-snug">
-                                  Max participants reached. We will be coming up with new events.
-                                </p>
-                              </div>
-                            ) : (
-                              <div className="space-y-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRegister(ev.id, 'participant')}
-                                  disabled={registerForEvent.isPending && registeringEventId === ev.id}
-                                  className="btn-primary w-full text-xs justify-center"
-                                >
-                                  {registerForEvent.isPending && registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
-                                </button>
-
-                                {/* Volunteer Register Option */}
-                                {(ev.volunteers_required || 0) > 0 && (
-                                  (ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) ? (
-                                    <button
-                                      type="button"
-                                      disabled
-                                      className="btn-secondary w-full text-xs justify-center opacity-60 cursor-not-allowed text-gray-500 bg-gray-100 border-gray-300 font-medium"
-                                      title="Maximum volunteers already registered"
-                                    >
-                                      Maximum volunteers already registered
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRegister(ev.id, 'volunteer')}
-                                      disabled={registerForEvent.isPending && registeringEventId === ev.id}
-                                      className="btn-secondary w-full text-xs justify-center text-teal-700 border-teal-300 hover:bg-teal-50 font-semibold"
-                                    >
-                                      {registerForEvent.isPending && registeringEventId === ev.id ? 'Submitting Request…' : 'Volunteer Register'}
-                                    </button>
-                                  )
-                                )}
-                              </div>
-                            )}
-                          </div>
+                {/* Two-column layout: Left for Professional Societies, Right for Clubs */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                  {/* Left Column: Professional Societies */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🌐</span>
+                        <div>
+                          <h2 className="text-lg font-bold text-foreground">Professional Societies</h2>
+                          <p className="text-xs text-gray-500">Events organized by professional societies and student chapters</p>
                         </div>
-                      )
-                    })}
+                      </div>
+                      <span className="inline-flex items-center rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-bold text-teal-700 ring-1 ring-inset ring-teal-600/20">
+                        {filteredUpcomingSocietyEvents.length} {filteredUpcomingSocietyEvents.length === 1 ? 'Event' : 'Events'}
+                      </span>
+                    </div>
+
+                    {upcomingSocietyLoading ? (
+                      <LoadingSpinner fullPage={false} label="Loading society events…" />
+                    ) : filteredUpcomingSocietyEvents.length === 0 ? (
+                      <div className="card p-8 text-center text-gray-400">
+                        No upcoming professional society events found.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {filteredUpcomingSocietyEvents.map((ev) => renderEventCard(ev, true))}
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  {/* Right Column: College Clubs */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🎯</span>
+                        <div>
+                          <h2 className="text-lg font-bold text-foreground">Clubs</h2>
+                          <p className="text-xs text-gray-500">Events organized by student clubs and activity bodies</p>
+                        </div>
+                      </div>
+                      <span className="inline-flex items-center rounded-full bg-navy/10 px-2.5 py-0.5 text-xs font-bold text-navy ring-1 ring-inset ring-navy/20">
+                        {filteredUpcomingEvents.length} {filteredUpcomingEvents.length === 1 ? 'Event' : 'Events'}
+                      </span>
+                    </div>
+
+                    {upcomingLoading ? (
+                      <LoadingSpinner fullPage={false} label="Loading club events…" />
+                    ) : filteredUpcomingEvents.length === 0 ? (
+                      <div className="card p-8 text-center text-gray-400">
+                        No upcoming club events found.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {filteredUpcomingEvents.map((ev) => renderEventCard(ev, false))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             ) : activeTab === 'settings' ? (
               <StudentSettingsTab profile={profile} profileLoading={profileLoading} />
@@ -1679,6 +1757,30 @@ export default function StudentDashboard() {
                   </div>
                 )
               })()}
+            </div>
+
+            {/* ─── Professional Circle Membership ─────────────────────── */}
+            <div className="card p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="section-title">Professional Circle Membership</h2>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700 ring-1 ring-teal-200">
+                  <span className="h-1.5 w-1.5 rounded-full bg-teal-500 animate-pulse" />
+                  Coming Soon
+                </span>
+              </div>
+              <div className="rounded-xl border border-dashed border-teal-200 bg-teal-50/50 p-6 text-center">
+                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-teal-100 text-teal-700 mb-2">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-teal-900">
+                  Feature will be available soon to use by the students.
+                </p>
+                <p className="mt-1 text-xs text-teal-700/80">
+                  Registration and enrollment into professional societies (IEEE, ACM, CSI, etc.) will open shortly.
+                </p>
+              </div>
             </div>
 
             <div>

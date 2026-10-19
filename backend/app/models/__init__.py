@@ -27,6 +27,9 @@ from .student_club_membership import StudentClubMembership, MembershipStatus
 from .event_registration import EventRegistration
 from .attendance import Attendance
 from .attendance_session import AttendanceSession
+from .professional_society import ProfessionalSociety, SocietyAssets
+from .society_event import SocietyEvent, SocietyEventStatus
+from .student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
 from ..certificate_config.model import CertificateTemplateConfig
 
 ALL_MODELS = [
@@ -60,6 +63,9 @@ ALL_MODELS = [
     Attendance,
     AttendanceSession,
     CertificateTemplateConfig,
+    ProfessionalSociety,
+    SocietyEvent,
+    StudentSocietyMembership,
 ]
 
 __all__ = [

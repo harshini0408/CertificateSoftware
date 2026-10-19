@@ -215,6 +215,7 @@ from .domains.dept.routers import router as dept_router
 from .domains.principal.routers import router as principal_router
 from .domains.hod.routers import router as hod_router
 from .domains.club.routers import router as club_router, coordinator_router as club_coordinator_router
+from .domains.professional_society.routers import router as society_router, coordinator_router as society_coordinator_router
 from .domains.superadmin.routers import router as superadmin_router
 from .domains.student_affairs.routers import router as student_affairs_router
 from .certificate_config.routes import router as cert_config_router
@@ -224,6 +225,8 @@ app.include_router(superadmin_router)
 app.include_router(cert_config_router, prefix="/api")
 app.include_router(club_router)
 app.include_router(club_coordinator_router)
+app.include_router(society_router)
+app.include_router(society_coordinator_router)
 app.include_router(events.router)
 app.include_router(participants.router)
 app.include_router(templates.router)

@@ -22,6 +22,8 @@ import GuestDashboard from './dashboards/guest/GuestDashboard'
 import GuestHistory from './dashboards/guest/GuestHistory'
 import StudentAffairsDashboard from './dashboards/student_affairs'
 import FacultyDashboard from './dashboards/faculty/FacultyDashboard'
+import ProfessionalSocietyDashboard from './dashboards/professional_society'
+import SocietyEventDetail from './dashboards/professional_society/EventDetail'
 import Footer from './components/Footer'
 import Authors from './Authors'
 
@@ -31,6 +33,7 @@ const ROLES = {
   PRINCIPAL: 'principal',
   HOD: 'hod',
   CLUB_COORD: 'club_coordinator',
+  PROFESSIONAL_SOCIETY_COORD: 'professional_society_coordinator',
   DEPT_COORD: 'dept_coordinator',
   STUDENT_AFFAIRS: 'student_affairs',
   FACULTY: 'faculty',
@@ -107,6 +110,26 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.CLUB_COORD, ROLES.SUPER_ADMIN]}>
               <TemplateSelector />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ── Professional Society coordinator ───────────────────────────── */}
+        <Route
+          path="/society/:society_id"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.PROFESSIONAL_SOCIETY_COORD, ROLES.SUPER_ADMIN]}>
+              <ProfessionalSocietyDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/society/:society_id/events/:event_id"
+          element={
+            <ProtectedRoute
+              allowedRoles={[ROLES.PROFESSIONAL_SOCIETY_COORD, ROLES.SUPER_ADMIN]}
+            >
+              <SocietyEventDetail />
             </ProtectedRoute>
           }
         />

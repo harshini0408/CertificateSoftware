@@ -119,3 +119,42 @@ async def require_event_access(
         return current_user
 
     raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
+
+
+# ── Professional Society access gates ────────────────────────────────────
+
+async def require_society_access(
+    society_id: PydanticObjectId,
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Ensure the user has permission to operate on *society_id*."""
+    if current_user.role == UserRole.SUPER_ADMIN:
+        return current_user
+
+    if current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR:
+        if current_user.society_id != society_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this professional society")
+        return current_user
+
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
+
+
+async def require_society_event_access(
+    society_id: PydanticObjectId,
+    event_id: PydanticObjectId,
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Ensure the user has permission to operate on *event_id* belonging to *society_id*."""
+    if current_user.role == UserRole.SUPER_ADMIN:
+        return current_user
+
+    if current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR:
+        if current_user.society_id != society_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this society")
+        from ..models.society_event import SocietyEvent
+        event = await SocietyEvent.get(event_id)
+        if not event or event.society_id != society_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found in this society")
+        return current_user
+
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")

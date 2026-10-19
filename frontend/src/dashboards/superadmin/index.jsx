@@ -15,6 +15,12 @@ import CertificateMappingTab from './CertificateMappingTab'
 
 import { useClubs, useClub, useClubUsers, useCreateClub, useUpdateClub, useDeleteClub } from '../club/api'
 import {
+  useAdminSocieties,
+  useCreateAdminSociety,
+  useUpdateAdminSociety,
+  useDeleteAdminSociety,
+} from '../professional_society/api'
+import {
   useUsers,
   useCreateUser,
   useUpdateUser,
@@ -75,6 +81,7 @@ const roleBadge = {
   student_affairs: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   club_coordinator: 'bg-blue-50 text-blue-700 ring-blue-200',
   dept_coordinator: 'bg-purple-50 text-purple-700 ring-purple-200',
+  professional_society_coordinator: 'bg-teal-50 text-teal-700 ring-teal-200',
   tutor: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   faculty: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   student: 'bg-green-50 text-green-700 ring-green-200',
@@ -87,6 +94,7 @@ const roleLabel = {
   student_affairs: 'Student Affairs',
   club_coordinator: 'Club Coordinator',
   dept_coordinator: 'Dept Coordinator',
+  professional_society_coordinator: 'Professional Circle Coordinator',
   tutor: 'Tutor',
   faculty: 'Faculty',
   student: 'Student',
@@ -414,6 +422,7 @@ const roles = [
   { value: 'hod', label: 'HOD', icon: '🧭', desc: 'Can be assigned to multiple departments' },
   { value: 'student_affairs', label: 'Student Affairs', icon: '🏛️', desc: 'Student affairs and event oversight' },
   { value: 'club_coordinator', label: 'Club Coordinator', icon: '🏛️', desc: 'Manages a single club' },
+  { value: 'professional_society_coordinator', label: 'Professional Circle Coordinator', icon: '🌐', desc: 'Manages a professional society / circle' },
   { value: 'dept_coordinator', label: 'Dept Coordinator', icon: '🎓', desc: 'Manages a department' },
   { value: 'tutor', label: 'Tutor', icon: '🧑‍🏫', desc: 'Manages one class of students' },
   { value: 'faculty', label: 'Faculty', icon: '👨‍🏫', desc: 'Institutional certificate generator' },
@@ -424,7 +433,7 @@ const roles = [
 function NewUserModal({ isOpen, onClose }) {
   const [step, setStep] = useState(1)
   const [selectedRole, setSelectedRole] = useState('')
-  const [form, setForm] = useState({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', departments: [], registration_number: '', batch: '', section: '' })
+  const [form, setForm] = useState({ username: '', name: '', email: '', password: '', club_id: '', society_id: '', event_id: '', department: '', departments: [], registration_number: '', batch: '', section: '' })
   const [tutorStudents, setTutorStudents] = useState([])
   const [studentDraft, setStudentDraft] = useState({ name: '', email: '', registration_number: '' })
   const [tutorImportFile, setTutorImportFile] = useState(null)
@@ -434,6 +443,7 @@ function NewUserModal({ isOpen, onClose }) {
   const assignTutorStudents = useAssignTutorStudents()
   const bulkImportTutorStudents = useBulkImportTutorStudents()
   const { data: clubsList } = useClubs()
+  const { data: societiesList } = useAdminSocieties()
   const { data: departmentsList } = useDepartments({ is_active: true })
   const { data: eventsList, isFetching: fetchingEvents } = useEvents(
     selectedRole === 'guest' && form.club_id ? form.club_id : null
@@ -447,7 +457,7 @@ function NewUserModal({ isOpen, onClose }) {
   const resetModal = () => {
     setStep(1)
     setSelectedRole('')
-    setForm({ username: '', name: '', email: '', password: '', club_id: '', event_id: '', department: '', departments: [], registration_number: '', batch: '', section: '' })
+    setForm({ username: '', name: '', email: '', password: '', club_id: '', society_id: '', event_id: '', department: '', departments: [], registration_number: '', batch: '', section: '' })
     setTutorStudents([])
     setStudentDraft({ name: '', email: '', registration_number: '' })
     setTutorImportFile(null)
@@ -469,6 +479,7 @@ function NewUserModal({ isOpen, onClose }) {
       errs.password = 'Min 8 characters if provided'
     }
     if (selectedRole === 'club_coordinator' && !form.club_id) errs.club_id = 'Required'
+    if (selectedRole === 'professional_society_coordinator' && !form.society_id) errs.society_id = 'Required'
     if (selectedRole === 'dept_coordinator' && !form.department) errs.department = 'Required'
     if (selectedRole === 'faculty' && !form.department) errs.department = 'Required'
     if (selectedRole === 'hod' && (!Array.isArray(form.departments) || form.departments.length === 0)) errs.departments = 'Select at least one department'
@@ -523,6 +534,9 @@ function NewUserModal({ isOpen, onClose }) {
 
     if (selectedRole === 'club_coordinator') {
       payload.club_id = form.club_id
+    }
+    if (selectedRole === 'professional_society_coordinator') {
+      payload.society_id = form.society_id
     }
     if (selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor' || selectedRole === 'faculty') {
       if (form.department?.trim()) payload.department = form.department.trim()
@@ -635,6 +649,22 @@ function NewUserModal({ isOpen, onClose }) {
                 {(clubsList || []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.slug})</option>)}
               </select>
               {errors.club_id && <p className="form-error">{errors.club_id}</p>}
+            </div>
+          )}
+          {selectedRole === 'professional_society_coordinator' && (
+            <div>
+              <label className="form-label">Professional Circle / Society *</label>
+              <select
+                className={`form-input ${errors.society_id ? 'form-input-error' : ''}`}
+                value={form.society_id}
+                onChange={(e) => handleChange('society_id', e.target.value)}
+              >
+                <option value="">Select circle / society…</option>
+                {(societiesList || []).map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.slug})</option>
+                ))}
+              </select>
+              {errors.society_id && <p className="form-error">{errors.society_id}</p>}
             </div>
           )}
           {(selectedRole === 'dept_coordinator' || selectedRole === 'student' || selectedRole === 'tutor' || selectedRole === 'faculty') && (
@@ -951,6 +981,7 @@ export default function AdminDashboard() {
           <div className="page-container">
             {activeTab === 'overview' && <OverviewTab />}
             {activeTab === 'clubs' && <ClubsTab />}
+            {activeTab === 'professional-circles' && <ProfessionalCirclesTab />}
             {activeTab === 'departments' && <DepartmentsTab />}
             {activeTab === 'users' && <UsersTab />}
             {activeTab === 'certificate-mapping' && <CertificateMappingTab />}
@@ -1680,6 +1711,252 @@ function ClubsTab() {
           confirmLabel={deleteClub.isPending ? 'Deleting…' : 'Delete Club'}
           variant="danger"
           isLoading={deleteClub.isPending}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── PROFESSIONAL CIRCLES TAB ──────────────────────────────────────────────────
+function NewProfessionalCircleModal({ isOpen, onClose }) {
+  const [form, setForm] = useState({ name: '', slug: '', contact_email: '' })
+  const [errors, setErrors] = useState({})
+  const createSociety = useCreateAdminSociety()
+
+  const handleChange = (field, value) => {
+    if (field === 'slug') value = value.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    setForm((f) => ({ ...f, [field]: value }))
+    setErrors((e) => ({ ...e, [field]: undefined }))
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const errs = {}
+    if (!form.name.trim()) errs.name = 'Circle name is required'
+    if (!form.slug.trim()) errs.slug = 'Slug is required'
+    if (!/^[A-Z0-9]+$/.test(form.slug)) errs.slug = 'Uppercase letters and digits only'
+    if (Object.keys(errs).length) { setErrors(errs); return }
+
+    createSociety.mutate(form, {
+      onSuccess: () => {
+        onClose()
+        setForm({ name: '', slug: '', contact_email: '' })
+      },
+      onError: (err) => {
+        const detail = err?.response?.data?.detail || ''
+        if (detail.toLowerCase().includes('slug')) setErrors({ slug: detail })
+      },
+    })
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="New Professional Circle">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="form-label">Professional Circle / Society Name *</label>
+          <input
+            className={`form-input ${errors.name ? 'form-input-error' : ''}`}
+            value={form.name}
+            onChange={(e) => handleChange('name', e.target.value)}
+            placeholder="e.g. IEEE Student Branch"
+          />
+          {errors.name && <p className="form-error">{errors.name}</p>}
+        </div>
+        <div>
+          <label className="form-label">Slug *</label>
+          <input
+            className={`form-input font-mono ${errors.slug ? 'form-input-error' : ''}`}
+            value={form.slug}
+            onChange={(e) => handleChange('slug', e.target.value)}
+            placeholder="IEEE"
+          />
+          <p className="mt-1 text-xs text-gray-400">Used in event and certificate tracking. Uppercase letters and digits only.</p>
+          {errors.slug && <p className="form-error">{errors.slug}</p>}
+        </div>
+        <div>
+          <label className="form-label">Contact Email</label>
+          <input
+            type="email"
+            className="form-input"
+            value={form.contact_email}
+            onChange={(e) => handleChange('contact_email', e.target.value)}
+            placeholder="ieee@psgitech.ac.in"
+          />
+        </div>
+        <p className="text-xs text-gray-500">Coordinator can be created separately under Users as Professional Circle Coordinator.</p>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary min-w-[120px]" disabled={createSociety.isPending}>
+            {createSociety.isPending ? <LoadingSpinner size="sm" label="" /> : 'Create Circle'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function EditProfessionalCircleModal({ isOpen, onClose, society }) {
+  const [form, setForm] = useState({ name: '', slug: '', contact_email: '', is_active: true })
+  const updateSociety = useUpdateAdminSociety()
+
+  useEffect(() => {
+    if (society) {
+      setForm({
+        name: society.name || '',
+        slug: society.slug || '',
+        contact_email: society.contact_email || '',
+        is_active: society.is_active !== false,
+      })
+    }
+  }, [society])
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    try {
+      const payload = {
+        societyId: society.id,
+        name: form.name.trim(),
+        contact_email: form.contact_email?.trim().toLowerCase() || '',
+        is_active: form.is_active,
+      }
+      if (!society.slug_locked && form.slug && form.slug.trim().toUpperCase() !== society.slug) {
+        payload.slug = form.slug.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+      }
+      await updateSociety.mutateAsync(payload)
+      onClose()
+    } catch {
+      // toast handled in hook
+    }
+  }
+
+  if (!society) return null
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit Professional Circle">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="form-label">Name</label>
+          <input className="form-input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+        </div>
+        <div>
+          <div className="flex items-center justify-between">
+            <label className="form-label">Slug</label>
+            {society.slug_locked ? (
+              <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Locked</span>
+            ) : (
+              <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Editable once</span>
+            )}
+          </div>
+          {society.slug_locked ? (
+            <input className="form-input font-mono bg-gray-50 cursor-not-allowed" value={society.slug} disabled title="Slug is locked" />
+          ) : (
+            <input
+              className="form-input font-mono"
+              value={form.slug}
+              onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
+            />
+          )}
+        </div>
+        <div>
+          <label className="form-label">Contact Email</label>
+          <input type="email" className="form-input" value={form.contact_email} onChange={(e) => setForm((f) => ({ ...f, contact_email: e.target.value }))} />
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="soc_active"
+            checked={form.is_active}
+            onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
+            className="h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
+          />
+          <label htmlFor="soc_active" className="text-sm font-medium text-gray-700">Active Status</label>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary min-w-[120px]" disabled={updateSociety.isPending}>
+            {updateSociety.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function ProfessionalCirclesTab() {
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search)
+  const filters = useMemo(() => {
+    const f = {}
+    if (debouncedSearch) f.search = debouncedSearch
+    return f
+  }, [debouncedSearch])
+
+  const { data: societies, isLoading } = useAdminSocieties(filters)
+  const deleteSociety = useDeleteAdminSociety()
+
+  const [showNew, setShowNew] = useState(false)
+  const [editSociety, setEditSociety] = useState(null)
+  const [societyToDelete, setSocietyToDelete] = useState(null)
+
+  const columns = [
+    { key: 'name', header: 'Name', sortable: true, render: (v) => <span className="font-semibold">{v}</span> },
+    { key: 'slug', header: 'Slug', render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span> },
+    { key: 'contact_email', header: 'Email', sortable: true },
+    {
+      key: 'is_active', header: 'Status', render: (v) => (
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${v ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+          {v ? 'Active' : 'Inactive'}
+        </span>
+      )
+    },
+    { key: 'created_at', header: 'Created', sortable: true, render: (v) => fmtDate(v) },
+    {
+      key: '_actions', header: 'Actions', searchKey: false, render: (_, row) => (
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <button title="Edit Society" onClick={() => setEditSociety(row)} className="rounded p-1 text-gray-400 hover:text-navy hover:bg-navy/10 transition-colors">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          </button>
+          <button
+            title="Delete Society"
+            onClick={() => setSocietyToDelete(row)}
+            className="rounded p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
+      )
+    },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Professional Circle</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Manage professional societies, coordinators, and circular activity</p>
+        </div>
+        <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Circle</button>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="search" placeholder="Search professional circles…" value={search} onChange={(e) => setSearch(e.target.value)} className="form-input w-64" />
+      </div>
+      <DataTable columns={columns} data={societies || []} isLoading={isLoading} emptyMessage="No professional circles found. Create your first circle." />
+      <NewProfessionalCircleModal isOpen={showNew} onClose={() => setShowNew(false)} />
+      <EditProfessionalCircleModal isOpen={!!editSociety} onClose={() => setEditSociety(null)} society={editSociety} />
+      {societyToDelete && (
+        <ConfirmModal
+          isOpen={!!societyToDelete}
+          onClose={() => setSocietyToDelete(null)}
+          onConfirm={async () => {
+            await deleteSociety.mutateAsync(societyToDelete.id)
+            setSocietyToDelete(null)
+          }}
+          title="Delete Professional Circle"
+          message={`Are you sure you want to delete "${societyToDelete.name}" (${societyToDelete.slug})? The associated coordinator account will also be deleted.`}
+          confirmLabel={deleteSociety.isPending ? 'Deleting…' : 'Delete Circle'}
+          variant="danger"
+          isLoading={deleteSociety.isPending}
         />
       )}
     </div>
@@ -4152,6 +4429,13 @@ function RoleUsersView({
     return m
   }, [clubs])
 
+  const { data: societiesList } = useAdminSocieties()
+  const societyMap = useMemo(() => {
+    const m = {}
+    ;(societiesList || []).forEach((s) => { m[s.id] = s.name })
+    return m
+  }, [societiesList])
+
   const getScope = (u) => {
     if (u.role === 'principal') return 'College'
     if (u.role === 'hod') {
@@ -4159,6 +4443,7 @@ function RoleUsersView({
       return u.department || '—'
     }
     if (u.role === 'club_coordinator') return clubMap[u.club_id] || u.club_id || '—'
+    if (u.role === 'professional_society_coordinator') return societyMap[u.society_id] || u.society_id || '—'
     if (u.role === 'dept_coordinator') return u.department || '—'
     if (u.role === 'guest') return clubMap[u.club_id] || '—'
     return u.department || '—'
@@ -4425,6 +4710,7 @@ const USER_ROLE_TABS = [
   { key: 'hod', label: 'HODs' },
   { key: 'dept_coordinator', label: 'Dept Coordinators' },
   { key: 'club_coordinator', label: 'Club Coordinators' },
+  { key: 'professional_society_coordinator', label: 'Professional Circle Coordinators' },
   { key: 'student_affairs', label: 'Student Affairs' },
   { key: 'principal', label: 'Principals' },
   { key: 'guest', label: 'Guests' },

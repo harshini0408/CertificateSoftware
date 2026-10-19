@@ -30,12 +30,13 @@ class UserCreate(BaseModel):
     def validate_email_domain(cls, v: EmailStr) -> EmailStr:
         return validate_psgitech_email(v)
     role: Literal[
-        "principal", "hod", "student_affairs", "club_coordinator", "dept_coordinator", "tutor", "student", "guest", "faculty"
+        "principal", "hod", "student_affairs", "club_coordinator", "dept_coordinator", "tutor", "student", "guest", "faculty", "professional_society_coordinator"
     ]
     is_active: bool = True
 
     # Role-conditional fields
     club_id: Optional[str] = None
+    society_id: Optional[str] = None
     event_id: Optional[str] = None
     department: Optional[str] = None
     departments: Optional[List[str]] = None
@@ -57,6 +58,10 @@ class UserCreate(BaseModel):
         elif role == "club_coordinator":
             if not self.club_id:
                 raise ValueError("club_id is required for club_coordinator role")
+
+        elif role == "professional_society_coordinator":
+            if not self.society_id:
+                raise ValueError("society_id is required for professional_society_coordinator role")
 
         elif role == "guest":
             pass
@@ -116,6 +121,7 @@ class UserUpdate(BaseModel):
     departments: Optional[List[str]] = None
     batch: Optional[str] = None
     section: Optional[str] = None
+    society_id: Optional[str] = None
     assigned_classes: Optional[List[dict]] = None
 
     @field_validator("email")
@@ -149,6 +155,7 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     club_id: Optional[str] = None
+    society_id: Optional[str] = None
     event_id: Optional[str] = None
     department: Optional[str] = None
     departments: Optional[List[str]] = None

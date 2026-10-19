@@ -13,6 +13,8 @@ export const principalKeys = {
   eventsOverview: (filters) => ['principal', 'events-overview', filters],
   leastPerformingClubs: (limit) => ['principal', 'least-performing-clubs', limit],
   activeMembers: (filters) => ['principal', 'active-members', filters],
+  societies: () => ['principal', 'societies'],
+  societyEvents: (societyId) => ['principal', 'society-events', societyId],
 }
 
 export function usePrincipalStats() {
@@ -140,4 +142,26 @@ export function usePrincipalActiveMembers(filters = {}) {
     },
   })
 }
+
+export function usePrincipalSocieties() {
+  return useQuery({
+    queryKey: principalKeys.societies(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/principal/professional-societies')
+      return data
+    },
+  })
+}
+
+export function usePrincipalSocietyEvents(societyId) {
+  return useQuery({
+    queryKey: principalKeys.societyEvents(societyId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/principal/professional-societies/${societyId}/events`)
+      return data
+    },
+    enabled: !!societyId,
+  })
+}
+
 

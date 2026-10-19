@@ -23,6 +23,7 @@ const useAuthStore = create(
       user: null,
       role: null,
       club_id: null,
+      society_id: null,
       event_id: null,
       department: null,
       requires_profile_setup: false,
@@ -31,7 +32,7 @@ const useAuthStore = create(
 
       /**
        * Populate the store after a successful /auth/login response.
-       * @param {{ user: string, role: string, club_id?: string,
+       * @param {{ user: string, role: string, club_id?: string, society_id?: string,
        *            event_id?: string, department?: string, requires_password_change?: boolean }} payload
        */
       setAuth: (payload) =>
@@ -39,6 +40,7 @@ const useAuthStore = create(
           user: payload.name ?? payload.user,
           role: payload.role,
           club_id: payload.club_id ?? null,
+          society_id: payload.society_id ?? null,
           event_id: payload.event_id ?? null,
           department: payload.department ?? null,
           requires_profile_setup: payload.requires_profile_setup ?? false,
@@ -52,6 +54,7 @@ const useAuthStore = create(
           user: null,
           role: null,
           club_id: null,
+          society_id: null,
           event_id: null,
           department: null,
           requires_profile_setup: false,

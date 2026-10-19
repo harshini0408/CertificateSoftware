@@ -37,12 +37,15 @@ def create_access_token(
     user_id: str,
     role: str,
     club_id: Optional[str] = None,
+    society_id: Optional[str] = None,
     event_id: Optional[str] = None,
     department: Optional[str] = None,
 ) -> str:
     data: Dict[str, Any] = {"sub": user_id, "role": role, "type": "access"}
     if club_id:
         data["club_id"] = club_id
+    if society_id:
+        data["society_id"] = society_id
     if event_id:
         data["event_id"] = event_id
     if department:

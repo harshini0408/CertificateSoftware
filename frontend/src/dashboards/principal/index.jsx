@@ -37,6 +37,8 @@ import {
   usePrincipalStudentCertificates,
   usePrincipalLeastPerformingClubs,
   usePrincipalActiveMembers,
+  usePrincipalSocieties,
+  usePrincipalSocietyEvents,
 } from './api'
 
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -1146,6 +1148,212 @@ function ClubDetailModal({ clubId, onClose }) {
                   <div className="mt-3 p-3 bg-gray-50 rounded border text-xs text-gray-700">
                     <p className="font-semibold mb-1">Description:</p>
                     {selectedEventReport.description}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2b. Professional Societies Tab
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ProfessionalSocietiesTab({ onSelectSociety }) {
+  const { data: societies, isLoading } = usePrincipalSocieties()
+
+  const columns = [
+    {
+      key: 'name',
+      header: 'Professional Society / Circle',
+      sortable: true,
+      searchKey: true,
+      render: (v, row) => (
+        <button
+          type="button"
+          className="text-left font-semibold text-navy hover:underline"
+          onClick={() => onSelectSociety(row.id || row.society_id)}
+        >
+          {v || row.society_name || '—'}
+        </button>
+      ),
+    },
+    {
+      key: 'slug',
+      header: 'Slug',
+      render: (v) => <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-mono font-bold">{v}</span>,
+    },
+    {
+      key: 'events_this_semester',
+      header: 'Events This Semester',
+      align: 'right',
+      sortable: true,
+      render: (v) => <span className="font-semibold text-indigo-700">{v ?? 0}</span>,
+    },
+    {
+      key: 'cumulative_participants',
+      header: 'Cumulative Participants',
+      align: 'right',
+      sortable: true,
+      render: (v) => <span className="font-bold text-green-700">{(v ?? 0).toLocaleString()}</span>,
+    },
+    {
+      key: 'total_completed_events',
+      header: 'Total Conducted',
+      align: 'right',
+      sortable: true,
+      render: (v, row) => <span className="font-semibold text-gray-700">{v ?? row.total_conducted_events ?? 0}</span>,
+    },
+    {
+      key: '_actions',
+      header: 'Action',
+      align: 'center',
+      render: (_, row) => (
+        <button
+          type="button"
+          className="rounded bg-navy/10 px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy/20"
+          onClick={() => onSelectSociety(row.id || row.society_id)}
+        >
+          View Details
+        </button>
+      ),
+    },
+  ]
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Professional Societies</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          List of all institutional professional societies, active circulars, and event engagement.
+        </p>
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={societies || []}
+        isLoading={isLoading}
+        emptyMessage="No professional societies found."
+        rowKey={(row) => row.id || row.society_id}
+        searchable
+        searchPlaceholder="Search professional societies..."
+        onRowClick={(row) => onSelectSociety(row.id || row.society_id)}
+      />
+    </div>
+  )
+}
+
+function SocietyDetailModal({ societyId, onClose }) {
+  const { data, isLoading } = usePrincipalSocietyEvents(societyId)
+  const events = data?.events || []
+  const [selectedEvent, setSelectedEvent] = useState(null)
+
+  const columns = [
+    { key: 'name', header: 'Event Name', sortable: true, searchKey: true, render: (v) => <span className="font-semibold">{v || '—'}</span> },
+    { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
+    { key: 'event_time', header: 'Time', render: (v) => v || '—' },
+    { key: 'venue', header: 'Venue', render: (v) => v || '—' },
+    {
+      key: 'participant_count',
+      header: 'Participants Registered',
+      align: 'right',
+      sortable: true,
+      render: (v) => <span className="font-bold text-green-700">{(v ?? 0).toLocaleString()}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (v) => (
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+          v === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
+        }`}>
+          {v}
+        </span>
+      ),
+    },
+    {
+      key: '_actions',
+      header: 'Details',
+      align: 'center',
+      render: (_, row) => (
+        <button
+          type="button"
+          className="rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-200"
+          onClick={(e) => {
+            e.stopPropagation()
+            setSelectedEvent(row)
+          }}
+        >
+          View Event
+        </button>
+      ),
+    },
+  ]
+
+  if (!societyId) return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-xl bg-white shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0 bg-gray-50/50">
+          <div>
+            <h2 className="text-lg font-bold text-navy">{data?.society_name || 'Society Events'}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {events.length} event{events.length !== 1 ? 's' : ''} conducted
+            </p>
+          </div>
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {isLoading ? (
+            <LoadingSpinner label="Loading society events..." />
+          ) : (
+            <DataTable
+              columns={columns}
+              data={events}
+              isLoading={false}
+              emptyMessage="No events found for this professional society."
+              rowKey="id"
+              searchable
+              searchPlaceholder="Search events..."
+              onRowClick={(row) => setSelectedEvent(row)}
+            />
+          )}
+        </div>
+
+        {selectedEvent && (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4"
+            onClick={() => setSelectedEvent(null)}
+          >
+            <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl space-y-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between border-b pb-3">
+                <div>
+                  <h3 className="font-bold text-foreground">{selectedEvent.name}</h3>
+                  <p className="text-xs text-gray-500">{fmtDate(selectedEvent.event_date)} · {selectedEvent.venue}</p>
+                </div>
+                <button className="btn-secondary text-xs" onClick={() => setSelectedEvent(null)}>Close</button>
+              </div>
+              <div className="space-y-2 text-sm">
+                <p><span className="font-semibold text-gray-600">Time:</span> {selectedEvent.event_time || '—'}</p>
+                <p><span className="font-semibold text-gray-600">Category:</span> {selectedEvent.category || '—'}</p>
+                <p><span className="font-semibold text-gray-600">Participants Registered:</span> {selectedEvent.participant_count ?? 0}</p>
+                <p><span className="font-semibold text-gray-600">Status:</span> {selectedEvent.status || '—'}</p>
+                {selectedEvent.description && (
+                  <div className="mt-3 p-3 bg-gray-50 rounded border text-xs text-gray-700">
+                    <p className="font-semibold mb-1">Description:</p>
+                    {selectedEvent.description}
                   </div>
                 )}
               </div>
@@ -2557,6 +2765,7 @@ export default function PrincipalDashboard() {
 
   // Selected entities for modals
   const [selectedClubId, setSelectedClubId] = useState(null)
+  const [selectedSocietyId, setSelectedSocietyId] = useState(null)
   const [selectedDepartmentName, setSelectedDepartmentName] = useState(null)
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [selectedStudentName, setSelectedStudentName] = useState(null)
@@ -2565,6 +2774,9 @@ export default function PrincipalDashboard() {
     switch (tabParam) {
       case 'clubs':
         return <ClubsTab onSelectClub={(id) => setSelectedClubId(id)} />
+      case 'professional-societies':
+      case 'professional_societies':
+        return <ProfessionalSocietiesTab onSelectSociety={(id) => setSelectedSocietyId(id)} />
       case 'departments':
         return <DepartmentsTab onSelectDept={(name) => setSelectedDepartmentName(name)} />
       case 'recent-events':
@@ -2616,6 +2828,14 @@ export default function PrincipalDashboard() {
         <ClubDetailModal
           clubId={selectedClubId}
           onClose={() => setSelectedClubId(null)}
+        />
+      )}
+
+      {/* Professional Society Drilldown Modal */}
+      {selectedSocietyId && (
+        <SocietyDetailModal
+          societyId={selectedSocietyId}
+          onClose={() => setSelectedSocietyId(null)}
         />
       )}
 

@@ -106,16 +106,18 @@ function NavItem({ to, icon, label, end = false, sidebarOpen, onNavigate }) {
 
 // ── Role-specific nav configs ─────────────────────────────────────────────────
 function useNavItems() {
-  const { role, club_id } = useAuthStore()
+  const { role, club_id, society_id } = useAuthStore()
   const params = useParams()
   const location = useLocation()
   const effectiveClubId = club_id ?? params.club_id
+  const effectiveSocietyId = society_id ?? params.society_id
 
   switch (role) {
     case 'super_admin':
       return [
         { to: '/admin',                          icon: icons.dashboard,   label: 'Overview',      end: true },
         { to: '/admin?tab=clubs',                icon: icons.clubs,       label: 'Clubs' },
+        { to: '/admin?tab=professional-circles', icon: icons.clubs,       label: 'Professional Circle' },
         { to: '/admin?tab=departments',          icon: icons.departments, label: 'Departments' },
         { to: '/admin?tab=users',                icon: icons.users,       label: 'Users' },
         { to: '/admin?tab=certificate-mapping',  icon: icons.template,    label: 'Certificate Mapping' },
@@ -129,6 +131,7 @@ function useNavItems() {
         { to: '/principal', icon: icons.dashboard, label: 'Dashboard', end: true },
         { to: '/principal?tab=recent-events', icon: icons.calendar, label: 'Recent Events' },
         { to: '/principal?tab=clubs', icon: icons.clubs, label: 'Clubs' },
+        { to: '/principal?tab=professional-societies', icon: icons.clubs, label: 'Professional Societies' },
         { to: '/principal?tab=departments', icon: icons.departments, label: 'Departments' },
         { to: '/principal?tab=active-members', icon: icons.users, label: 'Active Members' },
         { to: '/principal?tab=student-search', icon: icons.student, label: 'Student Search' },
@@ -147,6 +150,13 @@ function useNavItems() {
         { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard, label: 'Dashboard', end: true },
         { to: `/club/${effectiveClubId}?tab=active_members`,   icon: icons.users,     label: 'Active Members' },
         { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
+      ]
+
+    case 'professional_society_coordinator':
+      return [
+        { to: `/society/${effectiveSocietyId}`,                    icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: `/society/${effectiveSocietyId}?tab=active_members`, icon: icons.users,     label: 'Active Members' },
+        { to: `/society/${effectiveSocietyId}?tab=settings`,       icon: icons.settings,  label: 'Settings' },
       ]
 
     case 'guest':

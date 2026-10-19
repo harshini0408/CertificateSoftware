@@ -20,6 +20,7 @@ class LoginResponse(BaseModel):
     name: str
     redirect_to: str
     club_id: Optional[str] = None
+    society_id: Optional[str] = None
     event_id: Optional[str] = None
     department: Optional[str] = None
     requires_profile_setup: bool = False
@@ -33,6 +34,7 @@ class MeResponse(BaseModel):
     name: str
     redirect_to: str
     club_id: Optional[str] = None
+    society_id: Optional[str] = None
     event_id: Optional[str] = None
     department: Optional[str] = None
     requires_profile_setup: bool = False

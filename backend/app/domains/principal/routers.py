@@ -10,6 +10,8 @@ from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
 from ...models.certificate import Certificate, CertStatus
 from ...models.club import Club
+from ...models.professional_society import ProfessionalSociety
+from ...models.society_event import SocietyEvent
 from ...models.department import Department
 from ...models.event import Event, EventStatus
 from ...models.dept_event import DeptEvent
@@ -209,6 +211,82 @@ async def list_principal_club_events(club_id: PydanticObjectId, _user: User = _p
     return {
         "club_id": str(club.id),
         "club_name": club.name,
+        "events": results,
+    }
+
+
+@router.get("/professional-societies")
+async def list_principal_professional_societies(_user: User = _principal):
+    """List all professional societies with number of events this semester and cumulative participants."""
+    now = datetime.utcnow()
+    if now.month >= 7:
+        sem_start = datetime(now.year, 7, 1)
+        sem_end = datetime(now.year, 12, 31, 23, 59, 59)
+    else:
+        sem_start = datetime(now.year, 1, 1)
+        sem_end = datetime(now.year, 6, 30, 23, 59, 59)
+
+    societies = await ProfessionalSociety.find(ProfessionalSociety.is_active == True).to_list()
+    all_events = await SocietyEvent.find().to_list()
+
+    results = []
+    for soc in societies:
+        sid = soc.id
+        soc_events = [e for e in all_events if str(e.society_id) == str(sid)]
+        sem_events = [
+            e for e in soc_events
+            if e.event_date and sem_start <= e.event_date <= sem_end
+        ]
+        cum_participants = sum((e.participant_count or 0) for e in soc_events)
+
+        results.append({
+            "id": str(sid),
+            "society_id": str(sid),
+            "name": soc.name,
+            "society_name": soc.name,
+            "slug": soc.slug,
+            "events_this_semester": len(sem_events),
+            "cumulative_participants": cum_participants,
+            "total_conducted_events": len(soc_events),
+            "total_completed_events": len(soc_events),
+        })
+
+    results.sort(key=lambda x: (x["cumulative_participants"], x["events_this_semester"]), reverse=True)
+    return results
+
+
+@router.get("/professional-societies/{society_id}/events")
+async def list_principal_society_events(society_id: PydanticObjectId, _user: User = _principal):
+    """List events for a specific society with detailed info."""
+    society = await ProfessionalSociety.get(society_id)
+    if not society:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional Society not found")
+
+    events = await SocietyEvent.find({
+        "society_id": ObjectId(str(society_id)),
+    }).sort(-SocietyEvent.event_date).to_list()
+
+    results = []
+    for e in events:
+        results.append({
+            "id": str(e.id),
+            "name": e.name,
+            "event_date": e.event_date.isoformat() if e.event_date else None,
+            "event_time": e.event_time or "—",
+            "session": e.session or "—",
+            "venue": e.venue or "—",
+            "category": e.category or "—",
+            "participant_count": e.participant_count or 0,
+            "report_status": e.report_status or "not_submitted",
+            "report_url": e.report_url,
+            "report_filename": e.report_filename,
+            "description": e.description,
+            "poster_url": e.poster_url,
+        })
+
+    return {
+        "society_id": str(society.id),
+        "society_name": society.name,
         "events": results,
     }
 

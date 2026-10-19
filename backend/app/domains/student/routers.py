@@ -19,7 +19,10 @@ from ...models.credit_rule import CreditRule
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.event import Event, EventStatus
 from ...models.club import Club
+from ...models.professional_society import ProfessionalSociety
+from ...models.society_event import SocietyEvent, SocietyEventStatus
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
+from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
 from ...models.event_registration import EventRegistration
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
@@ -572,6 +575,31 @@ async def get_my_club_memberships(current_user: User = Depends(require_role(User
     ]
 
 
+# ── /students/me/societies ───────────────────────────────────────────────────
+
+@router.get("/students/me/societies")
+async def get_my_society_memberships(current_user: User = Depends(require_role(UserRole.STUDENT))):
+    """Return all professional society membership applications for the current student."""
+    memberships = await StudentSocietyMembership.find(
+        StudentSocietyMembership.student_id == current_user.id
+    ).sort("-applied_at").to_list()
+    return [
+        {
+            "id": str(m.id),
+            "society_id": str(m.society_id),
+            "society_name": m.society_name or "",
+            "status": m.status.value,
+            "applied_at": m.applied_at,
+            "updated_at": m.updated_at,
+            "review_note": m.review_note,
+            "office_bearer_role": m.office_bearer_role,
+        }
+        for m in memberships
+    ]
+
+
+
+
 @router.post("/students/me/clubs/apply")
 async def apply_for_club(
     body: dict,
@@ -1085,3 +1113,207 @@ async def cancel_event_registration(
         await event.set({"participant_count": max(0, event.participant_count - 1)})
 
     return {"message": "Registration cancelled successfully"}
+
+
+# ═══ PROFESSIONAL SOCIETY EVENTS & REGISTRATION ═══════════════════════════════
+
+@router.get("/student/upcoming-society-events")
+async def list_upcoming_society_events(
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    now = datetime.utcnow()
+    today_start = datetime(now.year, now.month, now.day)
+
+    # Auto-complete past active/closed society events
+    past_active = await SocietyEvent.find({
+        "status": {"$in": [SocietyEventStatus.ACTIVE.value, SocietyEventStatus.CLOSED.value]},
+        "event_date": {"$lt": today_start},
+    }).to_list()
+    for pe in past_active:
+        await pe.set({"status": SocietyEventStatus.COMPLETED.value})
+
+    events = await SocietyEvent.find({
+        "$or": [
+            {"status": {"$in": [SocietyEventStatus.ACTIVE.value, SocietyEventStatus.CLOSED.value]}},
+            {"is_published": True},
+        ],
+        "status": {"$ne": SocietyEventStatus.COMPLETED.value},
+        "event_date": {"$gte": today_start},
+        "is_published": True,
+    }).sort(+SocietyEvent.event_date).to_list()
+
+    societies = await ProfessionalSociety.find().to_list()
+    society_map = {str(s.id): s.name for s in societies}
+
+    # Fetch this student's registrations
+    registrations = await EventRegistration.find(
+        EventRegistration.student_email == current_user.email.lower(),
+    ).to_list()
+    student_reg_map = {}
+    for r in registrations:
+        eid = str(r.event_id)
+        reg_type = getattr(r, "registration_type", "participant")
+        reg_status = getattr(r, "status", "accepted" if reg_type == "participant" else "pending")
+        student_reg_map[eid] = {
+            "id": str(r.id),
+            "type": reg_type,
+            "status": reg_status,
+        }
+
+    all_regs = await EventRegistration.find().to_list()
+    reg_counts = {}
+    volunteer_counts = {}
+    for r in all_regs:
+        eid = str(r.event_id)
+        reg_type = getattr(r, "registration_type", "participant")
+        reg_status = getattr(r, "status", "accepted")
+        reg_counts[eid] = reg_counts.get(eid, 0) + 1
+        if reg_type == "volunteer" and reg_status != "rejected":
+            volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
+
+    results = []
+    for e in events:
+        eid = str(e.id)
+        session = e.session or _normalize_session(e.event_time)
+        my_reg = student_reg_map.get(eid)
+        results.append({
+            "id": eid,
+            "name": e.name,
+            "description": e.description,
+            "society_id": str(e.society_id),
+            "society_name": society_map.get(str(e.society_id), "Unknown"),
+            "event_date": e.event_date.isoformat() if e.event_date else None,
+            "event_time": e.event_time,
+            "session": session,
+            "venue": e.venue,
+            "category": e.category,
+            "poster_url": e.poster_url,
+            "is_registered": my_reg is not None,
+            "registration_id": my_reg["id"] if my_reg else None,
+            "registration_type": my_reg["type"] if my_reg else None,
+            "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
+            "registered_count": reg_counts.get(eid, 0),
+            "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
+            "volunteers_registered": volunteer_counts.get(eid, 0),
+            "registration_stopped": getattr(e, "registration_stopped", False) or False,
+        })
+    return results
+
+
+@router.post("/student/society-events/{event_id}/register")
+async def register_for_society_event(
+    event_id: PydanticObjectId,
+    type: str = "participant",
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Register for an upcoming society event."""
+    event = await SocietyEvent.get(event_id)
+    if not event or (event.status != SocietyEventStatus.ACTIVE and not event.is_published):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Society event not found or not open for registration")
+
+    if getattr(event, "registration_stopped", False):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Registration has been stopped for this event. Max participants reached."
+        )
+
+    max_p = getattr(event, "max_participants", None)
+    if max_p and max_p > 0:
+        reg_count = await EventRegistration.find(EventRegistration.event_id == event_id).count()
+        current_count = max(event.participant_count or 0, reg_count)
+        if current_count >= max_p:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"This event has reached its maximum capacity of {max_p} participants."
+            )
+
+    student_email = current_user.email.lower()
+
+    existing_reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == student_email,
+    )
+    if existing_reg:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event")
+
+    event_date_str = event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
+    session = event.session or _normalize_session(event.event_time)
+    session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
+
+    collision = await EventRegistration.find_one(
+        EventRegistration.student_email == student_email,
+        EventRegistration.event_date_str == event_date_str,
+        EventRegistration.session == session,
+    )
+    if collision:
+        conflicting_name = "another event"
+        c_event = await SocietyEvent.get(collision.event_id)
+        if c_event:
+            conflicting_name = c_event.name
+        else:
+            c_club_event = await Event.get(collision.event_id)
+            if c_club_event:
+                conflicting_name = c_club_event.name
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Registration conflict: You are already registered for '{conflicting_name}' on {event_date_str} in the {session_label} session.",
+        )
+
+    if type == "volunteer":
+        if (event.volunteers_required or 0) <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Volunteering is not currently open for this event")
+        volunteers_registered = await EventRegistration.find(
+            EventRegistration.event_id == event_id,
+            EventRegistration.registration_type == "volunteer",
+            {"$or": [{"status": "accepted"}, {"status": "pending"}]}
+        ).count()
+        if volunteers_registered >= (event.volunteers_required or 0):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Maximum volunteers already registered for this event")
+
+    reg = EventRegistration(
+        event_id=event.id,
+        student_id=current_user.id,
+        student_name=current_user.name,
+        student_email=student_email,
+        registration_number=current_user.registration_number,
+        department=current_user.department,
+        event_date_str=event_date_str,
+        session=session,
+        registration_type=type,
+        status="pending" if type == "volunteer" else "accepted",
+    )
+    await reg.insert()
+
+    await event.set({"participant_count": (event.participant_count or 0) + 1})
+
+    msg = f"Volunteer request submitted for '{event.name}'. Awaiting coordinator approval." if type == "volunteer" else f"Successfully registered for '{event.name}'"
+    return {
+        "message": msg,
+        "registration_id": str(reg.id),
+        "session": session,
+    }
+
+
+@router.post("/student/society-events/{event_id}/cancel-registration")
+@router.delete("/student/society-events/{event_id}/register")
+async def cancel_society_event_registration(
+    event_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Cancel registration for an upcoming society event."""
+    student_email = current_user.email.lower()
+    reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == student_email,
+    )
+    if not reg:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
+
+    await reg.delete()
+
+    event = await SocietyEvent.get(event_id)
+    if event and (event.participant_count or 0) > 0:
+        await event.set({"participant_count": max(0, event.participant_count - 1)})
+
+    return {"message": "Registration cancelled successfully"}
+

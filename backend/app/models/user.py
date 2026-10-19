@@ -17,6 +17,7 @@ class UserRole(str, Enum):
     STUDENT = "student"
     GUEST = "guest"
     FACULTY = "faculty"
+    PROFESSIONAL_SOCIETY_COORDINATOR = "professional_society_coordinator"
 
 
 class User(Document):
@@ -34,6 +35,7 @@ class User(Document):
 
     # ── Role-specific fields (null when not applicable) ──────────────
     club_id: Optional[PydanticObjectId] = None        # club_coordinator, guest
+    society_id: Optional[PydanticObjectId] = None     # professional_society_coordinator
     event_id: Optional[PydanticObjectId] = None       # guest only
     department: Optional[str] = None                   # dept_coordinator, student
     departments: Optional[List[str]] = None            # hod only (multi-department scope)

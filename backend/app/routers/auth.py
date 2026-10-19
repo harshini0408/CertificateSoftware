@@ -105,7 +105,7 @@ async def login(body: LoginRequest, response: Response):
             email=_masked_email(user.email) if user.email else None,
         )
 
-    if user.role == UserRole.CLUB_COORDINATOR and not user.first_login_completed:
+    if user.role in (UserRole.CLUB_COORDINATOR, UserRole.PROFESSIONAL_SOCIETY_COORDINATOR) and not user.first_login_completed:
         user.first_login_completed = True
         await user.save()
 
@@ -130,6 +130,7 @@ async def login(body: LoginRequest, response: Response):
         name=user.name,
         redirect_to=build_redirect(user),
         club_id=str(user.club_id) if user.club_id else None,
+        society_id=str(user.society_id) if getattr(user, "society_id", None) else None,
         event_id=str(user.event_id) if user.event_id else None,
         department=user.department,
         requires_profile_setup=requires_profile_setup,

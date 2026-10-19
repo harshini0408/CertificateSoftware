@@ -1033,6 +1033,21 @@ export default function TutorDashboard() {
                       )
                     },
                   },
+                  {
+                    key: 'society_memberships',
+                    header: 'Professional Society Membership',
+                    render: (v, row) => {
+                      const societies = Array.isArray(v) ? v : (Array.isArray(row?.society_memberships) ? row.society_memberships : [])
+                      if (!societies.length) return <span className="text-xs text-gray-400">—</span>
+                      return (
+                        <div className="flex flex-wrap gap-1">
+                          {societies.map((s) => (
+                            <span key={s} className="inline-flex rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700 ring-1 ring-teal-200">{s}</span>
+                          ))}
+                        </div>
+                      )
+                    },
+                  },
 
                   {
                     key: '_actions',

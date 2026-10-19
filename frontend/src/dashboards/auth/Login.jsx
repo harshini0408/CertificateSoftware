@@ -64,6 +64,7 @@ export default function Login() {
   const requiresPasswordChange = useAuthStore((s) => s.requires_password_change)
   const role = useAuthStore((s) => s.role)
   const club_id = useAuthStore((s) => s.club_id)
+  const society_id = useAuthStore((s) => s.society_id)
   const event_id = useAuthStore((s) => s.event_id)
   const userName = useAuthStore((s) => s.user)
 
@@ -91,6 +92,7 @@ export default function Login() {
       hod: '/hod',
       student_affairs: '/student-affairs',
       club_coordinator: `/club/${club_id}`,
+      professional_society_coordinator: `/society/${society_id}`,
       dept_coordinator: '/dept',
       tutor: '/tutor',
       student: '/student',

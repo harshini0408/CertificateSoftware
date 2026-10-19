@@ -418,3 +418,68 @@ export function useUpdateStudentRegNo() {
 
 // Legacy alias kept for any internal usage during refactor — can be removed after testing
 export { useSubmitAttendance as useMarkAttendance }
+
+export function useMySocietyMemberships() {
+  return useQuery({
+    queryKey: ['societies', 'me', 'memberships'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/students/me/societies')
+      return data
+    },
+  })
+}
+
+export function useUpcomingSocietyEvents() {
+  return useQuery({
+    queryKey: ['student', 'upcoming-society-events'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/student/upcoming-society-events')
+      return data
+    },
+    refetchInterval: 30_000,
+  })
+}
+
+export function useRegisterSocietyEvent() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ eventId, type = 'participant' }) => {
+      const { data } = await axiosInstance.post(
+        `/student/society-events/${eventId}/register`,
+        null,
+        { params: { type } },
+      )
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
+      addToast({ type: 'success', message: data?.message || 'Successfully registered for event!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to register for event.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useCancelSocietyEventRegistration() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (eventId) => {
+      const { data } = await axiosInstance.post(`/student/society-events/${eventId}/cancel-registration`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
+      addToast({ type: 'success', message: data?.message || 'Event registration cancelled.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to cancel registration.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}

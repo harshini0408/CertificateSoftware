@@ -43,6 +43,7 @@ def build_tokens(user: User) -> tuple[str, str]:
         user_id=str(user.id),
         role=user.role.value,
         club_id=str(user.club_id) if user.club_id else None,
+        society_id=str(user.society_id) if getattr(user, "society_id", None) else None,
         event_id=str(user.event_id) if user.event_id else None,
         department=user.department,
     )
@@ -60,6 +61,8 @@ def build_redirect(user: User) -> str:
         return "/hod"
     if user.role == UserRole.CLUB_COORDINATOR:
         return f"/club/{user.club_id}"
+    if user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR:
+        return f"/society/{user.society_id}"
     if user.role == UserRole.DEPT_COORDINATOR:
         return "/dept"
     if user.role == UserRole.STUDENT_AFFAIRS:
