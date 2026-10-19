@@ -63,6 +63,11 @@ async def create_participant(
         source=ParticipantSource.MANUAL, verified=True,
     )
     await p.insert()
+
+    event = await Event.get(event_id)
+    if event:
+        await event.set({"participant_count": (event.participant_count or 0) + 1})
+
     return _resp(p)
 
 

@@ -1,7 +1,7 @@
 from pathlib import Path
 import re
 from datetime import date, datetime
-from typing import Optional, List, Dict
+from typing import Optional, List
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -22,7 +22,7 @@ from ...models.club import Club
 from ...models.professional_society import ProfessionalSociety
 from ...models.society_event import SocietyEvent, SocietyEventStatus
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
-from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
+from ...models.student_society_membership import StudentSocietyMembership
 from ...models.event_registration import EventRegistration
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
@@ -959,6 +959,8 @@ async def list_upcoming_events(
             "is_team_event": getattr(e, "is_team_event", False) or False,
             "min_team_size": getattr(e, "min_team_size", 2) or 2,
             "max_team_size": getattr(e, "max_team_size", 4) or 4,
+            "max_participants": getattr(e, "max_participants", None),
+            "participant_count": max(e.participant_count or 0, reg_counts.get(eid, 0) - volunteer_counts.get(eid, 0)),
             "is_registered": my_reg is not None,
             "registration_id": my_reg["id"] if my_reg else None,
             "registration_type": my_reg["type"] if my_reg else None,
@@ -1046,6 +1048,23 @@ async def register_for_event(
             f"Registration conflict: You are already registered for '{conflict_name}' on {event_date_str}{slot_text}.",
         )
 
+    if getattr(event, "registration_stopped", False):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Registration has been stopped for this event.")
+
+    if type == "participant":
+        max_p = getattr(event, "max_participants", None)
+        if max_p is not None and max_p > 0:
+            reg_count = await EventRegistration.find(
+                EventRegistration.event_id == event_id,
+                EventRegistration.registration_type == "participant"
+            ).count()
+            current_count = max(event.participant_count or 0, reg_count)
+            if current_count >= max_p:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Registration limit reached: This event is capped at {max_p} participants."
+                )
+
     # Volunteer capacity check
     if type == "volunteer":
         if (event.volunteers_required or 0) <= 0:
@@ -1061,6 +1080,7 @@ async def register_for_event(
     # Create registration
     reg = EventRegistration(
         event_id=event.id,
+        event=event.name,
         student_id=current_user.id,
         student_name=current_user.name,
         student_email=student_email,
@@ -1344,6 +1364,7 @@ async def register_team_for_event(
         u_email = u.email.lower()
         reg = EventRegistration(
             event_id=event.id,
+            event=event.name,
             student_id=u.id,
             student_name=u.name,
             student_email=u_email,
@@ -1545,6 +1566,8 @@ async def list_upcoming_society_events(
             "is_team_event": getattr(e, "is_team_event", False) or False,
             "min_team_size": getattr(e, "min_team_size", 2) or 2,
             "max_team_size": getattr(e, "max_team_size", 4) or 4,
+            "max_participants": getattr(e, "max_participants", None),
+            "participant_count": max(getattr(e, "participant_count", 0) or 0, reg_counts.get(eid, 0) - volunteer_counts.get(eid, 0)),
             "is_registered": my_reg is not None,
             "registration_id": my_reg["id"] if my_reg else None,
             "registration_type": my_reg["type"] if my_reg else None,
@@ -1632,6 +1655,23 @@ async def register_for_society_event(
             f"Registration conflict: You are already registered for '{conflicting_name}' on {event_date_str}{slot_text}.",
         )
 
+    if getattr(event, "registration_stopped", False):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Registration has been stopped for this event.")
+
+    if type == "participant":
+        max_p = getattr(event, "max_participants", None)
+        if max_p is not None and max_p > 0:
+            reg_count = await EventRegistration.find(
+                EventRegistration.event_id == event_id,
+                EventRegistration.registration_type == "participant"
+            ).count()
+            current_count = max(getattr(event, "participant_count", 0) or 0, reg_count)
+            if current_count >= max_p:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Registration limit reached: This event is capped at {max_p} participants."
+                )
+
     if type == "volunteer":
         if (event.volunteers_required or 0) <= 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Volunteering is not currently open for this event")
@@ -1645,6 +1685,7 @@ async def register_for_society_event(
 
     reg = EventRegistration(
         event_id=event.id,
+        event=event.name,
         student_id=current_user.id,
         student_name=current_user.name,
         student_email=student_email,
@@ -1770,6 +1811,7 @@ async def register_team_for_society_event(
         u_email = u.email.lower()
         reg = EventRegistration(
             event_id=event.id,
+            event=event.name,
             student_id=u.id,
             student_name=u.name,
             student_email=u_email,

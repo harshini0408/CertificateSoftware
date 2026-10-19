@@ -1269,7 +1269,7 @@ export default function StudentDashboard() {
               </span>
               <div className="flex items-center gap-1.5 flex-wrap justify-end">
                 {ev.is_team_event && (
-                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-purple-50 text-purple-700 ring-1 ring-inset ring-purple-200">
+                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200">
                     👥 Team ({ev.min_team_size || 2}-{ev.max_team_size || 4})
                   </span>
                 )}
@@ -1301,15 +1301,6 @@ export default function StudentDashboard() {
                 <div className="flex items-center gap-1.5 truncate">
                   <span>📍</span>
                   <span className="truncate">{ev.venue}</span>
-                </div>
-              )}
-              {(ev.volunteers_required || 0) > 0 && (
-                <div className="flex items-center gap-1.5 text-[11px] text-teal-600 font-medium">
-                  <span>🤝</span>
-                  <span>
-                    Volunteers: {ev.volunteers_registered || 0} / {ev.volunteers_required} filled
-                    {(ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) && ' (Full)'}
-                  </span>
                 </div>
               )}
             </div>
@@ -1399,10 +1390,9 @@ export default function StudentDashboard() {
                 <button
                   type="button"
                   onClick={() => handleOpenTeamModal(ev, isSociety)}
-                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold text-xs shadow-sm transition-all"
+                  className="btn-primary w-full text-xs justify-center"
                 >
-                  <span>👥</span>
-                  <span>Register as Team ({ev.min_team_size || 2}-{ev.max_team_size || 4} Members)</span>
+                  👥 Register as Team ({ev.min_team_size || 2}-{ev.max_team_size || 4} Members)
                 </button>
               ) : (
                 <button
@@ -1423,7 +1413,7 @@ export default function StudentDashboard() {
                     className="btn-secondary w-full text-xs justify-center opacity-60 cursor-not-allowed text-gray-500 bg-gray-100 border-gray-300 font-medium"
                     title="Maximum volunteers already registered"
                   >
-                    Maximum volunteers already registered
+                    Maximum Volunteers Filled
                   </button>
                 ) : (
                   <button
@@ -2137,16 +2127,16 @@ export default function StudentDashboard() {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-purple-700 to-indigo-800 text-white">
+            <div className="flex items-center justify-between px-6 py-4 bg-navy text-white">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">👥</span>
                   <h3 className="text-base font-bold text-white">Team Registration</h3>
-                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-purple-100">
+                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-blue-100">
                     {teamModal.event.min_team_size || 2} - {teamModal.event.max_team_size || 4} Members
                   </span>
                 </div>
-                <p className="text-xs text-purple-100/90 truncate max-w-md">
+                <p className="text-xs text-blue-100/90 truncate max-w-md">
                   {teamModal.event.name} • {teamModal.event.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'}
                   {teamModal.event.slot ? ` • ${teamModal.event.slot}` : ''}
                 </p>
@@ -2154,7 +2144,7 @@ export default function StudentDashboard() {
               <button
                 type="button"
                 onClick={handleCloseTeamModal}
-                className="rounded-lg p-1.5 text-purple-200 hover:text-white hover:bg-white/10 transition-colors"
+                className="rounded-lg p-1.5 text-blue-200 hover:text-white hover:bg-white/10 transition-colors"
                 aria-label="Close"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2180,7 +2170,7 @@ export default function StudentDashboard() {
                     value={teamName}
                     onChange={(e) => setTeamName(e.target.value)}
                     placeholder="e.g. CyberKnights, Data Wizards..."
-                    className="form-input pl-9 w-full text-sm font-semibold rounded-lg border-gray-300 focus:border-purple-500 focus:ring-purple-500"
+                    className="form-input pl-9 w-full text-sm font-semibold rounded-lg border-gray-300 focus:border-navy focus:ring-navy"
                   />
                 </div>
                 <p className="text-[11px] text-gray-500 mt-1">
@@ -2189,18 +2179,18 @@ export default function StudentDashboard() {
               </div>
 
               {/* Leader Card (Readonly) */}
-              <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3.5 space-y-1.5">
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-navy flex items-center gap-1.5">
                     <span>👑</span> Team Leader (You)
                   </span>
-                  <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">
+                  <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-navy">
                     Confirmed
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs text-gray-700 pt-1">
                   <span className="font-semibold">{profile?.name || 'You'}</span>
-                  <span className="font-mono bg-white px-2 py-0.5 rounded border border-purple-200 text-purple-900 font-bold">
+                  <span className="font-mono bg-white px-2 py-0.5 rounded border border-blue-200 text-navy font-bold">
                     {profile?.roll_no || profile?.registration_number || profile?.username || '—'}
                   </span>
                 </div>
@@ -2218,7 +2208,7 @@ export default function StudentDashboard() {
                       Teammates ({teammates.length} of {Math.max(1, (teamModal.event.max_team_size || 4) - 1)} max)
                     </h4>
                     <p className="text-[11px] text-gray-500">
-                      Total team members: <strong className="text-purple-700">{1 + teammates.length}</strong> (Required: {teamModal.event.min_team_size || 2} to {teamModal.event.max_team_size || 4})
+                      Total team members: <strong className="text-navy">{1 + teammates.length}</strong> (Required: {teamModal.event.min_team_size || 2} to {teamModal.event.max_team_size || 4})
                     </p>
                   </div>
 
@@ -2226,7 +2216,7 @@ export default function StudentDashboard() {
                     <button
                       type="button"
                       onClick={handleAddTeammateRow}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded-lg border border-purple-200 transition-colors"
+                      className="inline-flex items-center gap-1 text-xs font-bold text-navy hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition-colors"
                     >
                       <span>+</span> Add Teammate
                     </button>
@@ -2273,7 +2263,7 @@ export default function StudentDashboard() {
                             type="button"
                             disabled={member.checking || !member.roll_no}
                             onClick={() => handleVerifyTeammate(idx)}
-                            className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 transition-colors h-8"
+                            className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-lg bg-navy hover:bg-navy/90 text-white disabled:opacity-50 transition-colors h-8"
                           >
                             {member.checking ? (
                               <>
@@ -2370,7 +2360,7 @@ export default function StudentDashboard() {
                     teammates.length < Math.max(1, (teamModal.event.min_team_size || 2) - 1) ||
                     teammates.some((t) => !t.verified)
                   }
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 px-5 py-2 text-xs font-bold text-white shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-primary text-xs px-5 py-2 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {registerTeamEvent.isPending ? (
                     <>

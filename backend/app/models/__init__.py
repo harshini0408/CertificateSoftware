@@ -20,6 +20,7 @@ from .dept_certificate_preview import DeptCertificatePreview
 from .dept_event import DeptEvent, DeptEventStatus
 from .dept_template import DeptTemplate
 from .guest_session import GuestSession
+from .faculty_session import FacultySession
 from .role_template_preset import RoleTemplatePreset
 from .user_otp import OTPRequest
 from .manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
@@ -55,6 +56,7 @@ ALL_MODELS = [
     DeptEvent,
     DeptTemplate,
     GuestSession,
+    FacultySession,
     RoleTemplatePreset,
     OTPRequest,
     ManualCreditSubmission,
@@ -88,6 +90,7 @@ __all__ = [
     "DeptCertificate", "DeptCertificatePreview", "DeptTemplate",
     "DeptEvent", "DeptEventStatus",
     "GuestSession",
+    "FacultySession",
     "RoleTemplatePreset",
     "OTPRequest",
     "ManualCreditSubmission", "ManualSubmissionStatus",

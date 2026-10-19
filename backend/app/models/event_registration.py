@@ -7,6 +7,7 @@ from pydantic import Field
 
 class EventRegistration(Document):
     event_id: Indexed(PydanticObjectId)  # type: ignore[valid-type]
+    event: Optional[str] = None  # Name of the event
     student_id: Indexed(PydanticObjectId)  # type: ignore[valid-type]
     student_name: str
     student_email: Indexed(str)  # type: ignore[valid-type]

@@ -329,7 +329,19 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
     },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
-    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    {
+      key: 'participant_count',
+      header: 'Participants',
+      align: 'right',
+      render: (v, row) => (
+        <span className="font-medium">
+          {(v ?? 0).toLocaleString()}
+          {row.max_participants ? (
+            <span className="text-gray-400 font-normal"> / {row.max_participants}</span>
+          ) : null}
+        </span>
+      ),
+    },
     { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
     { key: '_actions', header: 'Actions', align: 'center', searchKey: false, render: (_, row) => (
       <div className="flex justify-center gap-2">
@@ -535,16 +547,19 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   <input
                     id="dash-max-participants"
                     type="number"
-                    min="0"
+                    min="1"
                     className={`form-input ${errors.max_participants ? "form-input-error" : ""}`}
-                    placeholder="No limit"
+                    placeholder="e.g. 50 (leave empty for unlimited)"
                     onWheel={(e) => e.target.blur()}
                     {...register("max_participants", {
-                      setValueAs: v => (v === "" || isNaN(v)) ? null : parseInt(v, 10),
-                      min: { value: 0, message: "Cannot be negative" }
+                      setValueAs: v => (v === "" || v == null || isNaN(v)) ? null : parseInt(v, 10),
+                      min: { value: 1, message: "Must be at least 1" }
                     })}
                   />
                   {errors.max_participants && <p className="form-error">{errors.max_participants.message}</p>}
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    Registration automatically closes when this limit is reached.
+                  </p>
                 </div>
                 <div>
                   <label className="form-label" htmlFor="dash-volunteers-required">Volunteers Required</label>
