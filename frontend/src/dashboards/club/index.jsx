@@ -26,6 +26,7 @@ import {
   useClubActiveMembers,
   useBulkApproveMemberships,
   useRemoveClubMember,
+  useDeleteMembershipRequest,
 } from './api'
 import { useCreateEvent, useDeleteEvent, useEvents } from './eventsApi'
 import { useGenerateAttendanceQR } from './attendanceApi'
@@ -96,7 +97,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
         `/clubs/${clubId}/events/${row.id ?? row._id}/generate-qr`
       )
       const dataUrl = await QRCode.toDataURL(data.payload, {
-        width: 240,
+        width: 720,
         margin: 2,
         color: { dark: '#1E3A5F', light: '#FFFFFF' },
       })
@@ -562,29 +563,29 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       {/* ── Attendance QR Modal ─────────────────────────────────────────── */}
       {qrModal && createPortal(
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6"
           onClick={() => { clearInterval(qrTimerRef.current); setQrModal(null) }}
         >
-          <div className="absolute inset-0 bg-navy/50 backdrop-blur-sm" aria-hidden="true" />
+          <div className="absolute inset-0 bg-navy/60 backdrop-blur-sm" aria-hidden="true" />
           <div
-            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl lg:max-w-3xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col my-auto max-h-[95vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className={`px-6 py-4 flex items-center justify-between ${
+            <div className={`px-6 py-4 flex items-center justify-between shrink-0 ${
               qrModal.expired ? 'bg-gray-100' : 'bg-navy'
             }`}>
               <div>
                 <p className={`text-xs font-semibold uppercase tracking-wider ${
                   qrModal.expired ? 'text-gray-500' : 'text-white/70'
                 }`}>Attendance QR</p>
-                <h3 className={`text-base font-bold ${
+                <h3 className={`text-lg sm:text-xl font-bold ${
                   qrModal.expired ? 'text-gray-700' : 'text-white'
                 } line-clamp-1`}>{qrModal.eventName}</h3>
               </div>
               <button
                 onClick={() => { clearInterval(qrTimerRef.current); setQrModal(null) }}
-                className={`text-xl font-bold ${
+                className={`text-2xl font-bold leading-none p-1 ${
                   qrModal.expired ? 'text-gray-400 hover:text-gray-600' : 'text-white/70 hover:text-white'
                 }`}
               >
@@ -592,19 +593,19 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
               </button>
             </div>
 
-            {/* QR image area */}
-            <div className="flex flex-col items-center py-6 px-6 gap-4">
-              <div className={`relative rounded-xl overflow-hidden border-4 ${
+            {/* QR image area (scaled 3x to fit screen comfortably) */}
+            <div className="flex flex-col items-center py-5 px-4 sm:px-8 gap-4 overflow-y-auto">
+              <div className={`relative rounded-2xl overflow-hidden border-4 bg-white p-3 shadow-md ${
                 qrModal.expired ? 'border-gray-300 opacity-40 grayscale' : 'border-navy/20'
               }`}>
                 <img
                   src={qrModal.qrDataUrl}
                   alt="Attendance QR Code"
-                  className="w-56 h-56 object-contain"
+                  className="w-[min(82vw,620px)] h-[min(82vw,620px)] max-h-[58vh] object-contain select-none"
                 />
                 {qrModal.expired && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-white/80">
-                    <span className="text-2xl font-black text-gray-500 tracking-widest rotate-[-12deg] border-4 border-gray-400 rounded-lg px-3 py-1">
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/85 backdrop-blur-2xs">
+                    <span className="text-3xl sm:text-4xl font-black text-gray-500 tracking-widest rotate-[-12deg] border-4 border-gray-400 rounded-xl px-6 py-2 shadow-lg">
                       EXPIRED
                     </span>
                   </div>
@@ -613,12 +614,12 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
               {/* Countdown / status badge */}
               {qrModal.expired ? (
-                <div className="flex flex-col items-center gap-2 w-full">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-red-100 px-4 py-1.5 text-sm font-bold text-red-700">
-                    <span className="h-2 w-2 rounded-full bg-red-500" />
+                <div className="flex flex-col items-center gap-2 w-full max-w-[620px]">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-red-100 px-5 py-2 text-base font-bold text-red-700">
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
                     QR Expired
                   </span>
-                  <p className="text-xs text-gray-500 text-center">
+                  <p className="text-xs sm:text-sm text-gray-500 text-center">
                     {(qrModal.generationsCount ?? 1) >= 3
                       ? 'Maximum QR generation limit (3/3) reached for this event.'
                       : 'Generate a new QR for students to scan.'}
@@ -627,7 +628,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                     <button
                       type="button"
                       onClick={() => openQRModal({ id: qrModal.eventId, name: qrModal.eventName })}
-                      className="w-full btn-primary justify-center mt-1"
+                      className="w-full btn-primary justify-center mt-1 py-2.5 text-sm"
                     >
                       🔄 Generate New QR ({3 - (qrModal.generationsCount ?? 1)} remaining)
                     </button>
@@ -642,22 +643,22 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   )}
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-2 w-full">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-green-100 px-4 py-1.5 text-sm font-bold text-green-700">
-                    <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                <div className="flex flex-col items-center gap-2.5 w-full max-w-[620px]">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-green-100 px-5 py-2 text-base font-bold text-green-700">
+                    <span className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
                     Active — {qrModal.secondsLeft}s remaining
                   </span>
                   {/* Progress bar */}
-                  <div className="w-full bg-gray-100 rounded-full h-2">
+                  <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
                     <div
-                      className={`h-2 rounded-full transition-all duration-1000 ${
-                        qrModal.secondsLeft > 10 ? 'bg-green-500' :
+                      className={`h-full rounded-full transition-all duration-1000 ${
+                        qrModal.secondsLeft > 15 ? 'bg-green-500' :
                         qrModal.secondsLeft > 5  ? 'bg-amber-500' : 'bg-red-500'
                       }`}
-                      style={{ width: `${(qrModal.secondsLeft / qrModal.expiresIn) * 100}%` }}
+                      style={{ width: `${Math.max(0, (qrModal.secondsLeft / (qrModal.expiresIn || 60)) * 100)}%` }}
                     />
                   </div>
-                  <p className="text-xs text-gray-500 text-center">
+                  <p className="text-xs sm:text-sm text-gray-500 text-center">
                     Show this QR to students. It expires automatically in {qrModal.secondsLeft} second{qrModal.secondsLeft !== 1 ? 's' : ''}.
                   </p>
                 </div>
@@ -680,8 +681,10 @@ function MembersTab() {
   const { data: requests, isLoading } = useMembershipRequests()
   const updateStatus = useUpdateMembershipStatus()
   const bulkApprove = useBulkApproveMemberships()
+  const deleteMembership = useDeleteMembershipRequest()
   const [notes, setNotes] = useState({})
   const [selectedRequestIds, setSelectedRequestIds] = useState([])
+  const [requestToDelete, setRequestToDelete] = useState(null)
 
   const pending = (requests || []).filter((r) => r.status === 'pending')
   const reviewed = (requests || []).filter((r) => r.status !== 'pending')
@@ -718,14 +721,14 @@ function MembersTab() {
                 type="button"
                 className="btn-secondary text-xs"
                 onClick={toggleSelectAll}
-                disabled={updateStatus.isPending || bulkApprove.isPending}
+                disabled={updateStatus.isPending || bulkApprove.isPending || deleteMembership.isPending}
               >
                 {allPendingSelected ? 'Deselect all' : 'Select all'}
               </button>
               <button
                 type="button"
                 className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={selectedPendingIds.length === 0 || updateStatus.isPending || bulkApprove.isPending}
+                disabled={selectedPendingIds.length === 0 || updateStatus.isPending || bulkApprove.isPending || deleteMembership.isPending}
                 onClick={() => {
                   bulkApprove.mutate(
                     { membershipIds: selectedPendingIds },
@@ -750,7 +753,7 @@ function MembersTab() {
                     type="checkbox"
                     className="mt-1 h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy"
                     checked={selectedPendingIds.includes(req.id)}
-                    disabled={updateStatus.isPending || bulkApprove.isPending}
+                    disabled={updateStatus.isPending || bulkApprove.isPending || deleteMembership.isPending}
                     onChange={() => toggleRequestSelection(req.id)}
                     aria-label={`Select ${req.student_name || req.student_email || 'membership request'}`}
                   />
@@ -774,7 +777,7 @@ function MembersTab() {
                     <button
                       id={`approve-${req.id}`}
                       className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition-colors disabled:opacity-50"
-                      disabled={updateStatus.isPending || bulkApprove.isPending}
+                      disabled={updateStatus.isPending || bulkApprove.isPending || deleteMembership.isPending}
                       onClick={() => updateStatus.mutate(
                         { membershipId: req.id, status: 'approved', review_note: notes[req.id] || undefined },
                         { onSuccess: () => removeSelection(req.id) },
@@ -785,13 +788,22 @@ function MembersTab() {
                     <button
                       id={`reject-${req.id}`}
                       className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-                      disabled={updateStatus.isPending || bulkApprove.isPending}
+                      disabled={updateStatus.isPending || bulkApprove.isPending || deleteMembership.isPending}
                       onClick={() => updateStatus.mutate(
                         { membershipId: req.id, status: 'rejected', review_note: notes[req.id] || undefined },
                         { onSuccess: () => removeSelection(req.id) },
                       )}
                     >
                       Reject
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      disabled={updateStatus.isPending || bulkApprove.isPending || deleteMembership.isPending}
+                      onClick={() => setRequestToDelete(req)}
+                      title="Delete this request"
+                    >
+                      Delete
                     </button>
                   </div>
                 </div>
@@ -819,16 +831,53 @@ function MembersTab() {
                   <p className="text-xs text-gray-400">{req.student_email}</p>
                   {req.review_note && <p className="text-xs text-gray-500 mt-0.5">{req.review_note}</p>}
                 </div>
-                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                  req.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                }`}>
-                  {req.status}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    req.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                  }`}>
+                    {req.status}
+                  </span>
+                  <button
+                    type="button"
+                    className="rounded-md border border-red-200 bg-red-50/50 px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 hover:border-red-300 transition-colors flex items-center gap-1"
+                    onClick={() => setRequestToDelete(req)}
+                    disabled={deleteMembership.isPending}
+                    title={req.status === 'approved' ? 'Remove member from club' : 'Delete request'}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    <span>{req.status === 'approved' ? 'Remove Member' : 'Delete'}</span>
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal for removing/deleting member or request */}
+      <ConfirmModal
+        isOpen={!!requestToDelete}
+        onClose={() => setRequestToDelete(null)}
+        onConfirm={() => {
+          if (!requestToDelete?.id) return
+          deleteMembership.mutate(requestToDelete.id, {
+            onSuccess: () => {
+              removeSelection(requestToDelete.id)
+              setRequestToDelete(null)
+            },
+          })
+        }}
+        title={requestToDelete?.status === 'approved' ? 'Remove Club Member?' : 'Delete Membership Request?'}
+        message={
+          requestToDelete?.status === 'approved'
+            ? `Are you sure you want to remove ${requestToDelete?.student_name || 'this student'} (${requestToDelete?.student_email}) from ${requestToDelete?.club_name || 'the club'}? Their membership and any associated club role will be revoked.`
+            : `Are you sure you want to delete the membership request for ${requestToDelete?.student_name || 'this student'} (${requestToDelete?.student_email})?`
+        }
+        confirmLabel={requestToDelete?.status === 'approved' ? 'Remove Member' : 'Delete'}
+        isLoading={deleteMembership.isPending}
+      />
     </div>
   )
 }
@@ -1031,6 +1080,27 @@ function OfficeBearersTab() {
         </button>
       </div>
 
+      {/* Informational Guidance Callout */}
+      <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 sm:p-5 shadow-xs space-y-2.5">
+        <div className="flex items-center gap-2 text-blue-900 font-bold text-sm">
+          <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>Important Guidelines for Office Bearer Allocation</span>
+        </div>
+        <ul className="text-xs sm:text-sm text-blue-950/80 space-y-2 list-disc list-inside leading-relaxed pl-1">
+          <li>
+            <strong className="text-blue-900">Mandatory Club Membership:</strong> To be appointed as an Office Bearer, the student <span className="font-semibold underline decoration-blue-400">must first be an approved active member</span> of this club. If the student has not yet joined, they must submit a membership request and have it approved under the <em>Membership Requests</em> tab before they can be allocated to an office bearer role.
+          </li>
+          <li>
+            <strong className="text-blue-900">Handling Multiple Positions of the Same Role:</strong> Each position slot can hold only one student. If your club has multiple members serving in the same capacity (for example, 4 Event Coordinators or 2 Joint Secretaries), create uniquely identified positions like <span className="inline-flex font-mono font-semibold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-800">Event Coordinator 1</span>, <span className="inline-flex font-mono font-semibold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-800">Event Coordinator 2</span>, <span className="inline-flex font-mono font-semibold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-800">Event Coordinator 3</span>, etc., using the <strong className="text-blue-900">+ Add Position</strong> button, and assign each student to their respective designated position.
+          </li>
+          <li>
+            <strong className="text-blue-900">Single Office Bearer Rule:</strong> A student is permitted to hold an office bearer role in <strong className="text-blue-900">at most one club and one position</strong> across the entire institution.
+          </li>
+        </ul>
+      </div>
+
       {/* Grid of positions */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {positions.map((pos) => {
@@ -1120,9 +1190,12 @@ function OfficeBearersTab() {
             </div>
             <form onSubmit={handleAllocateSubmit} className="p-6 space-y-4">
               <div>
-                <label className="form-label" htmlFor="student-select">
+                <label className="form-label mb-0.5" htmlFor="student-select">
                   Select Approved Club Member *
                 </label>
+                <p className="text-[11px] text-gray-500 mb-1.5">
+                  Only approved club members are eligible to be allocated as office bearers.
+                </p>
                 {approvedMembers.length === 0 ? (
                   <p className="text-sm text-red-500 mt-1">
                     No approved club members available. Please approve student membership requests first.
@@ -1176,7 +1249,7 @@ function OfficeBearersTab() {
       {showAddPositionModal && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setShowAddPositionModal(false)}>
           <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm" aria-hidden="true" />
-          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-lg font-bold text-navy">Add New Position</h3>
               <button onClick={() => setShowAddPositionModal(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
@@ -1188,11 +1261,14 @@ function OfficeBearersTab() {
                   id="new-position-name"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Event Coordinator"
+                  placeholder="e.g. Event Coordinator 1"
                   value={newPositionName}
                   onChange={(e) => setNewPositionName(e.target.value)}
                   required
                 />
+                <p className="mt-2 text-xs text-gray-500 leading-relaxed bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                  💡 <strong>Tip:</strong> If multiple members hold the same role title (e.g. 4 Event Coordinators), assign distinct numbered positions like <em>Event Coordinator 1</em>, <em>Event Coordinator 2</em>, etc., and assign each student to their position.
+                </p>
               </div>
               <div className="pt-2 flex justify-end gap-3">
                 <button type="button" onClick={() => { setShowAddPositionModal(false); setNewPositionName('') }} className="btn-secondary">Cancel</button>

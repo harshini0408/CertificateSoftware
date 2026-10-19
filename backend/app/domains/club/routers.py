@@ -518,8 +518,29 @@ async def remove_club_member(
     if not membership:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club membership not found")
 
-    if membership.status != MembershipStatus.APPROVED:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only approved members can be removed")
+    student_name = membership.student_name or "Student"
+    club_name = membership.club_name or "the club"
+    await membership.delete()
+
+    return {"message": f"Successfully removed {student_name} from {club_name}"}
+
+
+@coordinator_router.delete("/memberships/{membership_id}")
+async def delete_club_membership(
+    membership_id: _ObjId,
+    current_user: User = Depends(require_role(UserRole.CLUB_COORDINATOR, UserRole.SUPER_ADMIN)),
+):
+    """Delete a club membership or membership request by membership_id."""
+    if not current_user.club_id and current_user.role == UserRole.CLUB_COORDINATOR:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No club assigned to coordinator")
+
+    membership = await StudentClubMembership.get(membership_id)
+    if not membership:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Membership request not found")
+
+    if current_user.role == UserRole.CLUB_COORDINATOR:
+        if not current_user.club_id or membership.club_id != current_user.club_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this membership")
 
     student_name = membership.student_name or "Student"
     club_name = membership.club_name or "the club"

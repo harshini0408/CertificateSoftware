@@ -449,3 +449,36 @@ export function useRemoveClubMember() {
     },
   })
 }
+
+// ── useDeleteMembershipRequest (coordinator) ─────────────────────────────────
+/**
+ * DELETE /coordinator/memberships/:membershipId
+ */
+export function useDeleteMembershipRequest() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (membershipId) =>
+      axiosInstance.delete(`/coordinator/memberships/${membershipId}`),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: clubKeys.membershipRequests() })
+      qc.invalidateQueries({ queryKey: ['coordinator', 'active-members'] })
+      qc.invalidateQueries({ queryKey: ['coordinator', 'office-bearers'] })
+      qc.invalidateQueries({ queryKey: ['clubs', 'me', 'memberships'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'student-club-memberships'] })
+      qc.invalidateQueries({ queryKey: ['tutor'] })
+      qc.invalidateQueries({ queryKey: ['hod'] })
+      qc.invalidateQueries({ queryKey: ['principal'] })
+      addToast({
+        type: 'success',
+        message: res.data?.message || 'Membership request removed.',
+      })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to remove membership request.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
