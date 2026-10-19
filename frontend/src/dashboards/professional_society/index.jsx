@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import Navbar from '../../components/Navbar'
@@ -51,6 +51,7 @@ function fmtDate(iso) {
 function DashboardTab({ societyId, dashboard, isLoading }) {
   const navigate = useNavigate()
   const { data: events, isLoading: eventsLoading } = useSocietyEvents(societyId)
+  const eventList = Array.isArray(events) ? events : []
   const createEvent = useCreateSocietyEvent(societyId)
   const updateEvent = useUpdateSocietyEvent(societyId)
   const deleteEvent = useDeleteSocietyEvent(societyId)
@@ -162,7 +163,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label="Total Events Conducted"
-          value={dashboard?.total_events ?? (events || []).length}
+          value={dashboard?.total_events ?? eventList.length}
           icon={<span className="text-xl">🌐</span>}
           accent="navy"
           loading={isLoading}
@@ -176,7 +177,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
         />
         <StatCard
           label="Published Events"
-          value={dashboard?.published_events_count ?? (events || []).filter((e) => e.is_published).length}
+          value={dashboard?.published_events_count ?? eventList.filter((e) => e.is_published).length}
           icon={<span className="text-xl">📅</span>}
           accent="purple"
           loading={isLoading}
@@ -221,7 +222,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       {/* Events List */}
       {eventsLoading ? (
         <LoadingSpinner fullPage={false} label="Loading events…" />
-      ) : !events || events.length === 0 ? (
+      ) : eventList.length === 0 ? (
         <div className="card p-12 text-center space-y-3">
           <div className="text-4xl">🗓️</div>
           <p className="text-base font-semibold text-gray-700">No events created yet</p>
@@ -238,7 +239,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {events.map((ev) => {
+          {eventList.map((ev) => {
             const sessionLabel = ev.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'
             return (
               <div
@@ -582,6 +583,7 @@ function ActiveMembersTab() {
   const { data: members, isLoading } = useSocietyActiveMembers()
   const deleteMembership = useDeleteSocietyMembership()
   const [memberToRemove, setMemberToRemove] = useState(null)
+  const memberList = Array.isArray(members) ? members : []
 
   const columns = [
     {
@@ -651,13 +653,13 @@ function ActiveMembersTab() {
           </p>
         </div>
         <span className="inline-flex items-center rounded-full bg-teal-50 px-3 py-1 text-xs font-bold text-teal-800 ring-1 ring-inset ring-teal-600/20">
-          {(members || []).length} Total Members
+          {memberList.length} Total Members
         </span>
       </div>
 
       <DataTable
         columns={columns}
-        data={members || []}
+        data={memberList}
         isLoading={isLoading}
         emptyMessage="No active approved members in this society yet."
         rowKey="id"
@@ -696,7 +698,7 @@ function MembershipRequestsTab() {
   const [requestToDelete, setRequestToDelete] = useState(null)
   const [statusFilter, setStatusFilter] = useState('pending')
 
-  const allRequests = requests || []
+  const allRequests = Array.isArray(requests) ? requests : []
   const filtered = allRequests.filter((r) => {
     if (statusFilter === 'all') return true
     return (r.status || '').toLowerCase() === statusFilter.toLowerCase()
@@ -922,8 +924,8 @@ function OfficeBearersTab() {
   const [selectedStudentId, setSelectedStudentId] = useState('')
   const [removePosConfirm, setRemovePosConfirm] = useState(null)
 
-  const positions = obData?.positions || []
-  const bearers = obData?.office_bearers || []
+  const positions = Array.isArray(obData?.positions) ? obData.positions : []
+  const bearers = Array.isArray(obData?.office_bearers) ? obData.office_bearers : []
 
   // Map position -> bearer
   const bearerMap = {}
@@ -1066,7 +1068,7 @@ function OfficeBearersTab() {
                   required
                 >
                   <option value="">-- Choose a student member --</option>
-                  {(activeMembers || []).map((m) => (
+                  {(Array.isArray(activeMembers) ? activeMembers : []).map((m) => (
                     <option key={m.student_id} value={m.student_id}>
                       {m.student_name} ({m.student_email})
                     </option>
@@ -1330,14 +1332,65 @@ function useUpdateAssetsWrapper(societyId) {
 export default function ProfessionalSocietyDashboard() {
   const { society_id: routeSocietyId } = useParams()
   const userSocietyId = useAuthStore((s) => s.society_id)
-  const societyId = routeSocietyId || userSocietyId
+  const role = useAuthStore((s) => s.role)
+  const navigate = useNavigate()
+
+  // For coordinator, lock to their assigned society_id; for superadmin, allow viewing route society
+  const societyId = (role === 'professional_society_coordinator' && userSocietyId)
+    ? userSocietyId
+    : (routeSocietyId || userSocietyId)
+
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'events'
 
-  const { data: dashboard, isLoading } = useSocietyDashboard(societyId)
+  const { data: dashboard, isLoading, isError: dashboardError } = useSocietyDashboard(societyId)
+
+  // Auto-correct route URL if coordinator is on a different/stale URL
+  useEffect(() => {
+    if (role === 'professional_society_coordinator' && userSocietyId && routeSocietyId && routeSocietyId !== userSocietyId) {
+      navigate(`/society/${userSocietyId}`, { replace: true })
+    }
+  }, [role, userSocietyId, routeSocietyId, navigate])
 
   const handleTabChange = (tab) => {
     setSearchParams(tab === 'events' ? {} : { tab })
+  }
+
+  if (dashboardError && !isLoading) {
+    return (
+      <div className="flex h-dvh flex-col overflow-hidden">
+        <Navbar />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto bg-background p-6">
+            <div className="max-w-md mx-auto mt-16 card p-8 text-center space-y-4 border border-amber-200 bg-amber-50/50 shadow-sm">
+              <div className="text-4xl">⚠️</div>
+              <h1 className="text-lg font-bold text-gray-900">Professional Society Not Found</h1>
+              <p className="text-xs text-gray-600">
+                The requested professional society does not exist or you do not have permission to view it.
+              </p>
+              {userSocietyId && userSocietyId !== routeSocietyId ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/society/${userSocietyId}`, { replace: true })}
+                  className="btn-primary text-xs mx-auto"
+                >
+                  Go to My Assigned Society
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate('/login')}
+                  className="btn-secondary text-xs mx-auto"
+                >
+                  Return to Login
+                </button>
+              )}
+            </div>
+          </main>
+        </div>
+      </div>
+    )
   }
 
   return (

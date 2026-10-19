@@ -132,7 +132,7 @@ async def require_society_access(
         return current_user
 
     if current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR:
-        if current_user.society_id != society_id:
+        if str(current_user.society_id) != str(society_id):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this professional society")
         return current_user
 
@@ -149,11 +149,11 @@ async def require_society_event_access(
         return current_user
 
     if current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR:
-        if current_user.society_id != society_id:
+        if str(current_user.society_id) != str(society_id):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this society")
         from ..models.society_event import SocietyEvent
         event = await SocietyEvent.get(event_id)
-        if not event or event.society_id != society_id:
+        if not event or str(event.society_id) != str(society_id):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found in this society")
         return current_user
 
