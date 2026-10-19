@@ -29,6 +29,7 @@ class SocietyEvent(Document):
     event_date: Optional[datetime] = None
     event_time: Optional[str] = None
     session: Optional[str] = None  # "FN" or "AN"
+    slot: Optional[str] = None
     venue: Optional[str] = None
     category: Optional[str] = None
     academic_year: Optional[str] = None

@@ -29,6 +29,8 @@ class Event(Document):
     event_time: Optional[str] = None
     venue: Optional[str] = None
     category: Optional[str] = None
+    session: Optional[str] = None  # "FN" or "AN"
+    slot: Optional[str] = None  # "8:45 AM - 10:15 AM", "10:30 AM - 12:00 PM", "1:10 PM - 2:50 PM", "3:05 PM - 4:45 PM"
     academic_year: Optional[str] = None
     academic_years: List[str] = Field(default_factory=list)
     status: EventStatus = EventStatus.DRAFT

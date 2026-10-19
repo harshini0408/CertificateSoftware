@@ -39,6 +39,34 @@ import { BACKEND_URL } from '../../utils/axiosInstance'
 // ── Tab ids ───────────────────────────────────────────────────────────────────
 const TABS = ['events', 'active_members', 'members', 'office_bearers', 'settings']
 
+export const SESSION_SLOTS = {
+  'Morning (FN)': ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
+  'Afternoon (AN)': ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM'],
+}
+
+export const EVENT_CATEGORIES = [
+  'Workshop',
+  'Technical Talk',
+  'Technical Event',
+  'Non-Technical Event',
+  'Hackathon',
+  'Other',
+]
+
+export const VENUE_OPTIONS = [
+  'E2 Seminar Hall',
+  'E3 EEE Seminar Hall',
+  'E4 ECE Seminar Hall',
+  'E5 CIVIL Seminar Hall',
+  'E6 MECH Seminar Hall',
+  'E8 Seminar Hall',
+  'iTech Square',
+  'Convention Center',
+  'Kalai Arangam',
+  'Outdoor Sports Complex',
+  'Other',
+]
+
 const TAB_LABELS = {
   events: 'Club Dashboard',
   active_members: 'Active Members',
@@ -150,13 +178,27 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
   const [acadYearError, setAcadYearError] = useState('')
   const [selectedPosterFile, setSelectedPosterFile] = useState(null)
   const [posterError, setPosterError] = useState('')
+  const [selectedVenueOption, setSelectedVenueOption] = useState('')
+  const [customVenue, setCustomVenue] = useState('')
 
-  const { register, handleSubmit, reset, formState: { isSubmitting, errors } } = useForm({
+  const { register, handleSubmit, reset, watch, setValue, formState: { isSubmitting, errors } } = useForm({
     defaultValues: {
       session_type: 'Morning (FN)',
+      slot: '8:45 AM - 10:15 AM',
       timing: '',
+      venue: '',
     },
   })
+
+  const selectedSessionType = watch('session_type') || 'Morning (FN)'
+  const availableSlots = SESSION_SLOTS[selectedSessionType] || SESSION_SLOTS['Morning (FN)']
+
+  useEffect(() => {
+    const currentSlot = watch('slot')
+    if (!availableSlots.includes(currentSlot)) {
+      setValue('slot', availableSlots[0] || '')
+    }
+  }, [selectedSessionType, setValue, watch, availableSlots])
 
   const handleAcadYearToggle = (year) => {
     setSelectedAcademicYears((prev) => {
@@ -193,9 +235,14 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       return
     }
 
+    const sessionCode = data.session_type?.includes('AN') ? 'AN' : 'FN'
+    const eventTimeStr = data.slot ? `${data.session_type} | ${data.slot}` : data.session_type
+
     const payload = {
       ...data,
-      event_time: data.timing ? `${data.session_type} | ${data.timing}` : data.session_type,
+      session: sessionCode,
+      slot: data.slot,
+      event_time: data.timing ? `${eventTimeStr} (${data.timing})` : eventTimeStr,
       academic_years: selectedAcademicYears,
       academic_year: selectedAcademicYears.join(', '),
     }
@@ -217,6 +264,8 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
         }
         setIsModalOpen(false)
         reset()
+        setSelectedVenueOption('')
+        setCustomVenue('')
         setSelectedAcademicYears([])
         setSelectedPosterFile(null)
         setAcadYearError('')
@@ -402,25 +451,60 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="form-label" htmlFor="dash-timing">Event Timings</label>
-                  <input
-                    id="dash-timing"
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. 09:00 AM - 12:00 PM"
-                    {...register('timing')}
-                  />
+                  <label className="form-label" htmlFor="dash-event-slot">Event Slot *</label>
+                  <select
+                    id="dash-event-slot"
+                    className={`form-input ${errors.slot ? 'form-input-error' : ''}`}
+                    {...register('slot', { required: 'Event slot is required' })}
+                  >
+                    {availableSlots.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.slot && <p className="form-error">{errors.slot.message}</p>}
                 </div>
                 <div>
-                  <label className="form-label" htmlFor="dash-venue">Venue *</label>
-                  <input
-                    id="dash-venue"
-                    type="text"
+                  <label className="form-label" htmlFor="dash-venue-select">Venue *</label>
+                  <select
+                    id="dash-venue-select"
                     className={`form-input ${errors.venue ? 'form-input-error' : ''}`}
-                    placeholder="e.g. Auditorium / Lab 3"
-                    {...register('venue', { required: 'Venue is required' })}
-                  />
-                  {errors.venue && <p className="form-error">{errors.venue.message}</p>}
+                    value={selectedVenueOption}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setSelectedVenueOption(val)
+                      if (val !== 'Other') {
+                        setValue('venue', val, { shouldValidate: true })
+                      } else {
+                        setValue('venue', customVenue.trim(), { shouldValidate: true })
+                      }
+                    }}
+                  >
+                    <option value="">Select venue</option>
+                    {VENUE_OPTIONS.map((v) => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                  {selectedVenueOption === 'Other' && (
+                    <div className="mt-2">
+                      <input
+                        id="dash-venue-custom"
+                        type="text"
+                        className={`form-input ${errors.venue ? 'form-input-error' : ''}`}
+                        placeholder="Type custom venue…"
+                        value={customVenue}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          setCustomVenue(val)
+                          setValue('venue', val.trim(), { shouldValidate: true })
+                        }}
+                        autoFocus
+                      />
+                    </div>
+                  )}
+                  <input type="hidden" {...register('venue', { required: 'Venue is required' })} />
+                  {errors.venue && <p className="form-error">{errors.venue.message || 'Venue is required'}</p>}
                 </div>
               </div>
 
@@ -429,13 +513,11 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   <label className="form-label" htmlFor="dash-category">Category</label>
                   <select id="dash-category" className="form-input" {...register('category')}>
                     <option value="">Select category</option>
-                    <option value="Workshop">Workshop</option>
-                    <option value="Technical Talk">Technical Talk</option>
-                    <option value="Hackathon">Hackathon</option>
-                    <option value="Cultural">Cultural</option>
-                    <option value="Seminar">Seminar</option>
-                    <option value="Competition">Competition</option>
-                    <option value="Other">Other</option>
+                    {EVENT_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>

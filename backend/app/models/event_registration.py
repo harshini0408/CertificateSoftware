@@ -14,6 +14,7 @@ class EventRegistration(Document):
     department: Optional[str] = None
     event_date_str: str  # YYYY-MM-DD for same-day conflict validation
     session: str  # "FN" or "AN"
+    slot: Optional[str] = None  # Specific slot e.g. "8:45 AM - 10:15 AM"
     registration_type: str = "participant"
     status: str = "accepted"  # "accepted", "pending", "rejected"
     registered_at: datetime = Field(default_factory=datetime.utcnow)

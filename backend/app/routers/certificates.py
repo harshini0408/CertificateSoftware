@@ -2,7 +2,7 @@ from datetime import datetime
 import asyncio
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -32,6 +32,23 @@ settings = get_settings()
 
 def _normalize_role_key(value: str) -> str:
     return "_".join(str(value or "").strip().lower().replace("-", " ").split())
+
+
+def _resolve_event_category_role(raw_role: str, category: Optional[str]) -> str:
+    norm = _normalize_role_key(raw_role)
+    if norm in {"participant", "event_participant", "attendance", ""}:
+        cat = (category or "").strip()
+        if cat == "Technical Event":
+            return "technical_participant"
+        elif cat == "Non-Technical Event":
+            return "non_technical_participant"
+        elif cat == "Technical Talk":
+            return "technical_talk"
+        elif "tech" in cat.lower() or cat in ("Workshop", "Hackathon"):
+            return "technical_participant"
+        else:
+            return "non_technical_participant"
+    return norm
 
 # Bounded concurrency to avoid overloading CPU/SMTP while improving throughput.
 _GEN_SEMAPHORE = asyncio.Semaphore(max(4, min(12, (os.cpu_count() or 4) * 2)))
@@ -91,7 +108,8 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         all_fields = {**(participant.fields or {}), **mapping_data}
 
         # Role detection for template selection
-        role_name = mapping_data["Role"] or "participant"
+        raw_role = mapping_data.get("Role") or participant.cert_type or "participant"
+        role_name = _resolve_event_category_role(raw_role, getattr(event, "category", None))
         normalized_role = _normalize_role_key(role_name)
         candidate_roles = [normalized_role]
         if normalized_role in {"volunteer", "student_volunteer"}:
@@ -115,7 +133,7 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
                     sig_path = str(sp)
 
             await generate_certificate_from_role_preset(
-                role_name=role_name,
+                role_name=preset.role_name,
                 participant_fields=all_fields,
                 output_path=tmp_path,
                 cert_number=cert.cert_number,
@@ -303,7 +321,8 @@ async def generate_certificates(
             skipped_existing += 1
             continue
 
-        cert_type = p.cert_type or "participant"
+        raw_cert_type = p.cert_type or "participant"
+        cert_type = _resolve_event_category_role(raw_cert_type, getattr(event, "category", None))
         normalized_role = cert_type.lower().replace(" ", "_").replace("-", "_")
         candidate_roles = [normalized_role]
         if normalized_role in {"volunteer", "student_volunteer"}:

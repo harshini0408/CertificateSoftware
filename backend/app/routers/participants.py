@@ -151,7 +151,9 @@ async def upload_participants(
     for row in rows:
         email = row.pop("_email", "").strip().lower()
         # Pop the internal cert_type key (not a real column)
-        cert_type = row.pop("_cert_type", "participant")
+        raw_cert_type = row.pop("_cert_type", "participant")
+        from .certificates import _resolve_event_category_role
+        cert_type = _resolve_event_category_role(raw_cert_type, getattr(event, "category", None))
 
         existing = await Participant.find_one(
             Participant.event_id == event_id, Participant.email == email)

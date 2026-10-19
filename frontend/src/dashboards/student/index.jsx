@@ -1107,7 +1107,9 @@ export default function StudentDashboard() {
               </div>
               <div className="flex items-center gap-1.5">
                 <span>🕐</span>
-                <span className="font-semibold text-navy">{sessionLabel}</span>
+                <span className="font-semibold text-navy">
+                  {sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''}
+                </span>
               </div>
               {ev.venue && (
                 <div className="flex items-center gap-1.5 truncate">
@@ -1135,20 +1137,20 @@ export default function StudentDashboard() {
               {ev.registration_type === 'volunteer' ? (
                 ev.volunteer_status === 'accepted' ? (
                   <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
-                    ✓ Volunteer Request Accepted ({sessionLabel})
+                    ✓ Volunteer Request Accepted ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
                   </div>
                 ) : ev.volunteer_status === 'rejected' ? (
                   <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-red-50 text-red-700 font-semibold text-xs border border-red-200">
-                    ✕ Volunteer Request Rejected ({sessionLabel})
+                    ✕ Volunteer Request Rejected ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
                   </div>
                 ) : (
                   <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-amber-50 text-amber-700 font-semibold text-xs border border-amber-200">
-                    ⏳ Volunteer Request Pending ({sessionLabel})
+                    ⏳ Volunteer Request Pending ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
                   </div>
                 )
               ) : (
                 <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
-                  ✓ Registered for Event ({sessionLabel})
+                  ✓ Registered for Event ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
                 </div>
               )}
 
@@ -1305,7 +1307,7 @@ export default function StudentDashboard() {
                 <div>
                   <h1 className="text-2xl font-bold text-foreground">Upcoming Events</h1>
                   <p className="mt-0.5 text-sm text-gray-500">
-                    Discover and register for upcoming events conducted by Professional Societies and College Clubs. Note: You can register for only one event per session (Morning / Afternoon) on the same date.
+                    Discover and register for upcoming events conducted by Professional Societies and College Clubs. Note: You can register for different time slots on the same date, but overlapping time slots are restricted.
                   </p>
                 </div>
 
@@ -1324,7 +1326,7 @@ export default function StudentDashboard() {
                     className="form-input w-full sm:w-48 text-xs"
                   >
                     <option value="">All Categories</option>
-                    {['Workshop', 'Technical Talk', 'Hackathon', 'Cultural', 'Seminar', 'Competition', 'Other'].map((c) => (
+                    {['Workshop', 'Technical Talk', 'Technical Event', 'Non-Technical Event', 'Hackathon', 'Other'].map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>

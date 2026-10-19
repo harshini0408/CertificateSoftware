@@ -221,7 +221,7 @@ function ClubEventsTab() {
             <label className="form-label">Category</label>
             <select className="form-input" onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value || undefined }))}>
               <option value="">All Categories</option>
-              {['Workshop', 'Technical Talk', 'Hackathon', 'Cultural', 'Seminar', 'Competition'].map((c) => (
+              {['Workshop', 'Technical Talk', 'Technical Event', 'Non-Technical Event', 'Hackathon', 'Other'].map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
@@ -618,7 +618,7 @@ function UpcomingEventsTab() {
             <label className="form-label">Category</label>
             <select className="form-input" onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value || undefined }))}>
               <option value="">All Categories</option>
-              {['Workshop', 'Technical Talk', 'Hackathon', 'Cultural', 'Seminar', 'Competition'].map((c) => (
+              {['Workshop', 'Technical Talk', 'Technical Event', 'Non-Technical Event', 'Hackathon', 'Other'].map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>

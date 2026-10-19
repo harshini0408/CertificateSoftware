@@ -23,6 +23,20 @@ function fmtDate(iso) {
   })
 }
 
+export const VENUE_OPTIONS = [
+  'E2 Seminar Hall',
+  'E3 EEE Seminar Hall',
+  'E4 ECE Seminar Hall',
+  'E5 CIVIL Seminar Hall',
+  'E6 MECH Seminar Hall',
+  'E8 Seminar Hall',
+  'iTech Square',
+  'Convention Center',
+  'Kalai Arangam',
+  'Outdoor Sports Complex',
+  'Other',
+]
+
 export default function SocietyEventDetail() {
   const { society_id: societyId, event_id: eventId } = useParams()
   const navigate = useNavigate()
@@ -36,15 +50,29 @@ export default function SocietyEventDetail() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [posterFile, setPosterFile] = useState(null)
   const [showPosterUpload, setShowPosterUpload] = useState(false)
+  const [editVenueOption, setEditVenueOption] = useState('')
+  const [editCustomVenue, setEditCustomVenue] = useState('')
 
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm()
 
   const handleOpenEdit = () => {
+    const curVenue = event?.venue || ''
+    if (VENUE_OPTIONS.filter((v) => v !== 'Other').includes(curVenue)) {
+      setEditVenueOption(curVenue)
+      setEditCustomVenue('')
+    } else if (curVenue) {
+      setEditVenueOption('Other')
+      setEditCustomVenue(curVenue)
+    } else {
+      setEditVenueOption('')
+      setEditCustomVenue('')
+    }
     reset({
       name: event?.name || '',
       description: event?.description || '',
@@ -441,7 +469,7 @@ export default function SocietyEventDetail() {
                       <div>
                         <label className="form-label">Category</label>
                         <select className="form-input text-sm" {...register('category')}>
-                          {['Workshop', 'Technical Talk', 'Hackathon', 'Seminar', 'Competition', 'Conference', 'Other'].map((c) => (
+                          {['Workshop', 'Technical Talk', 'Technical Event', 'Non-Technical Event', 'Hackathon', 'Conference', 'Other'].map((c) => (
                             <option key={c} value={c}>{c}</option>
                           ))}
                         </select>
@@ -450,11 +478,41 @@ export default function SocietyEventDetail() {
 
                     <div>
                       <label className="form-label">Venue</label>
-                      <input
-                        type="text"
+                      <select
                         className="form-input text-sm"
-                        {...register('venue')}
-                      />
+                        value={editVenueOption}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          setEditVenueOption(val)
+                          if (val !== 'Other') {
+                            setValue('venue', val, { shouldValidate: true })
+                          } else {
+                            setValue('venue', editCustomVenue.trim(), { shouldValidate: true })
+                          }
+                        }}
+                      >
+                        <option value="">Select venue</option>
+                        {VENUE_OPTIONS.map((v) => (
+                          <option key={v} value={v}>{v}</option>
+                        ))}
+                      </select>
+                      {editVenueOption === 'Other' && (
+                        <div className="mt-2">
+                          <input
+                            type="text"
+                            className="form-input text-sm"
+                            placeholder="Type custom venue…"
+                            value={editCustomVenue}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setEditCustomVenue(val)
+                              setValue('venue', val.trim(), { shouldValidate: true })
+                            }}
+                            autoFocus
+                          />
+                        </div>
+                      )}
+                      <input type="hidden" {...register('venue')} />
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

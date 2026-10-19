@@ -9,6 +9,8 @@ class EventCreate(BaseModel):
     description: Optional[str] = None
     event_date: Optional[datetime] = None
     event_time: Optional[str] = None
+    session: Optional[str] = None
+    slot: Optional[str] = None
     venue: Optional[str] = None
     category: Optional[str] = None
     academic_year: Optional[str] = None
@@ -24,6 +26,8 @@ class EventUpdate(BaseModel):
     description: Optional[str] = None
     event_date: Optional[datetime] = None
     event_time: Optional[str] = None
+    session: Optional[str] = None
+    slot: Optional[str] = None
     venue: Optional[str] = None
     category: Optional[str] = None
     academic_year: Optional[str] = None
@@ -45,6 +49,8 @@ class EventResponse(BaseModel):
     description: Optional[str] = None
     event_date: Optional[datetime] = None
     event_time: Optional[str] = None
+    session: Optional[str] = None
+    slot: Optional[str] = None
     venue: Optional[str] = None
     category: Optional[str] = None
     academic_year: Optional[str] = None

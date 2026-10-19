@@ -80,11 +80,21 @@ async def _get_latest_event_with_assets(club_id: PydanticObjectId) -> Optional[E
     return None
 
 
+def _normalize_session(time_str: Optional[str]) -> str:
+    val = (time_str or "").strip().lower()
+    if "an" in val or "afternoon" in val or ("pm" in val and not any(h in val for h in ["10", "11", "9", "8"])):
+        return "AN"
+    return "FN"
+
+
 def _event_response(e: Event, cert_count: int = 0, volunteers_registered: int = 0) -> EventResponse:
     return EventResponse(
         id=str(e.id), club_id=str(e.club_id), name=e.name,
         description=e.description, event_date=e.event_date,
-        event_time=e.event_time, venue=e.venue, category=e.category,
+        event_time=e.event_time,
+        session=getattr(e, "session", None) or (_normalize_session(e.event_time) if e.event_time else None),
+        slot=getattr(e, "slot", None),
+        venue=e.venue, category=e.category,
         academic_year=e.academic_year,
         academic_years=getattr(e, "academic_years", []) or ([] if not e.academic_year else [e.academic_year]),
         status=e.status.value, template_map={k: str(v) if v else None for k, v in e.template_map.items()},
@@ -174,10 +184,16 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
     acad_years = body.academic_years or ([] if not body.academic_year else [body.academic_year])
     acad_year_str = ", ".join(acad_years) if acad_years else body.academic_year
 
+    session_val = body.session
+    if not session_val and body.event_time:
+        session_val = _normalize_session(body.event_time)
+
     event = Event(
         club_id=club_id, name=body.name,
         description=body.description,
         event_date=body.event_date, event_time=body.event_time,
+        session=session_val,
+        slot=body.slot,
         venue=body.venue, category=body.category,
         academic_year=acad_year_str,
         academic_years=acad_years,

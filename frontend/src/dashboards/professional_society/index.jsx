@@ -47,6 +47,20 @@ function fmtDate(iso) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Events / Dashboard Tab
+const VENUE_OPTIONS = [
+  'E2 Seminar Hall',
+  'E3 EEE Seminar Hall',
+  'E4 ECE Seminar Hall',
+  'E5 CIVIL Seminar Hall',
+  'E6 MECH Seminar Hall',
+  'E8 Seminar Hall',
+  'iTech Square',
+  'Convention Center',
+  'Kalai Arangam',
+  'Outdoor Sports Complex',
+  'Other',
+]
+
 // ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab({ societyId, dashboard, isLoading }) {
   const navigate = useNavigate()
@@ -62,11 +76,14 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
   const [editingEvent, setEditingEvent] = useState(null)
   const [posterUploadEvent, setPosterUploadEvent] = useState(null)
   const [posterFile, setPosterFile] = useState(null)
+  const [selectedVenueOption, setSelectedVenueOption] = useState('')
+  const [customVenue, setCustomVenue] = useState('')
 
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
@@ -104,11 +121,24 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       await createEvent.mutateAsync(payload)
     }
     reset()
+    setSelectedVenueOption('')
+    setCustomVenue('')
     setIsModalOpen(false)
   }
 
   const handleOpenEdit = (ev) => {
     setEditingEvent(ev)
+    const curVenue = ev.venue || ''
+    if (VENUE_OPTIONS.filter((v) => v !== 'Other').includes(curVenue)) {
+      setSelectedVenueOption(curVenue)
+      setCustomVenue('')
+    } else if (curVenue) {
+      setSelectedVenueOption('Other')
+      setCustomVenue(curVenue)
+    } else {
+      setSelectedVenueOption('')
+      setCustomVenue('')
+    }
     reset({
       name: ev.name || '',
       description: ev.description || '',
@@ -196,6 +226,8 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
           type="button"
           onClick={() => {
             setEditingEvent(null)
+            setSelectedVenueOption('')
+            setCustomVenue('')
             reset({
               name: '',
               description: '',
@@ -373,7 +405,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
               </h3>
               <button
                 type="button"
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => { setIsModalOpen(false); setSelectedVenueOption(''); setCustomVenue(''); }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 ✕
@@ -433,7 +465,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                 <div>
                   <label className="form-label">Category</label>
                   <select className="form-input text-sm" {...register('category')}>
-                    {['Workshop', 'Technical Talk', 'Hackathon', 'Seminar', 'Competition', 'Conference', 'Other'].map((c) => (
+                    {['Workshop', 'Technical Talk', 'Technical Event', 'Non-Technical Event', 'Hackathon', 'Conference', 'Other'].map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
@@ -442,12 +474,41 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
 
               <div>
                 <label className="form-label">Venue</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Mechanical Seminar Hall"
+                <select
                   className="form-input text-sm"
-                  {...register('venue')}
-                />
+                  value={selectedVenueOption}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setSelectedVenueOption(val)
+                    if (val !== 'Other') {
+                      setValue('venue', val, { shouldValidate: true })
+                    } else {
+                      setValue('venue', customVenue.trim(), { shouldValidate: true })
+                    }
+                  }}
+                >
+                  <option value="">Select venue</option>
+                  {VENUE_OPTIONS.map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+                {selectedVenueOption === 'Other' && (
+                  <div className="mt-2">
+                    <input
+                      type="text"
+                      className="form-input text-sm"
+                      placeholder="Type custom venue…"
+                      value={customVenue}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setCustomVenue(val)
+                        setValue('venue', val.trim(), { shouldValidate: true })
+                      }}
+                      autoFocus
+                    />
+                  </div>
+                )}
+                <input type="hidden" {...register('venue')} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -488,7 +549,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
               <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={() => { setIsModalOpen(false); setSelectedVenueOption(''); setCustomVenue(''); }}
                   className="btn-secondary text-xs"
                 >
                   Cancel

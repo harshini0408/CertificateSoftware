@@ -88,15 +88,56 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editName, setEditName] = useState('')
   const [editDate, setEditDate] = useState('')
+  const [editSession, setEditSession] = useState('FN')
+  const [editSlot, setEditSlot] = useState('')
   const [editTime, setEditTime] = useState('')
   const [editVenue, setEditVenue] = useState('')
+  const [editVenueOption, setEditVenueOption] = useState('')
+  const [editCustomVenue, setEditCustomVenue] = useState('')
+  const [editCategory, setEditCategory] = useState('')
   const [editMaxParticipants, setEditMaxParticipants] = useState('')
+
+  const EDIT_SLOTS = {
+    FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
+    AN: ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM'],
+  }
+
+  const VENUE_OPTIONS = [
+    'E2 Seminar Hall',
+    'E3 EEE Seminar Hall',
+    'E4 ECE Seminar Hall',
+    'E5 CIVIL Seminar Hall',
+    'E6 MECH Seminar Hall',
+    'E8 Seminar Hall',
+    'iTech Square',
+    'Convention Center',
+    'Kalai Arangam',
+    'Outdoor Sports Complex',
+    'Other',
+  ]
 
   const handleStartEdit = () => {
     setEditName(event?.name || '')
     setEditDate(event?.event_date ? String(event.event_date).split('T')[0] : '')
+    const sess = event?.session || (event?.event_time?.toLowerCase()?.includes('an') ? 'AN' : 'FN')
+    setEditSession(sess)
+    setEditSlot(event?.slot || EDIT_SLOTS[sess]?.[0] || '')
     setEditTime(event?.event_time || '')
-    setEditVenue(event?.venue || '')
+    const curVenue = event?.venue || ''
+    if (VENUE_OPTIONS.filter((v) => v !== 'Other').includes(curVenue)) {
+      setEditVenueOption(curVenue)
+      setEditCustomVenue('')
+      setEditVenue(curVenue)
+    } else if (curVenue) {
+      setEditVenueOption('Other')
+      setEditCustomVenue(curVenue)
+      setEditVenue(curVenue)
+    } else {
+      setEditVenueOption('')
+      setEditCustomVenue('')
+      setEditVenue('')
+    }
+    setEditCategory(event?.category || '')
     setEditMaxParticipants(event?.max_participants != null ? String(event.max_participants) : '')
     setIsEditing(true)
   }
@@ -104,12 +145,18 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const handleSaveEdit = (e) => {
     e.preventDefault()
     if (!editName.trim()) return
+    const sessionLabel = editSession === 'FN' ? 'Morning (FN)' : 'Afternoon (AN)'
+    const timeStr = editSlot ? `${sessionLabel} | ${editSlot}` : (editTime || sessionLabel)
     updateEvent.mutate(
       {
         name: editName.trim(),
         event_date: editDate ? `${editDate}T00:00:00` : undefined,
-        event_time: editTime.trim(),
+        session: editSession,
+        slot: editSlot,
+        category: editCategory,
+        event_time: timeStr,
         venue: editVenue.trim(),
+        max_participants: editMaxParticipants ? parseInt(editMaxParticipants, 10) : null,
       },
       {
         onSuccess: () => setIsEditing(false),
@@ -234,26 +281,80 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 />
               </div>
               <div>
-                <label className="form-label text-xs font-semibold">Event Time *</label>
-                <input
-                  type="text"
-                  value={editTime}
-                  onChange={(e) => setEditTime(e.target.value)}
-                  required
+                <label className="form-label text-xs font-semibold">Event Session *</label>
+                <select
+                  value={editSession}
+                  onChange={(e) => {
+                    const nextSess = e.target.value
+                    setEditSession(nextSess)
+                    setEditSlot(EDIT_SLOTS[nextSess]?.[0] || '')
+                  }}
                   className="form-input text-sm"
-                  placeholder="e.g. Morning (FN) | 10:00 AM"
-                />
+                >
+                  <option value="FN">Morning (FN)</option>
+                  <option value="AN">Afternoon (AN)</option>
+                </select>
               </div>
-              <div className="sm:col-span-2">
-                <label className="form-label text-xs font-semibold">Venue *</label>
-                <input
-                  type="text"
-                  value={editVenue}
-                  onChange={(e) => setEditVenue(e.target.value)}
-                  required
+              <div>
+                <label className="form-label text-xs font-semibold">Event Slot *</label>
+                <select
+                  value={editSlot}
+                  onChange={(e) => setEditSlot(e.target.value)}
                   className="form-input text-sm"
-                  placeholder="e.g. Lab 3 / Auditorium"
-                />
+                >
+                  {(EDIT_SLOTS[editSession] || []).map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label text-xs font-semibold">Category</label>
+                <select
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value)}
+                  className="form-input text-sm"
+                >
+                  <option value="">Select category</option>
+                  {['Workshop', 'Technical Talk', 'Technical Event', 'Non-Technical Event', 'Hackathon', 'Other'].map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label text-xs font-semibold">Venue *</label>
+                <select
+                  value={editVenueOption}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setEditVenueOption(val)
+                    if (val !== 'Other') {
+                      setEditVenue(val)
+                    } else {
+                      setEditVenue(editCustomVenue.trim())
+                    }
+                  }}
+                  className="form-input text-sm"
+                  required
+                >
+                  <option value="">Select venue</option>
+                  {VENUE_OPTIONS.map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+                {editVenueOption === 'Other' && (
+                  <input
+                    type="text"
+                    value={editCustomVenue}
+                    onChange={(e) => {
+                      setEditCustomVenue(e.target.value)
+                      setEditVenue(e.target.value)
+                    }}
+                    required
+                    className="form-input text-sm mt-2"
+                    placeholder="Type custom venue…"
+                    autoFocus
+                  />
+                )}
               </div>
               <div>
                 <label className="form-label text-xs font-semibold">Max Participants (Optional)</label>
@@ -292,6 +393,8 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
               {[
                 ['Name', event?.name],
                 ['Date', event?.event_date ? formatDateOnly(event.event_date) : '—'],
+                ['Session', event?.session ? (event.session === 'FN' ? 'Morning (FN)' : 'Afternoon (AN)') : '—'],
+                ['Slot', event?.slot || '—'],
                 ['Time', event?.event_time || '—'],
                 ['Venue', event?.venue || '—'],
                 ['Category', event?.category || '—'],
@@ -904,15 +1007,24 @@ function ExcelUploadTab({ clubId, eventId }) {
 // Certificate Types / Role Presets (Requested Event Roles Only)
 // ─────────────────────────────────────────────────────────────────────────────
 export const EVENT_CERT_ROLES = [
-  { value: 'coordinator', label: 'Coordinator' },
-  { value: 'first_place', label: 'First Place' },
-  { value: 'non_technical_participant', label: 'Non-Technical Participant' },
-  { value: 'organizer', label: 'Organizer' },
-  { value: 'second_place', label: 'Second Place' },
-  { value: 'student_volunteer', label: 'Student Volunteer' },
   { value: 'technical_participant', label: 'Technical Participant' },
+  { value: 'non_technical_participant', label: 'Non-Technical Participant' },
+  { value: 'technical_talk', label: 'Technical Talk' },
+  { value: 'student_volunteer', label: 'Student Volunteer' },
+  { value: 'coordinator', label: 'Coordinator' },
+  { value: 'organizer', label: 'Organizer' },
+  { value: 'first_place', label: 'First Place' },
+  { value: 'second_place', label: 'Second Place' },
   { value: 'third_place', label: 'Third Place' },
 ]
+
+export function getDefaultCertType(cat) {
+  if (cat === 'Technical Event') return 'technical_participant'
+  if (cat === 'Non-Technical Event') return 'non_technical_participant'
+  if (cat === 'Technical Talk') return 'technical_talk'
+  if (cat && cat.toLowerCase().includes('tech')) return 'technical_participant'
+  return 'non_technical_participant'
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Manual Entry Sub-tab
@@ -922,19 +1034,26 @@ function ManualEntryTab({ clubId, eventId, event }) {
   const qc = useQueryClient()
   const { data: creditRules } = useClubCreditRules(clubId)
 
+  const defaultCertType = getDefaultCertType(event?.category)
+
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
       name: '',
       email: '',
       registration_number: '',
-      cert_type: 'non_technical_participant',
+      cert_type: defaultCertType,
     },
   })
+
+  useEffect(() => {
+    setValue('cert_type', getDefaultCertType(event?.category))
+  }, [event?.category, setValue])
 
   const onSubmit = async (values) => {
     try {
@@ -949,12 +1068,18 @@ function ManualEntryTab({ clubId, eventId, event }) {
             Name: values.name,
             Email: values.email,
             'Registration Number': values.registration_number,
+            Role: values.cert_type,
           },
         },
       )
       qc.invalidateQueries({ queryKey: ['participants', clubId, eventId] })
       addToast({ type: 'success', message: 'Participant added.' })
-      reset()
+      reset({
+        name: '',
+        email: '',
+        registration_number: '',
+        cert_type: getDefaultCertType(event?.category),
+      })
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Failed to add participant.'
       addToast({ type: 'error', message: msg })

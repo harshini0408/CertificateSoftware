@@ -937,7 +937,8 @@ async def list_upcoming_events(
     results = []
     for e in events:
         eid = str(e.id)
-        session = _normalize_session(e.event_time)
+        session = getattr(e, "session", None) or _normalize_session(e.event_time)
+        slot = getattr(e, "slot", None)
         my_reg = student_reg_map.get(eid)
         results.append({
             "id": eid,
@@ -948,6 +949,7 @@ async def list_upcoming_events(
             "event_date": e.event_date.isoformat() if e.event_date else None,
             "event_time": e.event_time,
             "session": session,
+            "slot": slot,
             "venue": e.venue,
             "category": e.category,
             "poster_url": e.poster_url,
@@ -1001,23 +1003,38 @@ async def register_for_event(
     if existing_reg:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event")
 
-    # Format event date and session
+    # Format event date, session, and slot
     event_date_str = event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
-    session = _normalize_session(event.event_time)
+    session = getattr(event, "session", None) or _normalize_session(event.event_time)
+    slot = getattr(event, "slot", None)
     session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
 
-    # Collision Check: Cannot register for multiple events on same date & same session
-    collision = await EventRegistration.find_one(
-        EventRegistration.student_email == student_email,
-        EventRegistration.event_date_str == event_date_str,
-        EventRegistration.session == session,
-    )
+    # Collision Check: Cannot register for conflicting slot on same date
+    if slot:
+        collision = await EventRegistration.find_one({
+            "student_email": student_email,
+            "event_date_str": event_date_str,
+            "$or": [
+                {"slot": slot},
+                {"session": session, "slot": None},
+                {"session": session, "slot": {"$exists": False}},
+            ]
+        })
+    else:
+        collision = await EventRegistration.find_one(
+            EventRegistration.student_email == student_email,
+            EventRegistration.event_date_str == event_date_str,
+            EventRegistration.session == session,
+        )
     if collision:
         conflicting_event = await Event.get(collision.event_id)
+        if not conflicting_event:
+            conflicting_event = await SocietyEvent.get(collision.event_id)
         conflict_name = conflicting_event.name if conflicting_event else "another event"
+        slot_text = f" in the {slot} slot" if slot else f" in the {session_label} session"
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Registration conflict: You are already registered for '{conflict_name}' on {event_date_str} in the {session_label} session.",
+            f"Registration conflict: You are already registered for '{conflict_name}' on {event_date_str}{slot_text}.",
         )
 
     # Volunteer capacity check
@@ -1042,10 +1059,28 @@ async def register_for_event(
         department=current_user.department,
         event_date_str=event_date_str,
         session=session,
+        slot=slot,
         registration_type=type,
         status="pending" if type == "volunteer" else "accepted",
     )
     await reg.insert()
+
+    # Determine mapped participant role based on event category
+    p_cert_type = type
+    if type == "participant":
+        cat = (event.category or "").strip()
+        if cat == "Technical Event":
+            p_cert_type = "technical_participant"
+        elif cat == "Non-Technical Event":
+            p_cert_type = "non_technical_participant"
+        elif cat == "Technical Talk":
+            p_cert_type = "technical_talk"
+        elif "tech" in cat.lower() or cat in ("Workshop", "Hackathon"):
+            p_cert_type = "technical_participant"
+        else:
+            p_cert_type = "non_technical_participant"
+    elif type == "volunteer":
+        p_cert_type = "student_volunteer"
 
     from ...models.participant import Participant, ParticipantSource
     existing_p = await Participant.find_one(
@@ -1058,12 +1093,13 @@ async def register_for_event(
             club_id=event.club_id,
             email=student_email,
             registration_number=current_user.registration_number,
-            cert_type=type,
+            cert_type=p_cert_type,
             fields={
                 "Name": current_user.name or "",
                 "Email": student_email,
                 "Registration Number": current_user.registration_number or "",
                 "Department": current_user.department or "",
+                "Role": p_cert_type,
             },
             source=ParticipantSource.REGISTRATION,
             # Attendance-based: participant stays unverified until they mark attendance
@@ -1080,6 +1116,7 @@ async def register_for_event(
         "message": msg,
         "registration_id": str(reg.id),
         "session": session,
+        "slot": slot,
     }
 
 
@@ -1238,13 +1275,25 @@ async def register_for_society_event(
 
     event_date_str = event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
     session = event.session or _normalize_session(event.event_time)
+    slot = getattr(event, "slot", None)
     session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
 
-    collision = await EventRegistration.find_one(
-        EventRegistration.student_email == student_email,
-        EventRegistration.event_date_str == event_date_str,
-        EventRegistration.session == session,
-    )
+    if slot:
+        collision = await EventRegistration.find_one({
+            "student_email": student_email,
+            "event_date_str": event_date_str,
+            "$or": [
+                {"slot": slot},
+                {"session": session, "slot": None},
+                {"session": session, "slot": {"$exists": False}},
+            ]
+        })
+    else:
+        collision = await EventRegistration.find_one(
+            EventRegistration.student_email == student_email,
+            EventRegistration.event_date_str == event_date_str,
+            EventRegistration.session == session,
+        )
     if collision:
         conflicting_name = "another event"
         c_event = await SocietyEvent.get(collision.event_id)
@@ -1254,9 +1303,10 @@ async def register_for_society_event(
             c_club_event = await Event.get(collision.event_id)
             if c_club_event:
                 conflicting_name = c_club_event.name
+        slot_text = f" in the {slot} slot" if slot else f" in the {session_label} session"
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Registration conflict: You are already registered for '{conflicting_name}' on {event_date_str} in the {session_label} session.",
+            f"Registration conflict: You are already registered for '{conflicting_name}' on {event_date_str}{slot_text}.",
         )
 
     if type == "volunteer":
@@ -1279,6 +1329,7 @@ async def register_for_society_event(
         department=current_user.department,
         event_date_str=event_date_str,
         session=session,
+        slot=slot,
         registration_type=type,
         status="pending" if type == "volunteer" else "accepted",
     )
@@ -1291,6 +1342,7 @@ async def register_for_society_event(
         "message": msg,
         "registration_id": str(reg.id),
         "session": session,
+        "slot": slot,
     }
 
 
