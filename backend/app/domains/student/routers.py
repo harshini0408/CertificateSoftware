@@ -920,6 +920,9 @@ async def list_upcoming_events(
             "id": str(r.id),
             "type": reg_type,
             "status": reg_status,
+            "team_id": getattr(r, "team_id", None),
+            "team_name": getattr(r, "team_name", None),
+            "team_role": getattr(r, "team_role", None),
         }
 
     # Count registrations per event
@@ -953,9 +956,15 @@ async def list_upcoming_events(
             "venue": e.venue,
             "category": e.category,
             "poster_url": e.poster_url,
+            "is_team_event": getattr(e, "is_team_event", False) or False,
+            "min_team_size": getattr(e, "min_team_size", 2) or 2,
+            "max_team_size": getattr(e, "max_team_size", 4) or 4,
             "is_registered": my_reg is not None,
             "registration_id": my_reg["id"] if my_reg else None,
             "registration_type": my_reg["type"] if my_reg else None,
+            "team_id": my_reg.get("team_id") if my_reg else None,
+            "team_name": my_reg.get("team_name") if my_reg else None,
+            "team_role": my_reg.get("team_role") if my_reg else None,
             "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
             "registered_count": reg_counts.get(eid, 0),
             "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
@@ -1120,6 +1129,273 @@ async def register_for_event(
     }
 
 
+class TeamRegisterRequest(BaseModel):
+    team_name: str
+    member_roll_nos: List[str] = []
+
+
+async def _check_teammate_eligibility(
+    roll_no: str,
+    event_id: PydanticObjectId,
+    event_date_str: str,
+    session: str,
+    slot: Optional[str],
+) -> User:
+    clean_roll = (roll_no or "").strip()
+    if not clean_roll:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Roll number cannot be empty")
+
+    student = await User.find_one({
+        "registration_number": {"$regex": f"^{re.escape(clean_roll)}$", "$options": "i"},
+        "role": UserRole.STUDENT,
+    })
+    if not student:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"Student with Roll Number '{clean_roll}' not found in the student database."
+        )
+
+    student_email = student.email.lower()
+
+    # Check if already registered for this event
+    existing_reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == student_email,
+    )
+    if existing_reg:
+        team_info = f" in team '{existing_reg.team_name}'" if getattr(existing_reg, "team_name", None) else ""
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Student '{student.name}' ({clean_roll}) is already registered for this event{team_info}."
+        )
+
+    # Collision Check
+    session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
+    if slot:
+        collision = await EventRegistration.find_one({
+            "student_email": student_email,
+            "event_date_str": event_date_str,
+            "$or": [
+                {"slot": slot},
+                {"session": session, "slot": None},
+                {"session": session, "slot": {"$exists": False}},
+            ]
+        })
+    else:
+        collision = await EventRegistration.find_one(
+            EventRegistration.student_email == student_email,
+            EventRegistration.event_date_str == event_date_str,
+            EventRegistration.session == session,
+        )
+
+    if collision:
+        conflicting_event = await Event.get(collision.event_id) or await SocietyEvent.get(collision.event_id)
+        c_name = conflicting_event.name if conflicting_event else "another event"
+        slot_text = f" in slot {slot}" if slot else f" in {session_label} session"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Schedule conflict for '{student.name}' ({clean_roll}): already registered for '{c_name}' on {event_date_str}{slot_text}."
+        )
+
+    return student
+
+
+@router.get("/student/events/{event_id}/check-member")
+@router.get("/student/society-events/{event_id}/check-member")
+async def check_event_team_member(
+    event_id: PydanticObjectId,
+    roll_no: str,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    event = await Event.get(event_id)
+    if not event:
+        event = await SocietyEvent.get(event_id)
+    if not event:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    event_date_str = event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
+    session = getattr(event, "session", None) or _normalize_session(event.event_time)
+    slot = getattr(event, "slot", None)
+
+    student = await _check_teammate_eligibility(roll_no, event_id, event_date_str, session, slot)
+    return {
+        "eligible": True,
+        "student_id": str(student.id),
+        "name": student.name,
+        "department": student.department,
+        "registration_number": student.registration_number,
+        "email": student.email,
+    }
+
+
+@router.post("/student/events/{event_id}/register-team")
+async def register_team_for_event(
+    event_id: PydanticObjectId,
+    body: TeamRegisterRequest,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    event = await Event.get(event_id)
+    if not event or event.status != EventStatus.ACTIVE:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
+
+    if not getattr(event, "is_team_event", False):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This event is configured for solo participation.")
+
+    if getattr(event, "registration_stopped", False):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Registration has been stopped for this event.")
+
+    team_name = (body.team_name or "").strip()
+    if not team_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Team name is required")
+
+    clean_member_rolls = [r.strip().upper() for r in body.member_roll_nos if r and r.strip()]
+    leader_roll = (current_user.registration_number or "").strip().upper()
+    if leader_roll in clean_member_rolls:
+        clean_member_rolls = [r for r in clean_member_rolls if r != leader_roll]
+
+    if len(clean_member_rolls) != len(set(clean_member_rolls)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Duplicate roll numbers detected in team members list")
+
+    total_team_size = 1 + len(clean_member_rolls)
+    min_s = getattr(event, "min_team_size", 2) or 2
+    max_s = getattr(event, "max_team_size", 4) or 4
+    if total_team_size < min_s or total_team_size > max_s:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Team size must be between {min_s} and {max_s} members (including leader). Current: {total_team_size}"
+        )
+
+    max_p = getattr(event, "max_participants", None)
+    if max_p and max_p > 0:
+        reg_count = await EventRegistration.find(EventRegistration.event_id == event_id).count()
+        current_count = max(event.participant_count or 0, reg_count)
+        if current_count + total_team_size > max_p:
+            available = max(0, max_p - current_count)
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Cannot register team of {total_team_size}: only {available} spot(s) remaining for this event."
+            )
+
+    event_date_str = event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
+    session = getattr(event, "session", None) or _normalize_session(event.event_time)
+    slot = getattr(event, "slot", None)
+
+    leader_email = current_user.email.lower()
+    existing_leader_reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == leader_email,
+    )
+    if existing_leader_reg:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event")
+
+    session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
+    if slot:
+        collision = await EventRegistration.find_one({
+            "student_email": leader_email,
+            "event_date_str": event_date_str,
+            "$or": [
+                {"slot": slot},
+                {"session": session, "slot": None},
+                {"session": session, "slot": {"$exists": False}},
+            ]
+        })
+    else:
+        collision = await EventRegistration.find_one(
+            EventRegistration.student_email == leader_email,
+            EventRegistration.event_date_str == event_date_str,
+            EventRegistration.session == session,
+        )
+    if collision:
+        conflicting_event = await Event.get(collision.event_id) or await SocietyEvent.get(collision.event_id)
+        c_name = conflicting_event.name if conflicting_event else "another event"
+        slot_text = f" in slot {slot}" if slot else f" in {session_label} session"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Schedule conflict for you (leader): already registered for '{c_name}' on {event_date_str}{slot_text}."
+        )
+
+    member_users = []
+    for m_roll in clean_member_rolls:
+        m_user = await _check_teammate_eligibility(m_roll, event_id, event_date_str, session, slot)
+        member_users.append(m_user)
+
+    team_id = str(uuid4())
+
+    cat = (event.category or "").strip()
+    if cat == "Technical Event":
+        p_cert_type = "technical_participant"
+    elif cat == "Non-Technical Event":
+        p_cert_type = "non_technical_participant"
+    elif cat == "Technical Talk":
+        p_cert_type = "technical_talk"
+    elif "tech" in cat.lower() or cat in ("Workshop", "Hackathon"):
+        p_cert_type = "technical_participant"
+    else:
+        p_cert_type = "non_technical_participant"
+
+    all_students_to_register = [
+        (current_user, "leader"),
+        *[(m_u, "member") for m_u in member_users]
+    ]
+
+    from ...models.participant import Participant, ParticipantSource
+
+    for u, role in all_students_to_register:
+        u_email = u.email.lower()
+        reg = EventRegistration(
+            event_id=event.id,
+            student_id=u.id,
+            student_name=u.name,
+            student_email=u_email,
+            registration_number=u.registration_number,
+            department=u.department,
+            event_date_str=event_date_str,
+            session=session,
+            slot=slot,
+            registration_type="participant",
+            status="accepted",
+            team_id=team_id,
+            team_name=team_name,
+            team_role=role,
+        )
+        await reg.insert()
+
+        existing_p = await Participant.find_one(
+            Participant.event_id == event_id,
+            Participant.email == u_email
+        )
+        if not existing_p:
+            p = Participant(
+                event_id=event.id,
+                club_id=event.club_id,
+                email=u_email,
+                registration_number=u.registration_number,
+                cert_type=p_cert_type,
+                fields={
+                    "Name": u.name or "",
+                    "Email": u_email,
+                    "Registration Number": u.registration_number or "",
+                    "Department": u.department or "",
+                    "Role": p_cert_type,
+                },
+                source=ParticipantSource.REGISTRATION,
+                verified=False,
+                status="registered",
+                team_id=team_id,
+                team_name=team_name,
+                team_role=role,
+            )
+            await p.insert()
+
+    await event.set({"participant_count": (event.participant_count or 0) + total_team_size})
+
+    return {
+        "message": f"Team '{team_name}' ({total_team_size} members) registered successfully!",
+        "team_id": team_id,
+        "team_name": team_name,
+    }
+
+
 @router.post("/student/events/{event_id}/cancel-registration")
 @router.delete("/student/events/{event_id}/register")
 async def cancel_event_registration(
@@ -1135,9 +1411,47 @@ async def cancel_event_registration(
     if not reg:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
 
+    from ...models.participant import Participant, ParticipantSource
+
+    if getattr(reg, "team_id", None):
+        team_id = reg.team_id
+        is_leader = getattr(reg, "team_role", None) == "leader"
+        if is_leader:
+            team_regs = await EventRegistration.find(
+                EventRegistration.event_id == event_id,
+                EventRegistration.team_id == team_id,
+            ).to_list()
+            emails = [r.student_email for r in team_regs]
+            deleted_count = len(team_regs)
+            for r in team_regs:
+                await r.delete()
+            team_parts = await Participant.find({
+                "event_id": event_id,
+                "email": {"$in": emails},
+                "source": ParticipantSource.REGISTRATION,
+            }).to_list()
+            for p in team_parts:
+                await p.delete()
+            event = await Event.get(event_id)
+            if event and event.participant_count > 0:
+                await event.set({"participant_count": max(0, event.participant_count - deleted_count)})
+            return {"message": f"Team registration for '{reg.team_name or 'team'}' cancelled successfully"}
+        else:
+            await reg.delete()
+            p = await Participant.find_one(
+                Participant.event_id == event_id,
+                Participant.email == student_email,
+                Participant.source == ParticipantSource.REGISTRATION,
+            )
+            if p:
+                await p.delete()
+            event = await Event.get(event_id)
+            if event and event.participant_count > 0:
+                await event.set({"participant_count": max(0, event.participant_count - 1)})
+            return {"message": "You have left the team registration"}
+
     await reg.delete()
 
-    from ...models.participant import Participant, ParticipantSource
     p = await Participant.find_one(
         Participant.event_id == event_id,
         Participant.email == student_email
@@ -1195,6 +1509,9 @@ async def list_upcoming_society_events(
             "id": str(r.id),
             "type": reg_type,
             "status": reg_status,
+            "team_id": getattr(r, "team_id", None),
+            "team_name": getattr(r, "team_name", None),
+            "team_role": getattr(r, "team_role", None),
         }
 
     all_regs = await EventRegistration.find().to_list()
@@ -1225,9 +1542,15 @@ async def list_upcoming_society_events(
             "venue": e.venue,
             "category": e.category,
             "poster_url": e.poster_url,
+            "is_team_event": getattr(e, "is_team_event", False) or False,
+            "min_team_size": getattr(e, "min_team_size", 2) or 2,
+            "max_team_size": getattr(e, "max_team_size", 4) or 4,
             "is_registered": my_reg is not None,
             "registration_id": my_reg["id"] if my_reg else None,
             "registration_type": my_reg["type"] if my_reg else None,
+            "team_id": my_reg.get("team_id") if my_reg else None,
+            "team_name": my_reg.get("team_name") if my_reg else None,
+            "team_role": my_reg.get("team_role") if my_reg else None,
             "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
             "registered_count": reg_counts.get(eid, 0),
             "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
@@ -1346,6 +1669,132 @@ async def register_for_society_event(
     }
 
 
+@router.post("/student/society-events/{event_id}/register-team")
+async def register_team_for_society_event(
+    event_id: PydanticObjectId,
+    body: TeamRegisterRequest,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    event = await SocietyEvent.get(event_id)
+    if not event or event.status != SocietyEventStatus.ACTIVE:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Society event not found or not open for registration")
+
+    if not getattr(event, "is_team_event", False):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This event is configured for solo participation.")
+
+    if getattr(event, "registration_stopped", False):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Registration has been stopped for this event.")
+
+    team_name = (body.team_name or "").strip()
+    if not team_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Team name is required")
+
+    clean_member_rolls = [r.strip().upper() for r in body.member_roll_nos if r and r.strip()]
+    leader_roll = (current_user.registration_number or "").strip().upper()
+    if leader_roll in clean_member_rolls:
+        clean_member_rolls = [r for r in clean_member_rolls if r != leader_roll]
+
+    if len(clean_member_rolls) != len(set(clean_member_rolls)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Duplicate roll numbers detected in team members list")
+
+    total_team_size = 1 + len(clean_member_rolls)
+    min_s = getattr(event, "min_team_size", 2) or 2
+    max_s = getattr(event, "max_team_size", 4) or 4
+    if total_team_size < min_s or total_team_size > max_s:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Team size must be between {min_s} and {max_s} members (including leader). Current: {total_team_size}"
+        )
+
+    max_p = getattr(event, "max_participants", None)
+    if max_p and max_p > 0:
+        reg_count = await EventRegistration.find(EventRegistration.event_id == event_id).count()
+        current_count = max(event.participant_count or 0, reg_count)
+        if current_count + total_team_size > max_p:
+            available = max(0, max_p - current_count)
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Cannot register team of {total_team_size}: only {available} spot(s) remaining for this event."
+            )
+
+    event_date_str = event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
+    session = getattr(event, "session", None) or _normalize_session(event.event_time)
+    slot = getattr(event, "slot", None)
+
+    leader_email = current_user.email.lower()
+    existing_leader_reg = await EventRegistration.find_one(
+        EventRegistration.event_id == event_id,
+        EventRegistration.student_email == leader_email,
+    )
+    if existing_leader_reg:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event")
+
+    session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
+    if slot:
+        collision = await EventRegistration.find_one({
+            "student_email": leader_email,
+            "event_date_str": event_date_str,
+            "$or": [
+                {"slot": slot},
+                {"session": session, "slot": None},
+                {"session": session, "slot": {"$exists": False}},
+            ]
+        })
+    else:
+        collision = await EventRegistration.find_one(
+            EventRegistration.student_email == leader_email,
+            EventRegistration.event_date_str == event_date_str,
+            EventRegistration.session == session,
+        )
+    if collision:
+        conflicting_event = await SocietyEvent.get(collision.event_id) or await Event.get(collision.event_id)
+        c_name = conflicting_event.name if conflicting_event else "another event"
+        slot_text = f" in slot {slot}" if slot else f" in {session_label} session"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Schedule conflict for you (leader): already registered for '{c_name}' on {event_date_str}{slot_text}."
+        )
+
+    member_users = []
+    for m_roll in clean_member_rolls:
+        m_user = await _check_teammate_eligibility(m_roll, event_id, event_date_str, session, slot)
+        member_users.append(m_user)
+
+    team_id = str(uuid4())
+    all_students_to_register = [
+        (current_user, "leader"),
+        *[(m_u, "member") for m_u in member_users]
+    ]
+
+    for u, role in all_students_to_register:
+        u_email = u.email.lower()
+        reg = EventRegistration(
+            event_id=event.id,
+            student_id=u.id,
+            student_name=u.name,
+            student_email=u_email,
+            registration_number=u.registration_number,
+            department=u.department,
+            event_date_str=event_date_str,
+            session=session,
+            slot=slot,
+            registration_type="participant",
+            status="accepted",
+            team_id=team_id,
+            team_name=team_name,
+            team_role=role,
+        )
+        await reg.insert()
+
+    await event.set({"participant_count": (event.participant_count or 0) + total_team_size})
+
+    return {
+        "message": f"Team '{team_name}' ({total_team_size} members) registered successfully!",
+        "team_id": team_id,
+        "team_name": team_name,
+    }
+
+
 @router.post("/student/society-events/{event_id}/cancel-registration")
 @router.delete("/student/society-events/{event_id}/register")
 async def cancel_society_event_registration(
@@ -1360,6 +1809,28 @@ async def cancel_society_event_registration(
     )
     if not reg:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
+
+    if getattr(reg, "team_id", None):
+        team_id = reg.team_id
+        is_leader = getattr(reg, "team_role", None) == "leader"
+        if is_leader:
+            team_regs = await EventRegistration.find(
+                EventRegistration.event_id == event_id,
+                EventRegistration.team_id == team_id,
+            ).to_list()
+            deleted_count = len(team_regs)
+            for r in team_regs:
+                await r.delete()
+            event = await SocietyEvent.get(event_id)
+            if event and (event.participant_count or 0) > 0:
+                await event.set({"participant_count": max(0, event.participant_count - deleted_count)})
+            return {"message": f"Team registration for '{reg.team_name or 'team'}' cancelled successfully"}
+        else:
+            await reg.delete()
+            event = await SocietyEvent.get(event_id)
+            if event and (event.participant_count or 0) > 0:
+                await event.set({"participant_count": max(0, event.participant_count - 1)})
+            return {"message": "You have left the team registration"}
 
     await reg.delete()
 

@@ -483,3 +483,41 @@ export function useCancelSocietyEventRegistration() {
     },
   })
 }
+
+/**
+ * Check if a teammate roll number is eligible for an event
+ */
+export async function checkTeamMember(eventId, rollNo, isSociety = false) {
+  const url = isSociety
+    ? `/student/society-events/${eventId}/check-member`
+    : `/student/events/${eventId}/check-member`
+  const { data } = await axiosInstance.get(url, { params: { roll_no: rollNo } })
+  return data
+}
+
+/**
+ * POST /student/events/:eventId/register-team or society equivalent
+ */
+export function useRegisterTeamForEvent() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ eventId, team_name, member_roll_nos, isSociety = false }) => {
+      const url = isSociety
+        ? `/student/society-events/${eventId}/register-team`
+        : `/student/events/${eventId}/register-team`
+      const { data } = await axiosInstance.post(url, { team_name, member_roll_nos })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
+      addToast({ type: 'success', message: data?.message || 'Team registered successfully!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to register team.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}

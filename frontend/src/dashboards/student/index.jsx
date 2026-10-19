@@ -33,6 +33,8 @@ import {
   useUpdateManualCreditSubmission,
   useDeleteManualCreditSubmission,
   useLeaveClubMembership,
+  checkTeamMember,
+  useRegisterTeamForEvent,
 } from './api'
 import { useChangePassword } from '../auth/api'
 
@@ -726,6 +728,7 @@ export default function StudentDashboard() {
   const cancelEventRegistration = useCancelEventRegistration()
   const registerSocietyEvent = useRegisterSocietyEvent()
   const cancelSocietyEventRegistration = useCancelSocietyEventRegistration()
+  const registerTeamEvent = useRegisterTeamForEvent()
   const validateQR = useValidateAttendanceQR()
 
   const [editingSubmission, setEditingSubmission] = useState(null)
@@ -738,6 +741,182 @@ export default function StudentDashboard() {
   const [eventSearch, setEventSearch] = useState('')
   const [eventCategoryFilter, setEventCategoryFilter] = useState('')
   const [expandedPoster, setExpandedPoster] = useState(null)
+
+  // ── Team Registration state ───────────────────────────────────────────────
+  const [teamModal, setTeamModal] = useState(null) // { event, isSociety } | null
+  const [teamName, setTeamName] = useState('')
+  const [teammates, setTeammates] = useState([])
+
+  const handleOpenTeamModal = (event, isSociety = false) => {
+    setTeamName('')
+    const initialTeammatesCount = Math.max(1, (event.min_team_size || 2) - 1)
+    const initialRows = Array.from({ length: initialTeammatesCount }, () => ({
+      roll_no: '',
+      name: '',
+      department: '',
+      verified: false,
+      checking: false,
+      error: '',
+    }))
+    setTeammates(initialRows)
+    setTeamModal({ event, isSociety })
+  }
+
+  const handleCloseTeamModal = () => {
+    setTeamModal(null)
+    setTeamName('')
+    setTeammates([])
+  }
+
+  const handleAddTeammateRow = () => {
+    if (!teamModal) return
+    const maxTeammates = (teamModal.event.max_team_size || 4) - 1
+    if (teammates.length >= maxTeammates) {
+      addToast({ type: 'info', message: `Maximum team size is ${teamModal.event.max_team_size || 4} members (Leader + ${maxTeammates} teammates).` })
+      return
+    }
+    setTeammates((prev) => [
+      ...prev,
+      { roll_no: '', name: '', department: '', verified: false, checking: false, error: '' },
+    ])
+  }
+
+  const handleRemoveTeammateRow = (index) => {
+    setTeammates((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleTeammateRollChange = (index, val) => {
+    const uppercaseVal = val.toUpperCase().trim()
+    setTeammates((prev) =>
+      prev.map((t, i) =>
+        i === index
+          ? { ...t, roll_no: uppercaseVal, verified: false, name: '', department: '', error: '' }
+          : t
+      )
+    )
+  }
+
+  const handleVerifyTeammate = async (index) => {
+    if (!teamModal) return
+    const target = teammates[index]
+    const rollNo = (target?.roll_no || '').trim()
+    if (!rollNo) {
+      setTeammates((prev) =>
+        prev.map((t, i) => (i === index ? { ...t, error: 'Enter a roll number' } : t))
+      )
+      return
+    }
+
+    const myRoll = (profile?.roll_no || profile?.registration_number || profile?.username || '').toUpperCase()
+    if (myRoll && rollNo.toUpperCase() === myRoll) {
+      setTeammates((prev) =>
+        prev.map((t, i) =>
+          i === index
+            ? { ...t, verified: false, error: 'You are the leader! Do not add yourself here.' }
+            : t
+        )
+      )
+      return
+    }
+
+    const isDuplicate = teammates.some(
+      (t, i) => i !== index && t.roll_no && t.roll_no.toUpperCase() === rollNo.toUpperCase()
+    )
+    if (isDuplicate) {
+      setTeammates((prev) =>
+        prev.map((t, i) =>
+          i === index
+            ? { ...t, verified: false, error: 'This roll number is already added in the team.' }
+            : t
+        )
+      )
+      return
+    }
+
+    setTeammates((prev) =>
+      prev.map((t, i) => (i === index ? { ...t, checking: true, error: '' } : t))
+    )
+
+    try {
+      const res = await checkTeamMember(teamModal.event.id, rollNo, teamModal.isSociety)
+      if (res && res.eligible) {
+        setTeammates((prev) =>
+          prev.map((t, i) =>
+            i === index
+              ? {
+                  ...t,
+                  checking: false,
+                  verified: true,
+                  name: res.name,
+                  roll_no: res.roll_no || rollNo,
+                  department: res.department || '—',
+                  error: '',
+                }
+              : t
+          )
+        )
+      } else {
+        setTeammates((prev) =>
+          prev.map((t, i) =>
+            i === index
+              ? { ...t, checking: false, verified: false, error: res?.reason || 'Not eligible' }
+              : t
+          )
+        )
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || 'Verification failed / Student not found.'
+      setTeammates((prev) =>
+        prev.map((t, i) =>
+          i === index
+            ? { ...t, checking: false, verified: false, error: msg }
+            : t
+        )
+      )
+    }
+  }
+
+  const handleSubmitTeamRegistration = async (e) => {
+    e.preventDefault()
+    if (!teamModal) return
+    const nameTrimmed = teamName.trim()
+    if (!nameTrimmed) {
+      addToast({ type: 'error', message: 'Please enter a team name.' })
+      return
+    }
+
+    const minSize = teamModal.event.min_team_size || 2
+    const maxSize = teamModal.event.max_team_size || 4
+    const totalMembers = 1 + teammates.length
+
+    if (totalMembers < minSize) {
+      addToast({ type: 'error', message: `Team must have at least ${minSize} members (Leader + ${minSize - 1} teammates).` })
+      return
+    }
+    if (totalMembers > maxSize) {
+      addToast({ type: 'error', message: `Team cannot exceed ${maxSize} members.` })
+      return
+    }
+
+    const unverified = teammates.some((t) => !t.verified || !t.roll_no.trim())
+    if (unverified) {
+      addToast({ type: 'error', message: 'Please verify all teammate roll numbers before submitting.' })
+      return
+    }
+
+    const member_roll_nos = teammates.map((t) => t.roll_no.trim())
+    try {
+      await registerTeamEvent.mutateAsync({
+        eventId: teamModal.event.id,
+        team_name: nameTrimmed,
+        member_roll_nos,
+        isSociety: teamModal.isSociety,
+      })
+      handleCloseTeamModal()
+    } catch (err) {
+      // Handled by mutation onError toast
+    }
+  }
 
   useEffect(() => {
     if (!expandedPoster) return
@@ -1088,9 +1267,16 @@ export default function StudentDashboard() {
               <span className={`text-xs font-bold uppercase tracking-wider ${isSociety ? 'text-teal-700' : 'text-navy'}`}>
                 {entityName}
               </span>
-              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
-                {ev.category || 'Event'}
-              </span>
+              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                {ev.is_team_event && (
+                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-purple-50 text-purple-700 ring-1 ring-inset ring-purple-200">
+                    👥 Team ({ev.min_team_size || 2}-{ev.max_team_size || 4})
+                  </span>
+                )}
+                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
+                  {ev.category || 'Event'}
+                </span>
+              </div>
             </div>
 
             <h3 className="text-sm font-bold text-foreground line-clamp-1">{ev.name}</h3>
@@ -1149,8 +1335,21 @@ export default function StudentDashboard() {
                   </div>
                 )
               ) : (
-                <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
-                  ✓ Registered for Event ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
+                <div className="w-full flex flex-col items-center justify-center gap-1 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200 text-center">
+                  <div className="flex items-center justify-center gap-1.5 font-bold">
+                    <span>✓</span>
+                    <span>{ev.team_name ? `Team: "${ev.team_name}"` : 'Registered for Event'}</span>
+                  </div>
+                  {ev.team_name && (
+                    <div className="flex items-center gap-1 text-[10px]">
+                      <span className={`px-1.5 py-0.5 rounded font-semibold ${ev.team_role === 'leader' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
+                        {ev.team_role === 'leader' ? '👑 Leader' : '👤 Teammate'}
+                      </span>
+                    </div>
+                  )}
+                  <span className="text-[10px] text-green-600">
+                    ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
+                  </span>
                 </div>
               )}
 
@@ -1178,6 +1377,10 @@ export default function StudentDashboard() {
                   ? 'Cancelling…'
                   : ev.registration_type === 'volunteer'
                   ? 'Cancel Volunteer Request'
+                  : ev.team_role === 'leader'
+                  ? 'Cancel Team Registration (All Members)'
+                  : ev.team_role === 'member'
+                  ? 'Leave Team'
                   : 'Cancel Registration'}
               </button>
             </div>
@@ -1192,14 +1395,25 @@ export default function StudentDashboard() {
             </div>
           ) : (
             <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => isSociety ? handleRegisterSociety(ev.id, 'participant') : handleRegister(ev.id, 'participant')}
-                disabled={(registerForEvent.isPending || registerSocietyEvent.isPending) && registeringEventId === ev.id}
-                className="btn-primary w-full text-xs justify-center"
-              >
-                {registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
-              </button>
+              {ev.is_team_event ? (
+                <button
+                  type="button"
+                  onClick={() => handleOpenTeamModal(ev, isSociety)}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold text-xs shadow-sm transition-all"
+                >
+                  <span>👥</span>
+                  <span>Register as Team ({ev.min_team_size || 2}-{ev.max_team_size || 4} Members)</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => isSociety ? handleRegisterSociety(ev.id, 'participant') : handleRegister(ev.id, 'participant')}
+                  disabled={(registerForEvent.isPending || registerSocietyEvent.isPending) && registeringEventId === ev.id}
+                  className="btn-primary w-full text-xs justify-center"
+                >
+                  {registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
+                </button>
+              )}
 
               {(ev.volunteers_required || 0) > 0 && (
                 (ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) ? (
@@ -1909,6 +2123,269 @@ export default function StudentDashboard() {
                 className="max-h-[78vh] w-auto max-w-full object-contain rounded shadow select-none"
               />
             </div>
+          </div>
+        </div>
+      )}
+      {/* ── Team Registration Modal ── */}
+      {teamModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto"
+          onClick={handleCloseTeamModal}
+        >
+          <div
+            className="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden my-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-purple-700 to-indigo-800 text-white">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">👥</span>
+                  <h3 className="text-base font-bold text-white">Team Registration</h3>
+                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-purple-100">
+                    {teamModal.event.min_team_size || 2} - {teamModal.event.max_team_size || 4} Members
+                  </span>
+                </div>
+                <p className="text-xs text-purple-100/90 truncate max-w-md">
+                  {teamModal.event.name} • {teamModal.event.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'}
+                  {teamModal.event.slot ? ` • ${teamModal.event.slot}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseTeamModal}
+                className="rounded-lg p-1.5 text-purple-200 hover:text-white hover:bg-white/10 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body / Form */}
+            <form onSubmit={handleSubmitTeamRegistration} className="p-6 space-y-5 max-h-[calc(85vh-120px)] overflow-y-auto">
+              {/* Team Name */}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Team Name <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                    🏷️
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    value={teamName}
+                    onChange={(e) => setTeamName(e.target.value)}
+                    placeholder="e.g. CyberKnights, Data Wizards..."
+                    className="form-input pl-9 w-full text-sm font-semibold rounded-lg border-gray-300 focus:border-purple-500 focus:ring-purple-500"
+                  />
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Unique name for your team. Note: Certificate generation and attendance remain strictly individual.
+                </p>
+              </div>
+
+              {/* Leader Card (Readonly) */}
+              <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                    <span>👑</span> Team Leader (You)
+                  </span>
+                  <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">
+                    Confirmed
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-700 pt-1">
+                  <span className="font-semibold">{profile?.name || 'You'}</span>
+                  <span className="font-mono bg-white px-2 py-0.5 rounded border border-purple-200 text-purple-900 font-bold">
+                    {profile?.roll_no || profile?.registration_number || profile?.username || '—'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-gray-500 flex items-center justify-between">
+                  <span>Department: {profile?.department || '—'}</span>
+                  <span>{profile?.batch ? `Batch ${profile.batch}` : ''}</span>
+                </div>
+              </div>
+
+              {/* Teammates Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Teammates ({teammates.length} of {Math.max(1, (teamModal.event.max_team_size || 4) - 1)} max)
+                    </h4>
+                    <p className="text-[11px] text-gray-500">
+                      Total team members: <strong className="text-purple-700">{1 + teammates.length}</strong> (Required: {teamModal.event.min_team_size || 2} to {teamModal.event.max_team_size || 4})
+                    </p>
+                  </div>
+
+                  {1 + teammates.length < (teamModal.event.max_team_size || 4) && (
+                    <button
+                      type="button"
+                      onClick={handleAddTeammateRow}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded-lg border border-purple-200 transition-colors"
+                    >
+                      <span>+</span> Add Teammate
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-2.5">
+                  {teammates.map((member, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-xl border transition-all ${
+                        member.verified
+                          ? 'bg-green-50/60 border-green-200'
+                          : member.error
+                          ? 'bg-red-50/50 border-red-200'
+                          : 'bg-gray-50 border-gray-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-gray-500 w-5">#{idx + 1}</span>
+                        <div className="flex-1 relative">
+                          <input
+                            type="text"
+                            placeholder="Teammate Roll No (e.g. 21CS042)"
+                            value={member.roll_no}
+                            disabled={member.verified || member.checking}
+                            onChange={(e) => handleTeammateRollChange(idx, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                handleVerifyTeammate(idx)
+                              }
+                            }}
+                            className={`form-input uppercase w-full text-xs font-mono font-medium rounded-lg h-8 py-1 ${
+                              member.verified
+                                ? 'bg-white text-green-800 border-green-300 font-bold'
+                                : 'bg-white'
+                            }`}
+                          />
+                        </div>
+
+                        {!member.verified ? (
+                          <button
+                            type="button"
+                            disabled={member.checking || !member.roll_no}
+                            onClick={() => handleVerifyTeammate(idx)}
+                            className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 transition-colors h-8"
+                          >
+                            {member.checking ? (
+                              <>
+                                <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                </svg>
+                                <span>Verifying…</span>
+                              </>
+                            ) : (
+                              <span>Verify</span>
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTeammates((prev) =>
+                                prev.map((t, i) => (i === idx ? { ...t, verified: false } : t))
+                              )
+                            }}
+                            className="text-xs font-medium text-gray-600 hover:text-gray-800 underline px-1.5"
+                            title="Edit roll number"
+                          >
+                            Change
+                          </button>
+                        )}
+
+                        {teammates.length > Math.max(1, (teamModal.event.min_team_size || 2) - 1) && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTeammateRow(idx)}
+                            className="text-gray-400 hover:text-red-600 p-1 rounded transition-colors"
+                            title="Remove teammate"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Verified student details */}
+                      {member.verified && (
+                        <div className="mt-2 pt-2 border-t border-green-200/80 flex items-center justify-between text-xs text-green-900">
+                          <span className="font-semibold flex items-center gap-1">
+                            <span className="text-green-600">✓</span> {member.name}
+                          </span>
+                          <span className="text-[11px] text-green-700 bg-green-100/80 px-2 py-0.5 rounded font-medium">
+                            {member.department}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Error message */}
+                      {member.error && (
+                        <div className="mt-1.5 flex items-start gap-1 text-[11px] text-red-600 font-medium">
+                          <span className="text-red-500">⚠️</span>
+                          <span>{member.error}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Notice */}
+              <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-[11px] text-gray-600 space-y-1">
+                <div className="font-bold text-gray-700 flex items-center gap-1">
+                  <span>ℹ️</span> Important Instructions:
+                </div>
+                <ul className="list-disc list-inside space-y-0.5 pl-1 text-gray-500">
+                  <li>Teammates must not have any slot conflicts on the same date.</li>
+                  <li>Attendance will be marked <strong>individually</strong> for each team member during the event.</li>
+                  <li>Certificates are issued individually to each attendee with standard format (no team name printed).</li>
+                </ul>
+              </div>
+
+              {/* Form Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={handleCloseTeamModal}
+                  disabled={registerTeamEvent.isPending}
+                  className="btn-secondary text-xs px-4 py-2"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    registerTeamEvent.isPending ||
+                    !teamName.trim() ||
+                    teammates.length < Math.max(1, (teamModal.event.min_team_size || 2) - 1) ||
+                    teammates.some((t) => !t.verified)
+                  }
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 px-5 py-2 text-xs font-bold text-white shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {registerTeamEvent.isPending ? (
+                    <>
+                      <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                      <span>Registering Team…</span>
+                    </>
+                  ) : (
+                    <span>Confirm Team Registration</span>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -96,6 +96,9 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [editCustomVenue, setEditCustomVenue] = useState('')
   const [editCategory, setEditCategory] = useState('')
   const [editMaxParticipants, setEditMaxParticipants] = useState('')
+  const [editIsTeamEvent, setEditIsTeamEvent] = useState(false)
+  const [editMinTeamSize, setEditMinTeamSize] = useState(2)
+  const [editMaxTeamSize, setEditMaxTeamSize] = useState(4)
 
   const EDIT_SLOTS = {
     FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
@@ -139,6 +142,9 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     }
     setEditCategory(event?.category || '')
     setEditMaxParticipants(event?.max_participants != null ? String(event.max_participants) : '')
+    setEditIsTeamEvent(!!event?.is_team_event)
+    setEditMinTeamSize(event?.min_team_size || 2)
+    setEditMaxTeamSize(event?.max_team_size || 4)
     setIsEditing(true)
   }
 
@@ -157,6 +163,9 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
         event_time: timeStr,
         venue: editVenue.trim(),
         max_participants: editMaxParticipants ? parseInt(editMaxParticipants, 10) : null,
+        is_team_event: editIsTeamEvent,
+        min_team_size: editMinTeamSize,
+        max_team_size: editMaxTeamSize,
       },
       {
         onSuccess: () => setIsEditing(false),
@@ -369,6 +378,58 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 />
                 <p className="text-xs text-gray-400 mt-1">Leave blank for no limit. Students will see &ldquo;Maximum participants reached&rdquo; when full.</p>
               </div>
+
+              {/* Participation Mode */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 space-y-2.5">
+                <label className="form-label mb-1">Participation Type</label>
+                <div className="flex items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
+                    <input
+                      type="radio"
+                      name="edit_participation_type"
+                      checked={!editIsTeamEvent}
+                      onChange={() => setEditIsTeamEvent(false)}
+                      className="text-navy focus:ring-navy h-4 w-4"
+                    />
+                    <span>👤 Individual (Solo)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
+                    <input
+                      type="radio"
+                      name="edit_participation_type"
+                      checked={editIsTeamEvent}
+                      onChange={() => setEditIsTeamEvent(true)}
+                      className="text-navy focus:ring-navy h-4 w-4"
+                    />
+                    <span>👥 Team Event</span>
+                  </label>
+                </div>
+
+                {editIsTeamEvent && (
+                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="form-label text-xs">Min Team Size</label>
+                      <input
+                        type="number"
+                        min={2}
+                        className="form-input text-xs"
+                        value={editMinTeamSize}
+                        onChange={(e) => setEditMinTeamSize(Math.max(2, parseInt(e.target.value, 10) || 2))}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label text-xs">Max Team Size</label>
+                      <input
+                        type="number"
+                        min={editMinTeamSize}
+                        className="form-input text-xs"
+                        value={editMaxTeamSize}
+                        onChange={(e) => setEditMaxTeamSize(Math.max(editMinTeamSize, parseInt(e.target.value, 10) || editMinTeamSize))}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
               <button
@@ -399,6 +460,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 ['Venue', event?.venue || '—'],
                 ['Category', event?.category || '—'],
                 ['Academic Year', event?.academic_year || '—'],
+                ['Participation Type', event?.is_team_event ? `Team Event (${event.min_team_size || 2} - ${event.max_team_size || 4} members)` : 'Individual (Solo)'],
                 ['Registration Status', event?.registration_stopped ? 'Stopped' : 'Open'],
                 ['Participants', (event?.participant_count ?? 0).toLocaleString()],
                 ['Certificates Issued', (event?.cert_count ?? 0).toLocaleString()],
@@ -1242,7 +1304,18 @@ function ParticipantListTab({ clubId, eventId }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   
   const columns = [
-    { key: 'name', header: 'Name', searchKey: true, sortable: true, render: (_, row) => row.fields?.Name || '—' },
+    { key: 'name', header: 'Name', searchKey: true, sortable: true,
+      render: (_, row) => (
+        <div className="flex flex-col items-start gap-0.5">
+          <span className="font-semibold text-gray-900">{row.fields?.Name || '—'}</span>
+          {row.team_name && (
+            <span className="inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-inset ring-blue-600/20">
+              👥 {row.team_name} {row.team_role === 'leader' ? '👑 Leader' : '• Member'}
+            </span>
+          )}
+        </div>
+      )
+    },
     { key: 'email', header: 'Email', searchKey: true, sortable: true },
     { key: 'registration_number', header: 'Reg No.', searchKey: true, sortable: true, render: (v) => v || '—' },
     {

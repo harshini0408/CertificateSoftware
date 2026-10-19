@@ -20,7 +20,11 @@ def _resp(p: Participant) -> ParticipantResponse:
         id=str(p.id), event_id=str(p.event_id), club_id=str(p.club_id),
         email=p.email, registration_number=p.registration_number,
         cert_type=p.cert_type, fields=p.fields, field_mapping=p.field_mapping,
-        source=p.source.value, verified=p.verified, registered_at=p.registered_at,
+        source=p.source.value, verified=p.verified,
+        team_id=getattr(p, "team_id", None),
+        team_name=getattr(p, "team_name", None),
+        team_role=getattr(p, "team_role", None),
+        registered_at=p.registered_at,
     )
 
 

@@ -35,6 +35,9 @@ class ParticipantResponse(BaseModel):
     field_mapping: Dict[str, str] = Field(default_factory=dict)
     source: str
     verified: bool
+    team_id: Optional[str] = None
+    team_name: Optional[str] = None
+    team_role: Optional[str] = None
     registered_at: datetime
 
     class Config:

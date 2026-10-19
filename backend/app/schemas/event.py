@@ -17,6 +17,9 @@ class EventCreate(BaseModel):
     academic_years: List[str] = Field(default_factory=list)
     max_participants: Optional[int] = None
     volunteers_required: int = 0
+    is_team_event: bool = False
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
     is_published: bool = False
 
@@ -34,6 +37,9 @@ class EventUpdate(BaseModel):
     academic_years: Optional[List[str]] = None
     max_participants: Optional[int] = None
     volunteers_required: Optional[int] = None
+    is_team_event: Optional[bool] = None
+    min_team_size: Optional[int] = None
+    max_team_size: Optional[int] = None
     qr_generations_count: Optional[int] = None
     registration_stopped: Optional[bool] = None
     status: Optional[str] = None
@@ -63,6 +69,9 @@ class EventResponse(BaseModel):
     participant_count: int = 0
     volunteers_required: int = 0
     volunteers_registered: int = 0
+    is_team_event: bool = False
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
     cert_count: int = 0
     qr_generations_count: int = 0
     registration_stopped: bool = False

@@ -83,6 +83,9 @@ export default function SocietyEventDetail() {
       category: event?.category || 'Workshop',
       max_participants: event?.max_participants != null ? String(event.max_participants) : '',
       volunteers_required: event?.volunteers_required || 0,
+      is_team_event: !!event?.is_team_event,
+      min_team_size: event?.min_team_size || 2,
+      max_team_size: event?.max_team_size || 4,
       is_published: !!event?.is_published,
       registration_stopped: !!event?.registration_stopped,
     })
@@ -100,6 +103,9 @@ export default function SocietyEventDetail() {
       category: formData.category || 'Workshop',
       max_participants: formData.max_participants ? parseInt(formData.max_participants, 10) : null,
       volunteers_required: formData.volunteers_required ? parseInt(formData.volunteers_required, 10) : 0,
+      is_team_event: !!formData.is_team_event,
+      min_team_size: formData.min_team_size ? parseInt(formData.min_team_size, 10) : 2,
+      max_team_size: formData.max_team_size ? parseInt(formData.max_team_size, 10) : 4,
       is_published: !!formData.is_published,
       registration_stopped: !!formData.registration_stopped,
     }
@@ -240,6 +246,11 @@ export default function SocietyEventDetail() {
                       <span className="text-xs font-semibold text-navy bg-navy/5 px-2.5 py-1 rounded">
                         {sessionLabel}
                       </span>
+                      {event.is_team_event && (
+                        <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded ring-1 ring-blue-600/20">
+                          👥 Team Event ({event.min_team_size || 2} - {event.max_team_size || 4} members)
+                        </span>
+                      )}
                     </div>
                     <span
                       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${
@@ -534,6 +545,62 @@ export default function SocietyEventDetail() {
                           {...register('volunteers_required')}
                         />
                       </div>
+                    </div>
+
+                    {/* Participation Mode */}
+                    <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 space-y-2.5">
+                      <label className="form-label mb-1">Participation Type</label>
+                      <div className="flex items-center gap-6">
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
+                          <input
+                            type="radio"
+                            name="society_edit_participation_type"
+                            checked={!watch('is_team_event')}
+                            onChange={() => setValue('is_team_event', false)}
+                            className="text-teal-600 focus:ring-teal-500 h-4 w-4"
+                          />
+                          <span>👤 Individual (Solo)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
+                          <input
+                            type="radio"
+                            name="society_edit_participation_type"
+                            checked={!!watch('is_team_event')}
+                            onChange={() => setValue('is_team_event', true)}
+                            className="text-teal-600 focus:ring-teal-500 h-4 w-4"
+                          />
+                          <span>👥 Team Event</span>
+                        </label>
+                      </div>
+
+                      {watch('is_team_event') && (
+                        <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="form-label text-xs">Min Team Size</label>
+                            <input
+                              type="number"
+                              min={2}
+                              className="form-input text-xs"
+                              {...register('min_team_size', {
+                                valueAsNumber: true,
+                                min: { value: 2, message: 'Minimum 2 members' },
+                              })}
+                            />
+                          </div>
+                          <div>
+                            <label className="form-label text-xs">Max Team Size</label>
+                            <input
+                              type="number"
+                              min={watch('min_team_size') || 2}
+                              className="form-input text-xs"
+                              {...register('max_team_size', {
+                                valueAsNumber: true,
+                                min: { value: 2, message: 'Minimum 2 members' },
+                              })}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-2 pt-1 border-t border-gray-100">

@@ -104,6 +104,9 @@ def _event_response(e: Event, cert_count: int = 0, volunteers_registered: int = 
         participant_count=e.participant_count,
         volunteers_required=getattr(e, "volunteers_required", 0) or 0,
         volunteers_registered=volunteers_registered,
+        is_team_event=getattr(e, "is_team_event", False) or False,
+        min_team_size=getattr(e, "min_team_size", 2) or 2,
+        max_team_size=getattr(e, "max_team_size", 4) or 4,
         cert_count=cert_count,
         qr_generations_count=getattr(e, "qr_generations_count", 0) or 0,
         registration_stopped=getattr(e, "registration_stopped", False) or False,
@@ -200,6 +203,9 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
         template_map=tmap, assets=inherited_assets,
         volunteers_required=body.volunteers_required,
         max_participants=body.max_participants,
+        is_team_event=body.is_team_event,
+        min_team_size=body.min_team_size or 2,
+        max_team_size=body.max_team_size or 4,
         is_published=body.is_published,
     )
     await event.insert()

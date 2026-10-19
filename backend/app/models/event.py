@@ -65,6 +65,9 @@ class Event(Document):
     max_participants: Optional[int] = None
     participant_count: int = 0
     volunteers_required: int = 0
+    is_team_event: bool = False
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
     qr_generations_count: int = 0
     registration_stopped: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)

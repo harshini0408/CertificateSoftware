@@ -17,6 +17,9 @@ class EventRegistration(Document):
     slot: Optional[str] = None  # Specific slot e.g. "8:45 AM - 10:15 AM"
     registration_type: str = "participant"
     status: str = "accepted"  # "accepted", "pending", "rejected"
+    team_id: Optional[str] = None
+    team_name: Optional[str] = None
+    team_role: Optional[str] = None  # "leader" or "member"
     registered_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:

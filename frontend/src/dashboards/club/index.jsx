@@ -187,6 +187,9 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       slot: '8:45 AM - 10:15 AM',
       timing: '',
       venue: '',
+      is_team_event: false,
+      min_team_size: 2,
+      max_team_size: 4,
     },
   })
 
@@ -309,12 +312,19 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
   const eventColumns = [
     { key: 'name', header: 'Event', sortable: true, searchKey: true,
       render: (v, row) => (
-        <button
-          className="text-sm font-semibold text-navy hover:underline text-left"
-          onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)}
-        >
-          {v}
-        </button>
+        <div className="flex flex-col items-start gap-1">
+          <button
+            className="text-sm font-semibold text-navy hover:underline text-left"
+            onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)}
+          >
+            {v}
+          </button>
+          {row.is_team_event && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
+              👥 Team ({row.min_team_size || 2}-{row.max_team_size || 4})
+            </span>
+          )}
+        </div>
       )
     },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
@@ -552,6 +562,64 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   />
                   {errors.volunteers_required && <p className="form-error">{errors.volunteers_required.message}</p>}
                 </div>
+              </div>
+
+              {/* Participation Mode */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 space-y-2.5">
+                <label className="form-label mb-1">Participation Type *</label>
+                <div className="flex items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
+                    <input
+                      type="radio"
+                      name="club_participation_type"
+                      checked={!watch('is_team_event')}
+                      onChange={() => setValue('is_team_event', false)}
+                      className="text-navy focus:ring-navy h-4 w-4"
+                    />
+                    <span>👤 Individual (Solo)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
+                    <input
+                      type="radio"
+                      name="club_participation_type"
+                      checked={!!watch('is_team_event')}
+                      onChange={() => setValue('is_team_event', true)}
+                      className="text-navy focus:ring-navy h-4 w-4"
+                    />
+                    <span>👥 Team Event</span>
+                  </label>
+                </div>
+
+                {watch('is_team_event') && (
+                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="form-label text-xs">Min Team Size *</label>
+                      <input
+                        type="number"
+                        min={2}
+                        className="form-input text-xs"
+                        {...register('min_team_size', {
+                          valueAsNumber: true,
+                          min: { value: 2, message: 'Minimum 2 members' },
+                        })}
+                      />
+                      {errors.min_team_size && <p className="form-error">{errors.min_team_size.message}</p>}
+                    </div>
+                    <div>
+                      <label className="form-label text-xs">Max Team Size *</label>
+                      <input
+                        type="number"
+                        min={watch('min_team_size') || 2}
+                        className="form-input text-xs"
+                        {...register('max_team_size', {
+                          valueAsNumber: true,
+                          min: { value: 2, message: 'Minimum 2 members' },
+                        })}
+                      />
+                      {errors.max_team_size && <p className="form-error">{errors.max_team_size.message}</p>}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>

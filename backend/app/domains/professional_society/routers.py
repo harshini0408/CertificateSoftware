@@ -63,6 +63,9 @@ class SocietyEventCreate(BaseModel):
     academic_years: List[str] = Field(default_factory=list)
     max_participants: Optional[int] = None
     volunteers_required: int = 0
+    is_team_event: bool = False
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
     is_published: bool = False
 
 
@@ -78,6 +81,9 @@ class SocietyEventUpdate(BaseModel):
     academic_years: Optional[List[str]] = None
     max_participants: Optional[int] = None
     volunteers_required: Optional[int] = None
+    is_team_event: Optional[bool] = None
+    min_team_size: Optional[int] = None
+    max_team_size: Optional[int] = None
     registration_stopped: Optional[bool] = None
     status: Optional[str] = None
     is_published: Optional[bool] = None
@@ -174,6 +180,9 @@ async def get_society_events(
             "participant_count": e.participant_count,
             "volunteers_required": e.volunteers_required,
             "volunteers_registered": e.volunteers_registered,
+            "is_team_event": getattr(e, "is_team_event", False) or False,
+            "min_team_size": getattr(e, "min_team_size", 2) or 2,
+            "max_team_size": getattr(e, "max_team_size", 4) or 4,
             "registration_stopped": e.registration_stopped,
             "created_at": e.created_at,
         }
@@ -206,6 +215,9 @@ async def create_society_event(
         status=status_val,
         max_participants=body.max_participants,
         volunteers_required=body.volunteers_required,
+        is_team_event=body.is_team_event,
+        min_team_size=body.min_team_size or 2,
+        max_team_size=body.max_team_size or 4,
         is_published=body.is_published,
     )
     await new_event.insert()
@@ -241,6 +253,9 @@ async def get_society_event_detail(
         "participant_count": event.participant_count,
         "volunteers_required": event.volunteers_required,
         "volunteers_registered": event.volunteers_registered,
+        "is_team_event": getattr(event, "is_team_event", False) or False,
+        "min_team_size": getattr(event, "min_team_size", 2) or 2,
+        "max_team_size": getattr(event, "max_team_size", 4) or 4,
         "registration_stopped": event.registration_stopped,
         "report_url": event.report_url,
         "report_status": event.report_status,
