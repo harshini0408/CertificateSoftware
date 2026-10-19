@@ -1407,6 +1407,14 @@ export default function StudentDashboard() {
                   <p className="mb-3 text-sm text-gray-500">
                     Upload your certificate, choose role and event date. Credits are added only after tutor verification.
                   </p>
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-semibold">Certificate submission guidelines</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      <li>Upload certificates only for external events attended in the current semester.</li>
+                      <li>Do not upload certificates for events attended in previous semesters.</li>
+                      <li>Certificates for events conducted by the college will not be considered for verification.</li>
+                    </ul>
+                  </div>
 
                   <form className="grid grid-cols-1 gap-3 sm:grid-cols-4" onSubmit={handleManualSubmit}>
                     <div>
