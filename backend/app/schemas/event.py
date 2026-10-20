@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Dict, List, Optional, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class EventCreate(BaseModel):
@@ -20,6 +20,7 @@ class EventCreate(BaseModel):
     is_team_event: bool = False
     min_team_size: Optional[int] = 2
     max_team_size: Optional[int] = 4
+    max_teams: Optional[int] = None
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
     is_published: bool = False
 
@@ -40,6 +41,7 @@ class EventUpdate(BaseModel):
     is_team_event: Optional[bool] = None
     min_team_size: Optional[int] = None
     max_team_size: Optional[int] = None
+    max_teams: Optional[int] = None
     qr_generations_count: Optional[int] = None
     registration_stopped: Optional[bool] = None
     status: Optional[str] = None
@@ -72,6 +74,8 @@ class EventResponse(BaseModel):
     is_team_event: bool = False
     min_team_size: Optional[int] = 2
     max_team_size: Optional[int] = 4
+    max_teams: Optional[int] = None
+    team_count: int = 0
     cert_count: int = 0
     qr_generations_count: int = 0
     registration_stopped: bool = False

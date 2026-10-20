@@ -927,15 +927,20 @@ async def list_upcoming_events(
 
     # Count registrations per event
     all_regs = await EventRegistration.find().to_list()
-    reg_counts = {}
+    participant_counts = {}
     volunteer_counts = {}
+    team_counts = {}
     for r in all_regs:
         eid = str(r.event_id)
         reg_type = getattr(r, "registration_type", "participant")
         reg_status = getattr(r, "status", "accepted")
-        reg_counts[eid] = reg_counts.get(eid, 0) + 1
-        if reg_type == "volunteer" and reg_status != "rejected":
-            volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
+        if reg_type == "volunteer":
+            if reg_status != "rejected":
+                volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
+        else:
+            participant_counts[eid] = participant_counts.get(eid, 0) + 1
+            if getattr(r, "team_id", None) and getattr(r, "team_role", None) == "leader":
+                team_counts[eid] = team_counts.get(eid, 0) + 1
 
     results = []
     for e in events:
@@ -960,7 +965,9 @@ async def list_upcoming_events(
             "min_team_size": getattr(e, "min_team_size", 2) or 2,
             "max_team_size": getattr(e, "max_team_size", 4) or 4,
             "max_participants": getattr(e, "max_participants", None),
-            "participant_count": max(e.participant_count or 0, reg_counts.get(eid, 0) - volunteer_counts.get(eid, 0)),
+            "max_teams": getattr(e, "max_teams", None),
+            "team_count": max(getattr(e, "team_count", 0) or 0, team_counts.get(eid, 0)),
+            "participant_count": max(getattr(e, "participant_count", 0) or 0, participant_counts.get(eid, 0)),
             "is_registered": my_reg is not None,
             "registration_id": my_reg["id"] if my_reg else None,
             "registration_type": my_reg["type"] if my_reg else None,
@@ -992,17 +999,6 @@ async def register_for_event(
             status.HTTP_400_BAD_REQUEST,
             "Registration has been stopped for this event. Max participants reached."
         )
-
-    # Max participants check
-    max_p = getattr(event, "max_participants", None)
-    if max_p and max_p > 0:
-        reg_count = await EventRegistration.find(EventRegistration.event_id == event_id).count()
-        current_count = max(event.participant_count or 0, reg_count)
-        if current_count >= max_p:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                f"This event has reached its maximum capacity of {max_p} participants."
-            )
 
     student_email = current_user.email.lower()
 
@@ -1055,8 +1051,7 @@ async def register_for_event(
         max_p = getattr(event, "max_participants", None)
         if max_p is not None and max_p > 0:
             reg_count = await EventRegistration.find(
-                EventRegistration.event_id == event_id,
-                EventRegistration.registration_type == "participant"
+                {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
             ).count()
             current_count = max(event.participant_count or 0, reg_count)
             if current_count >= max_p:
@@ -1137,8 +1132,12 @@ async def register_for_event(
         )
         await p.insert()
 
-    # Increment participant count
-    await event.set({"participant_count": event.participant_count + 1})
+    # Update participant count dynamically (volunteers are tracked separately)
+    if type == "participant":
+        total_participants = await EventRegistration.find(
+            {"event_id": event.id, "registration_type": {"$ne": "volunteer"}}
+        ).count()
+        await event.set({"participant_count": total_participants})
 
     msg = f"Volunteer request submitted for '{event.name}'. Awaiting club coordinator approval." if type == "volunteer" else f"Successfully registered for '{event.name}'"
     return {
@@ -1285,9 +1284,23 @@ async def register_team_for_event(
             f"Team size must be between {min_s} and {max_s} members (including leader). Current: {total_team_size}"
         )
 
+    max_t = getattr(event, "max_teams", None)
+    if max_t and max_t > 0:
+        teams_count = await EventRegistration.find(
+            EventRegistration.event_id == event_id,
+            EventRegistration.team_role == "leader",
+        ).count()
+        if teams_count >= max_t:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Registration limit reached: This event is capped at {max_t} teams."
+            )
+
     max_p = getattr(event, "max_participants", None)
     if max_p and max_p > 0:
-        reg_count = await EventRegistration.find(EventRegistration.event_id == event_id).count()
+        reg_count = await EventRegistration.find(
+            {"event_id": event_id, "registration_type": "participant"}
+        ).count()
         current_count = max(event.participant_count or 0, reg_count)
         if current_count + total_team_size > max_p:
             available = max(0, max_p - current_count)
@@ -1408,7 +1421,17 @@ async def register_team_for_event(
             )
             await p.insert()
 
-    await event.set({"participant_count": (event.participant_count or 0) + total_team_size})
+    total_participants = await EventRegistration.find(
+        {"event_id": event.id, "registration_type": "participant"}
+    ).count()
+    teams_count = await EventRegistration.find(
+        EventRegistration.event_id == event.id,
+        EventRegistration.team_role == "leader",
+    ).count()
+    await event.set({
+        "participant_count": total_participants,
+        "team_count": teams_count,
+    })
 
     return {
         "message": f"Team '{team_name}' ({total_team_size} members) registered successfully!",
@@ -1443,7 +1466,6 @@ async def cancel_event_registration(
                 EventRegistration.team_id == team_id,
             ).to_list()
             emails = [r.student_email for r in team_regs]
-            deleted_count = len(team_regs)
             for r in team_regs:
                 await r.delete()
             team_parts = await Participant.find({
@@ -1454,8 +1476,18 @@ async def cancel_event_registration(
             for p in team_parts:
                 await p.delete()
             event = await Event.get(event_id)
-            if event and event.participant_count > 0:
-                await event.set({"participant_count": max(0, event.participant_count - deleted_count)})
+            if event:
+                total_participants = await EventRegistration.find(
+                    {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+                ).count()
+                teams_count = await EventRegistration.find(
+                    EventRegistration.event_id == event_id,
+                    EventRegistration.team_role == "leader",
+                ).count()
+                await event.set({
+                    "participant_count": total_participants,
+                    "team_count": teams_count,
+                })
             return {"message": f"Team registration for '{reg.team_name or 'team'}' cancelled successfully"}
         else:
             await reg.delete()
@@ -1467,8 +1499,11 @@ async def cancel_event_registration(
             if p:
                 await p.delete()
             event = await Event.get(event_id)
-            if event and event.participant_count > 0:
-                await event.set({"participant_count": max(0, event.participant_count - 1)})
+            if event:
+                total_participants = await EventRegistration.find(
+                    {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+                ).count()
+                await event.set({"participant_count": total_participants})
             return {"message": "You have left the team registration"}
 
     await reg.delete()
@@ -1481,8 +1516,11 @@ async def cancel_event_registration(
         await p.delete()
 
     event = await Event.get(event_id)
-    if event and event.participant_count > 0:
-        await event.set({"participant_count": max(0, event.participant_count - 1)})
+    if event:
+        total_participants = await EventRegistration.find(
+            {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+        ).count()
+        await event.set({"participant_count": total_participants})
 
     return {"message": "Registration cancelled successfully"}
 
@@ -1536,15 +1574,20 @@ async def list_upcoming_society_events(
         }
 
     all_regs = await EventRegistration.find().to_list()
-    reg_counts = {}
+    participant_counts = {}
     volunteer_counts = {}
+    team_counts = {}
     for r in all_regs:
         eid = str(r.event_id)
         reg_type = getattr(r, "registration_type", "participant")
         reg_status = getattr(r, "status", "accepted")
-        reg_counts[eid] = reg_counts.get(eid, 0) + 1
-        if reg_type == "volunteer" and reg_status != "rejected":
-            volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
+        if reg_type == "volunteer":
+            if reg_status != "rejected":
+                volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
+        else:
+            participant_counts[eid] = participant_counts.get(eid, 0) + 1
+            if getattr(r, "team_id", None) and getattr(r, "team_role", None) == "leader":
+                team_counts[eid] = team_counts.get(eid, 0) + 1
 
     results = []
     for e in events:
@@ -1567,7 +1610,9 @@ async def list_upcoming_society_events(
             "min_team_size": getattr(e, "min_team_size", 2) or 2,
             "max_team_size": getattr(e, "max_team_size", 4) or 4,
             "max_participants": getattr(e, "max_participants", None),
-            "participant_count": max(getattr(e, "participant_count", 0) or 0, reg_counts.get(eid, 0) - volunteer_counts.get(eid, 0)),
+            "max_teams": getattr(e, "max_teams", None),
+            "team_count": max(getattr(e, "team_count", 0) or 0, team_counts.get(eid, 0)),
+            "participant_count": max(getattr(e, "participant_count", 0) or 0, participant_counts.get(eid, 0)),
             "is_registered": my_reg is not None,
             "registration_id": my_reg["id"] if my_reg else None,
             "registration_type": my_reg["type"] if my_reg else None,
@@ -1599,16 +1644,6 @@ async def register_for_society_event(
             status.HTTP_400_BAD_REQUEST,
             "Registration has been stopped for this event. Max participants reached."
         )
-
-    max_p = getattr(event, "max_participants", None)
-    if max_p and max_p > 0:
-        reg_count = await EventRegistration.find(EventRegistration.event_id == event_id).count()
-        current_count = max(event.participant_count or 0, reg_count)
-        if current_count >= max_p:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                f"This event has reached its maximum capacity of {max_p} participants."
-            )
 
     student_email = current_user.email.lower()
 
@@ -1662,8 +1697,7 @@ async def register_for_society_event(
         max_p = getattr(event, "max_participants", None)
         if max_p is not None and max_p > 0:
             reg_count = await EventRegistration.find(
-                EventRegistration.event_id == event_id,
-                EventRegistration.registration_type == "participant"
+                {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
             ).count()
             current_count = max(getattr(event, "participant_count", 0) or 0, reg_count)
             if current_count >= max_p:
@@ -1699,7 +1733,11 @@ async def register_for_society_event(
     )
     await reg.insert()
 
-    await event.set({"participant_count": (event.participant_count or 0) + 1})
+    if type == "participant":
+        total_participants = await EventRegistration.find(
+            {"event_id": event.id, "registration_type": {"$ne": "volunteer"}}
+        ).count()
+        await event.set({"participant_count": total_participants})
 
     msg = f"Volunteer request submitted for '{event.name}'. Awaiting coordinator approval." if type == "volunteer" else f"Successfully registered for '{event.name}'"
     return {
@@ -1747,9 +1785,23 @@ async def register_team_for_society_event(
             f"Team size must be between {min_s} and {max_s} members (including leader). Current: {total_team_size}"
         )
 
+    max_t = getattr(event, "max_teams", None)
+    if max_t and max_t > 0:
+        teams_count = await EventRegistration.find(
+            EventRegistration.event_id == event_id,
+            EventRegistration.team_role == "leader",
+        ).count()
+        if teams_count >= max_t:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Registration limit reached: This event is capped at {max_t} teams."
+            )
+
     max_p = getattr(event, "max_participants", None)
     if max_p and max_p > 0:
-        reg_count = await EventRegistration.find(EventRegistration.event_id == event_id).count()
+        reg_count = await EventRegistration.find(
+            {"event_id": event_id, "registration_type": "participant"}
+        ).count()
         current_count = max(event.participant_count or 0, reg_count)
         if current_count + total_team_size > max_p:
             available = max(0, max_p - current_count)
@@ -1828,7 +1880,17 @@ async def register_team_for_society_event(
         )
         await reg.insert()
 
-    await event.set({"participant_count": (event.participant_count or 0) + total_team_size})
+    total_participants = await EventRegistration.find(
+        {"event_id": event.id, "registration_type": "participant"}
+    ).count()
+    teams_count = await EventRegistration.find(
+        EventRegistration.event_id == event.id,
+        EventRegistration.team_role == "leader",
+    ).count()
+    await event.set({
+        "participant_count": total_participants,
+        "team_count": teams_count,
+    })
 
     return {
         "message": f"Team '{team_name}' ({total_team_size} members) registered successfully!",
@@ -1860,25 +1922,40 @@ async def cancel_society_event_registration(
                 EventRegistration.event_id == event_id,
                 EventRegistration.team_id == team_id,
             ).to_list()
-            deleted_count = len(team_regs)
             for r in team_regs:
                 await r.delete()
             event = await SocietyEvent.get(event_id)
-            if event and (event.participant_count or 0) > 0:
-                await event.set({"participant_count": max(0, event.participant_count - deleted_count)})
+            if event:
+                total_participants = await EventRegistration.find(
+                    {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+                ).count()
+                teams_count = await EventRegistration.find(
+                    EventRegistration.event_id == event_id,
+                    EventRegistration.team_role == "leader",
+                ).count()
+                await event.set({
+                    "participant_count": total_participants,
+                    "team_count": teams_count,
+                })
             return {"message": f"Team registration for '{reg.team_name or 'team'}' cancelled successfully"}
         else:
             await reg.delete()
             event = await SocietyEvent.get(event_id)
-            if event and (event.participant_count or 0) > 0:
-                await event.set({"participant_count": max(0, event.participant_count - 1)})
+            if event:
+                total_participants = await EventRegistration.find(
+                    {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+                ).count()
+                await event.set({"participant_count": total_participants})
             return {"message": "You have left the team registration"}
 
     await reg.delete()
 
     event = await SocietyEvent.get(event_id)
-    if event and (event.participant_count or 0) > 0:
-        await event.set({"participant_count": max(0, event.participant_count - 1)})
+    if event:
+        total_participants = await EventRegistration.find(
+            {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+        ).count()
+        await event.set({"participant_count": total_participants})
 
     return {"message": "Registration cancelled successfully"}
 

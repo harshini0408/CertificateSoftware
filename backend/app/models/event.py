@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Literal
+from typing import Dict, List, Optional, Any
 
 from beanie import Document, PydanticObjectId
 from pydantic import BaseModel, Field, field_validator
@@ -68,6 +68,8 @@ class Event(Document):
     is_team_event: bool = False
     min_team_size: Optional[int] = 2
     max_team_size: Optional[int] = 4
+    max_teams: Optional[int] = None
+    team_count: int = 0
     qr_generations_count: int = 0
     registration_stopped: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)

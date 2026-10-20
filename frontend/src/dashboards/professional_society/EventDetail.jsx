@@ -58,6 +58,7 @@ export default function SocietyEventDetail() {
     handleSubmit,
     reset,
     setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm()
 
@@ -86,6 +87,7 @@ export default function SocietyEventDetail() {
       is_team_event: !!event?.is_team_event,
       min_team_size: event?.min_team_size || 2,
       max_team_size: event?.max_team_size || 4,
+      max_teams: event?.max_teams != null ? String(event.max_teams) : '',
       is_published: !!event?.is_published,
       registration_stopped: !!event?.registration_stopped,
     })
@@ -106,6 +108,7 @@ export default function SocietyEventDetail() {
       is_team_event: !!formData.is_team_event,
       min_team_size: formData.min_team_size ? parseInt(formData.min_team_size, 10) : 2,
       max_team_size: formData.max_team_size ? parseInt(formData.max_team_size, 10) : 4,
+      max_teams: formData.is_team_event && formData.max_teams ? parseInt(formData.max_teams, 10) : null,
       is_published: !!formData.is_published,
       registration_stopped: !!formData.registration_stopped,
     }
@@ -309,6 +312,27 @@ export default function SocietyEventDetail() {
                         </span>
                       )}
                     </div>
+
+                    {event.is_team_event && (
+                      <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
+                        <span className="text-xs font-semibold uppercase text-gray-500">Teams Registered</span>
+                        <div className="flex items-baseline gap-2 mt-1">
+                          <span className="text-2xl font-extrabold text-blue-700">
+                            {event.team_count ?? 0}
+                          </span>
+                          {event.max_teams && (
+                            <span className="text-xs text-gray-500 font-medium">
+                              / {event.max_teams} teams limit
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-400 mt-2">
+                          {event.max_teams
+                            ? `${Math.max(0, event.max_teams - (event.team_count ?? 0))} team slot(s) remaining`
+                            : 'No maximum team limit'}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
                       <span className="text-xs font-semibold uppercase text-gray-500">Student Volunteers</span>
@@ -574,7 +598,7 @@ export default function SocietyEventDetail() {
                       </div>
 
                       {watch('is_team_event') && (
-                        <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
                             <label className="form-label text-xs">Min Team Size</label>
                             <input
@@ -597,6 +621,16 @@ export default function SocietyEventDetail() {
                                 valueAsNumber: true,
                                 min: { value: 2, message: 'Minimum 2 members' },
                               })}
+                            />
+                          </div>
+                          <div>
+                            <label className="form-label text-xs">Max Teams (Optional)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              placeholder="Unlimited"
+                              className="form-input text-xs"
+                              {...register('max_teams')}
                             />
                           </div>
                         </div>

@@ -99,6 +99,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [editIsTeamEvent, setEditIsTeamEvent] = useState(false)
   const [editMinTeamSize, setEditMinTeamSize] = useState(2)
   const [editMaxTeamSize, setEditMaxTeamSize] = useState(4)
+  const [editMaxTeams, setEditMaxTeams] = useState('')
 
   const EDIT_SLOTS = {
     FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
@@ -145,6 +146,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     setEditIsTeamEvent(!!event?.is_team_event)
     setEditMinTeamSize(event?.min_team_size || 2)
     setEditMaxTeamSize(event?.max_team_size || 4)
+    setEditMaxTeams(event?.max_teams != null ? String(event.max_teams) : '')
     setIsEditing(true)
   }
 
@@ -166,6 +168,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
         is_team_event: editIsTeamEvent,
         min_team_size: editMinTeamSize,
         max_team_size: editMaxTeamSize,
+        max_teams: editIsTeamEvent && editMaxTeams ? parseInt(editMaxTeams, 10) : null,
       },
       {
         onSuccess: () => setIsEditing(false),
@@ -406,7 +409,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 </div>
 
                 {editIsTeamEvent && (
-                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="form-label text-xs">Min Team Size</label>
                       <input
@@ -425,6 +428,18 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                         className="form-input text-xs"
                         value={editMaxTeamSize}
                         onChange={(e) => setEditMaxTeamSize(Math.max(editMinTeamSize, parseInt(e.target.value, 10) || editMinTeamSize))}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label text-xs">Max Teams (Optional)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        className="form-input text-xs"
+                        placeholder="e.g. 10 (unlimited)"
+                        value={editMaxTeams}
+                        onChange={(e) => setEditMaxTeams(e.target.value)}
+                        onWheel={(e) => e.target.blur()}
                       />
                     </div>
                   </div>
@@ -461,8 +476,12 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 ['Category', event?.category || '—'],
                 ['Academic Year', event?.academic_year || '—'],
                 ['Participation Type', event?.is_team_event ? `Team Event (${event.min_team_size || 2} - ${event.max_team_size || 4} members)` : 'Individual (Solo)'],
+                ...(event?.is_team_event ? [
+                  ['Max Teams', event?.max_teams ? `${event.max_teams} teams` : 'Unlimited'],
+                  ['Teams Registered', `${(event?.team_count ?? 0).toLocaleString()}${event?.max_teams ? ` / ${event.max_teams}` : ''}`],
+                ] : []),
                 ['Registration Status', event?.registration_stopped ? 'Stopped' : 'Open'],
-                ['Participants', (event?.participant_count ?? 0).toLocaleString()],
+                ['Participants', `${(event?.participant_count ?? 0).toLocaleString()}${event?.max_participants ? ` / ${event.max_participants}` : ''}`],
                 ['Certificates Issued', (event?.cert_count ?? 0).toLocaleString()],
               ].map(([label, value]) => (
                 <div key={label} className="flex flex-col gap-0.5">

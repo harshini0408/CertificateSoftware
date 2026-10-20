@@ -1,10 +1,9 @@
 import hashlib
 from datetime import datetime as _datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Any
 
 from beanie import PydanticObjectId
-from bson import ObjectId as _ObjId
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from pydantic import BaseModel, Field
 
@@ -12,9 +11,8 @@ from ...core.dependencies import get_current_user, require_role, require_society
 from ...models.user import User, UserRole
 from ...models.professional_society import ProfessionalSociety, DEFAULT_SOCIETY_OFFICE_BEARER_POSITIONS
 from ...models.society_event import SocietyEvent, SocietyEventStatus
+from ...models.event_registration import EventRegistration
 from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
-from ...models.attendance import Attendance
-from ...models.attendance_session import AttendanceSession
 from ...schemas.professional_society import SocietyResponse
 from ...config import get_settings
 from ...services.signature_service import process_signature, save_logo
@@ -66,6 +64,7 @@ class SocietyEventCreate(BaseModel):
     is_team_event: bool = False
     min_team_size: Optional[int] = 2
     max_team_size: Optional[int] = 4
+    max_teams: Optional[int] = None
     is_published: bool = False
 
 
@@ -84,6 +83,7 @@ class SocietyEventUpdate(BaseModel):
     is_team_event: Optional[bool] = None
     min_team_size: Optional[int] = None
     max_team_size: Optional[int] = None
+    max_teams: Optional[int] = None
     registration_stopped: Optional[bool] = None
     status: Optional[str] = None
     is_published: Optional[bool] = None
@@ -162,9 +162,27 @@ async def get_society_events(
     _user: User = Depends(require_society_access),
 ):
     events = await SocietyEvent.find(SocietyEvent.society_id == society_id).sort("-created_at").to_list()
-    return [
-        {
-            "id": str(e.id),
+    event_ids = [e.id for e in events]
+    participant_regs = await EventRegistration.find(
+        {"event_id": {"$in": event_ids}, "registration_type": {"$ne": "volunteer"}}
+    ).to_list() if event_ids else []
+    reg_counts = {}
+    team_counts = {}
+    for pr in participant_regs:
+        eid = str(pr.event_id)
+        reg_counts[eid] = reg_counts.get(eid, 0) + 1
+        if getattr(pr, "team_id", None) and getattr(pr, "team_role", None) == "leader":
+            team_counts[eid] = team_counts.get(eid, 0) + 1
+
+    result = []
+    for e in events:
+        eid = str(e.id)
+        actual_count = max(e.participant_count or 0, reg_counts.get(eid, 0))
+        if actual_count != e.participant_count:
+            await e.set({"participant_count": actual_count})
+            e.participant_count = actual_count
+        result.append({
+            "id": eid,
             "society_id": str(e.society_id),
             "name": e.name,
             "description": e.description,
@@ -183,11 +201,12 @@ async def get_society_events(
             "is_team_event": getattr(e, "is_team_event", False) or False,
             "min_team_size": getattr(e, "min_team_size", 2) or 2,
             "max_team_size": getattr(e, "max_team_size", 4) or 4,
+            "max_teams": getattr(e, "max_teams", None),
+            "team_count": team_counts.get(eid, 0),
             "registration_stopped": e.registration_stopped,
             "created_at": e.created_at,
-        }
-        for e in events
-    ]
+        })
+    return result
 
 
 @router.post("/{society_id}/events", status_code=201)
@@ -218,6 +237,7 @@ async def create_society_event(
         is_team_event=body.is_team_event,
         min_team_size=body.min_team_size or 2,
         max_team_size=body.max_team_size or 4,
+        max_teams=body.max_teams,
         is_published=body.is_published,
     )
     await new_event.insert()
@@ -233,6 +253,18 @@ async def get_society_event_detail(
     event = await SocietyEvent.get(event_id)
     if not event or event.society_id != society_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+
+    reg_count = await EventRegistration.find(
+        {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+    ).count()
+    if reg_count != event.participant_count:
+        await event.set({"participant_count": max(event.participant_count or 0, reg_count)})
+        event.participant_count = max(event.participant_count or 0, reg_count)
+
+    team_count = await EventRegistration.find(
+        EventRegistration.event_id == event_id,
+        EventRegistration.team_role == "leader",
+    ).count()
 
     return {
         "id": str(event.id),
@@ -256,6 +288,8 @@ async def get_society_event_detail(
         "is_team_event": getattr(event, "is_team_event", False) or False,
         "min_team_size": getattr(event, "min_team_size", 2) or 2,
         "max_team_size": getattr(event, "max_team_size", 4) or 4,
+        "max_teams": getattr(event, "max_teams", None),
+        "team_count": team_count,
         "registration_stopped": event.registration_stopped,
         "report_url": event.report_url,
         "report_status": event.report_status,
@@ -274,7 +308,7 @@ async def update_society_event(
     if not event or event.society_id != society_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
-    updates = body.model_dump(exclude_none=True)
+    updates = body.model_dump(exclude_unset=True)
     if "is_published" in updates and "status" not in updates:
         updates["status"] = SocietyEventStatus.ACTIVE if updates["is_published"] else SocietyEventStatus.DRAFT
 

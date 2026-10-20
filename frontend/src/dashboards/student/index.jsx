@@ -748,6 +748,10 @@ export default function StudentDashboard() {
   const [teammates, setTeammates] = useState([])
 
   const handleOpenTeamModal = (event, isSociety = false) => {
+    if (event.max_teams != null && (event.team_count ?? 0) >= event.max_teams) {
+      addToast({ type: 'warning', message: 'Maximum teams limit reached for this event.' })
+      return
+    }
     setTeamName('')
     const initialTeammatesCount = Math.max(1, (event.min_team_size || 2) - 1)
     const initialRows = Array.from({ length: initialTeammatesCount }, () => ({
@@ -1303,6 +1307,51 @@ export default function StudentDashboard() {
                   <span className="truncate">{ev.venue}</span>
                 </div>
               )}
+
+              {/* Dynamic Capacity / Registration Stats */}
+              <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
+                {ev.is_team_event ? (
+                  <>
+                    <span className="text-gray-500 font-medium">
+                      🛡️ Teams: <strong className="text-navy">{ev.team_count ?? 0}</strong>
+                      {ev.max_teams ? ` / ${ev.max_teams}` : ''}
+                    </span>
+                    {ev.max_teams ? (
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                        (ev.team_count ?? 0) >= ev.max_teams
+                          ? 'bg-red-50 text-red-700 ring-1 ring-red-200'
+                          : 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
+                      }`}>
+                        {(ev.team_count ?? 0) >= ev.max_teams
+                          ? 'Teams Full'
+                          : `${Math.max(0, ev.max_teams - (ev.team_count ?? 0))} teams left`}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-gray-400 font-medium">Unlimited teams</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="text-gray-500 font-medium">
+                      👥 Registered: <strong className="text-navy">{ev.participant_count ?? 0}</strong>
+                      {ev.max_participants ? ` / ${ev.max_participants}` : ''}
+                    </span>
+                    {ev.max_participants ? (
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                        (ev.participant_count ?? 0) >= ev.max_participants
+                          ? 'bg-red-50 text-red-700 ring-1 ring-red-200'
+                          : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                      }`}>
+                        {(ev.participant_count ?? 0) >= ev.max_participants
+                          ? 'Full'
+                          : `${Math.max(0, ev.max_participants - (ev.participant_count ?? 0))} seats left`}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-gray-400 font-medium">Unlimited seats</span>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1375,59 +1424,74 @@ export default function StudentDashboard() {
                   : 'Cancel Registration'}
               </button>
             </div>
-          ) : (ev.registration_stopped || (ev.max_participants != null && ev.participant_count >= ev.max_participants)) ? (
-            <div className="w-full flex flex-col items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 text-center space-y-1">
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-amber-700">
-                <span>⚠️</span> Max Capacity Reached
-              </span>
-              <p className="text-xs font-medium text-amber-800 leading-snug">
-                Max participants reached for this event.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {ev.is_team_event ? (
-                <button
-                  type="button"
-                  onClick={() => handleOpenTeamModal(ev, isSociety)}
-                  className="btn-primary w-full text-xs justify-center"
-                >
-                  👥 Register as Team ({ev.min_team_size || 2}-{ev.max_team_size || 4} Members)
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => isSociety ? handleRegisterSociety(ev.id, 'participant') : handleRegister(ev.id, 'participant')}
-                  disabled={(registerForEvent.isPending || registerSocietyEvent.isPending) && registeringEventId === ev.id}
-                  className="btn-primary w-full text-xs justify-center"
-                >
-                  {registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
-                </button>
-              )}
+          ) : (() => {
+            const isIndividualFull = !ev.is_team_event && ev.max_participants != null && (ev.participant_count ?? 0) >= ev.max_participants
+            const isTeamFull = ev.is_team_event && (
+              (ev.max_teams != null && (ev.team_count ?? 0) >= ev.max_teams) ||
+              (ev.max_participants != null && (ev.participant_count ?? 0) >= ev.max_participants)
+            )
+            const isRegistrationClosed = ev.registration_stopped || isIndividualFull || isTeamFull
 
-              {(ev.volunteers_required || 0) > 0 && (
-                (ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) ? (
+            return (
+              <div className="space-y-2">
+                {isRegistrationClosed ? (
+                  <div className="w-full flex flex-col items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 text-center space-y-1">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-amber-700">
+                      <span>⚠️</span> {ev.registration_stopped ? 'Registration Closed' : isTeamFull ? 'Maximum Teams Reached' : 'Max Capacity Reached'}
+                    </span>
+                    <p className="text-xs font-medium text-amber-800 leading-snug">
+                      {ev.registration_stopped
+                        ? 'Registrations for this event have been closed by the coordinator.'
+                        : isTeamFull
+                        ? (ev.max_teams && (ev.team_count ?? 0) >= ev.max_teams
+                            ? `Maximum team limit (${ev.max_teams} teams) reached for this event.`
+                            : 'Maximum participants capacity reached for this event.')
+                        : `Maximum participation limit (${ev.max_participants} students) reached for this event.`}
+                    </p>
+                  </div>
+                ) : ev.is_team_event ? (
                   <button
                     type="button"
-                    disabled
-                    className="btn-secondary w-full text-xs justify-center opacity-60 cursor-not-allowed text-gray-500 bg-gray-100 border-gray-300 font-medium"
-                    title="Maximum volunteers already registered"
+                    onClick={() => handleOpenTeamModal(ev, isSociety)}
+                    className="btn-primary w-full text-xs justify-center"
                   >
-                    Maximum Volunteers Filled
+                    👥 Register as Team ({ev.min_team_size || 2}-{ev.max_team_size || 4} Members)
                   </button>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => isSociety ? handleRegisterSociety(ev.id, 'volunteer') : handleRegister(ev.id, 'volunteer')}
+                    onClick={() => isSociety ? handleRegisterSociety(ev.id, 'participant') : handleRegister(ev.id, 'participant')}
                     disabled={(registerForEvent.isPending || registerSocietyEvent.isPending) && registeringEventId === ev.id}
-                    className="btn-secondary w-full text-xs justify-center text-teal-700 border-teal-300 hover:bg-teal-50 font-semibold"
+                    className="btn-primary w-full text-xs justify-center"
                   >
-                    {registeringEventId === ev.id ? 'Submitting Request…' : 'Volunteer Register'}
+                    {registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
                   </button>
-                )
-              )}
-            </div>
-          )}
+                )}
+
+                {(ev.volunteers_required || 0) > 0 && (
+                  (ev.volunteers_registered || 0) >= (ev.volunteers_required || 0) ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="btn-secondary w-full text-xs justify-center opacity-60 cursor-not-allowed text-gray-500 bg-gray-100 border-gray-300 font-medium"
+                      title="Maximum volunteers already registered"
+                    >
+                      Maximum Volunteers Filled
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => isSociety ? handleRegisterSociety(ev.id, 'volunteer') : handleRegister(ev.id, 'volunteer')}
+                      disabled={(registerForEvent.isPending || registerSocietyEvent.isPending) && registeringEventId === ev.id}
+                      className="btn-secondary w-full text-xs justify-center text-teal-700 border-teal-300 hover:bg-teal-50 font-semibold"
+                    >
+                      {registeringEventId === ev.id ? 'Submitting Request…' : 'Volunteer Register'}
+                    </button>
+                  )
+                )}
+              </div>
+            )
+          })()}
         </div>
       </div>
     )
@@ -2143,6 +2207,11 @@ export default function StudentDashboard() {
                   <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-blue-100">
                     {teamModal.event.min_team_size || 2} - {teamModal.event.max_team_size || 4} Members
                   </span>
+                  {teamModal.event.max_teams && (
+                    <span className="rounded-full bg-blue-500/30 px-2 py-0.5 text-[10px] font-semibold text-blue-100">
+                      Teams: {teamModal.event.team_count ?? 0} / {teamModal.event.max_teams}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-blue-100/90 truncate max-w-md">
                   {teamModal.event.name} • {teamModal.event.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'}

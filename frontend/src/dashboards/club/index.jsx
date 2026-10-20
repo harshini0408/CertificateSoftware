@@ -190,6 +190,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       is_team_event: false,
       min_team_size: 2,
       max_team_size: 4,
+      max_teams: '',
     },
   })
 
@@ -243,6 +244,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
     const payload = {
       ...data,
+      max_teams: data.is_team_event && data.max_teams ? parseInt(data.max_teams, 10) : null,
       session: sessionCode,
       slot: data.slot,
       event_time: data.timing ? `${eventTimeStr} (${data.timing})` : eventTimeStr,
@@ -331,14 +333,27 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
     {
       key: 'participant_count',
-      header: 'Participants',
+      header: 'Participants / Teams',
       align: 'right',
       render: (v, row) => (
         <span className="font-medium">
-          {(v ?? 0).toLocaleString()}
-          {row.max_participants ? (
-            <span className="text-gray-400 font-normal"> / {row.max_participants}</span>
-          ) : null}
+          {row.is_team_event ? (
+            <>
+              {(row.team_count ?? 0).toLocaleString()}
+              {row.max_teams ? (
+                <span className="text-gray-400 font-normal"> / {row.max_teams} teams</span>
+              ) : (
+                <span className="text-gray-400 font-normal"> teams</span>
+              )}
+            </>
+          ) : (
+            <>
+              {(v ?? 0).toLocaleString()}
+              {row.max_participants ? (
+                <span className="text-gray-400 font-normal"> / {row.max_participants}</span>
+              ) : null}
+            </>
+          )}
         </span>
       ),
     },
@@ -606,7 +621,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                 </div>
 
                 {watch('is_team_event') && (
-                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="form-label text-xs">Min Team Size *</label>
                       <input
@@ -632,6 +647,21 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                         })}
                       />
                       {errors.max_team_size && <p className="form-error">{errors.max_team_size.message}</p>}
+                    </div>
+                    <div>
+                      <label className="form-label text-xs">Max Teams (Optional)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        className="form-input text-xs"
+                        placeholder="e.g. 10 (unlimited)"
+                        onWheel={(e) => e.target.blur()}
+                        {...register('max_teams', {
+                          setValueAs: v => (v === "" || v == null || isNaN(v)) ? null : parseInt(v, 10),
+                          min: { value: 1, message: 'Must be at least 1' }
+                        })}
+                      />
+                      {errors.max_teams && <p className="form-error">{errors.max_teams.message}</p>}
                     </div>
                   </div>
                 )}

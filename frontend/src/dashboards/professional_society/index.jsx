@@ -84,6 +84,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
     handleSubmit,
     reset,
     setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
@@ -99,6 +100,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       is_team_event: false,
       min_team_size: 2,
       max_team_size: 4,
+      max_teams: '',
       is_published: true,
     },
   })
@@ -117,6 +119,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       is_team_event: !!formData.is_team_event,
       min_team_size: formData.min_team_size ? parseInt(formData.min_team_size, 10) : 2,
       max_team_size: formData.max_team_size ? parseInt(formData.max_team_size, 10) : 4,
+      max_teams: formData.is_team_event && formData.max_teams ? parseInt(formData.max_teams, 10) : null,
       is_published: !!formData.is_published,
     }
 
@@ -158,6 +161,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       is_team_event: !!ev.is_team_event,
       min_team_size: ev.min_team_size || 2,
       max_team_size: ev.max_team_size || 4,
+      max_teams: ev.max_teams != null ? String(ev.max_teams) : '',
       is_published: !!ev.is_published,
     })
     setIsModalOpen(true)
@@ -247,6 +251,10 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
               category: 'Workshop',
               max_participants: '',
               volunteers_required: 0,
+              is_team_event: false,
+              min_team_size: 2,
+              max_team_size: 4,
+              max_teams: '',
               is_published: true,
             })
             setIsModalOpen(true)
@@ -349,8 +357,17 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                       )}
                       <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1">
                         <span>
-                          👥 Participants: <strong className="text-gray-700">{ev.participant_count ?? 0}</strong>
-                          {ev.max_participants ? ` / ${ev.max_participants}` : ''}
+                          {ev.is_team_event ? (
+                            <>
+                              🛡️ Teams: <strong className="text-gray-700">{ev.team_count ?? 0}</strong>
+                              {ev.max_teams ? ` / ${ev.max_teams}` : ''}
+                            </>
+                          ) : (
+                            <>
+                              👥 Participants: <strong className="text-gray-700">{ev.participant_count ?? 0}</strong>
+                              {ev.max_participants ? ` / ${ev.max_participants}` : ''}
+                            </>
+                          )}
                         </span>
                         {(ev.volunteers_required || 0) > 0 && (
                           <span>🤝 Volunteers: {ev.volunteers_registered || 0}/{ev.volunteers_required}</span>
@@ -577,7 +594,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                 </div>
 
                 {watch('is_team_event') && (
-                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="form-label text-xs">Min Team Size *</label>
                       <input
@@ -600,6 +617,16 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                           valueAsNumber: true,
                           min: { value: 2, message: 'Minimum 2 members' },
                         })}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label text-xs">Max Teams (Optional)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        placeholder="Unlimited"
+                        className="form-input text-xs"
+                        {...register('max_teams')}
                       />
                     </div>
                   </div>
