@@ -162,6 +162,8 @@ function OverviewTab({ event, societyId, eventId, onNextStep }) {
   const [editDate, setEditDate] = useState('')
   const [editSession, setEditSession] = useState('FN')
   const [editSlot, setEditSlot] = useState('')
+  const [editSlotOption, setEditSlotOption] = useState('')
+  const [editCustomSlot, setEditCustomSlot] = useState('')
   const [editTime, setEditTime] = useState('')
   const [editVenue, setEditVenue] = useState('')
   const [editVenueOption, setEditVenueOption] = useState('')
@@ -174,8 +176,8 @@ function OverviewTab({ event, societyId, eventId, onNextStep }) {
   const [editMaxTeams, setEditMaxTeams] = useState('')
 
   const EDIT_SLOTS = {
-    FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
-    AN: ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM'],
+    FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM', 'Other'],
+    AN: ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM', 'Other'],
   }
 
   const VENUE_OPTIONS = [
@@ -209,8 +211,22 @@ function OverviewTab({ event, societyId, eventId, onNextStep }) {
     setEditStatus(event?.status || 'draft')
     setEditName(event?.name || '')
     setEditDate(event?.event_date ? String(event.event_date).slice(0, 10) : '')
-    setEditSession(event?.session || 'FN')
-    setEditSlot(event?.slot || '')
+    const sess = event?.session || 'FN'
+    setEditSession(sess)
+    
+    const rawSlot = event?.slot || ''
+    const curSlots = EDIT_SLOTS[sess] || []
+    if (curSlots.filter((s) => s !== 'Other').includes(rawSlot)) {
+      setEditSlotOption(rawSlot)
+      setEditCustomSlot('')
+    } else if (rawSlot) {
+      setEditSlotOption('Other')
+      setEditCustomSlot(rawSlot)
+    } else {
+      setEditSlotOption(curSlots[0] || '')
+      setEditCustomSlot('')
+    }
+    setEditSlot(rawSlot)
     setEditTime(event?.event_time || '')
     const venue = event?.venue || ''
     setEditVenue(venue)
@@ -238,14 +254,17 @@ function OverviewTab({ event, societyId, eventId, onNextStep }) {
   }
 
   const handleSaveDetails = () => {
+    const finalSlot = editSlotOption === 'Other' ? editCustomSlot.trim() : editSlotOption
     const finalVenue = editVenueOption === 'Other' ? editCustomVenue.trim() : editVenueOption
+    const sessionLabel = editSession === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'
+    const timeStr = finalSlot ? `${sessionLabel} | ${finalSlot}` : sessionLabel
     const payload = {
       name: editName.trim(),
       status: editStatus,
       event_date: editDate || undefined,
       session: editSession,
-      slot: editSlot,
-      event_time: editTime,
+      slot: finalSlot || null,
+      event_time: timeStr,
       venue: finalVenue,
       category: editCategory,
       max_participants: editMaxParticipants ? parseInt(editMaxParticipants, 10) : null,
@@ -364,8 +383,12 @@ function OverviewTab({ event, societyId, eventId, onNextStep }) {
                 <select
                   value={editSession}
                   onChange={(e) => {
-                    setEditSession(e.target.value)
-                    setEditSlot(EDIT_SLOTS[e.target.value]?.[0] || '')
+                    const nextSess = e.target.value
+                    setEditSession(nextSess)
+                    const nextSlots = EDIT_SLOTS[nextSess] || []
+                    if (editSlotOption !== 'Other') {
+                      setEditSlotOption(nextSlots[0] || '')
+                    }
                   }}
                   className="form-input text-xs"
                 >
@@ -375,16 +398,34 @@ function OverviewTab({ event, societyId, eventId, onNextStep }) {
               </div>
 
               <div>
-                <label className="form-label text-xs">Slot</label>
+                <label className="form-label text-xs">Slot / Timing</label>
                 <select
-                  value={editSlot}
-                  onChange={(e) => setEditSlot(e.target.value)}
+                  value={editSlotOption}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setEditSlotOption(val)
+                    if (val !== 'Other') {
+                      setEditCustomSlot('')
+                    }
+                  }}
                   className="form-input text-xs"
                 >
                   {(EDIT_SLOTS[editSession] || []).map((slot) => (
-                    <option key={slot} value={slot}>{slot}</option>
+                    <option key={slot} value={slot}>
+                      {slot === 'Other' ? 'Others (Custom Timing)' : slot}
+                    </option>
                   ))}
                 </select>
+                {editSlotOption === 'Other' && (
+                  <input
+                    type="text"
+                    value={editCustomSlot}
+                    onChange={(e) => setEditCustomSlot(e.target.value)}
+                    placeholder="e.g. 9:00 AM - 1:00 PM"
+                    className="form-input text-xs mt-2"
+                    autoFocus
+                  />
+                )}
               </div>
 
               <div>

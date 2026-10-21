@@ -100,10 +100,12 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [editMinTeamSize, setEditMinTeamSize] = useState(2)
   const [editMaxTeamSize, setEditMaxTeamSize] = useState(4)
   const [editMaxTeams, setEditMaxTeams] = useState('')
+  const [editSlotOption, setEditSlotOption] = useState('')
+  const [editCustomSlot, setEditCustomSlot] = useState('')
 
   const EDIT_SLOTS = {
-    FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
-    AN: ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM'],
+    FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM', 'Other'],
+    AN: ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM', 'Other'],
   }
 
   const VENUE_OPTIONS = [
@@ -125,7 +127,20 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     setEditDate(event?.event_date ? String(event.event_date).split('T')[0] : '')
     const sess = event?.session || (event?.event_time?.toLowerCase()?.includes('an') ? 'AN' : 'FN')
     setEditSession(sess)
-    setEditSlot(event?.slot || EDIT_SLOTS[sess]?.[0] || '')
+    
+    const rawSlot = event?.slot || ''
+    const curSlots = EDIT_SLOTS[sess] || []
+    if (curSlots.filter((s) => s !== 'Other').includes(rawSlot)) {
+      setEditSlotOption(rawSlot)
+      setEditCustomSlot('')
+    } else if (rawSlot) {
+      setEditSlotOption('Other')
+      setEditCustomSlot(rawSlot)
+    } else {
+      setEditSlotOption(curSlots[0] || '')
+      setEditCustomSlot('')
+    }
+    setEditSlot(rawSlot)
     setEditTime(event?.event_time || '')
     const curVenue = event?.venue || ''
     if (VENUE_OPTIONS.filter((v) => v !== 'Other').includes(curVenue)) {
@@ -154,13 +169,14 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     e.preventDefault()
     if (!editName.trim()) return
     const sessionLabel = editSession === 'FN' ? 'Morning (FN)' : 'Afternoon (AN)'
-    const timeStr = editSlot ? `${sessionLabel} | ${editSlot}` : (editTime || sessionLabel)
+    const finalSlot = editSlotOption === 'Other' ? editCustomSlot.trim() : editSlotOption
+    const timeStr = finalSlot ? `${sessionLabel} | ${finalSlot}` : (editTime || sessionLabel)
     updateEvent.mutate(
       {
         name: editName.trim(),
         event_date: editDate ? `${editDate}T00:00:00` : undefined,
         session: editSession,
-        slot: editSlot,
+        slot: finalSlot || null,
         category: editCategory,
         event_time: timeStr,
         venue: editVenue.trim(),
@@ -299,7 +315,10 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                   onChange={(e) => {
                     const nextSess = e.target.value
                     setEditSession(nextSess)
-                    setEditSlot(EDIT_SLOTS[nextSess]?.[0] || '')
+                    const nextSlots = EDIT_SLOTS[nextSess] || []
+                    if (editSlotOption !== 'Other') {
+                      setEditSlotOption(nextSlots[0] || '')
+                    }
                   }}
                   className="form-input text-sm"
                 >
@@ -308,16 +327,35 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 </select>
               </div>
               <div>
-                <label className="form-label text-xs font-semibold">Event Slot *</label>
+                <label className="form-label text-xs font-semibold">Event Slot / Timing *</label>
                 <select
-                  value={editSlot}
-                  onChange={(e) => setEditSlot(e.target.value)}
+                  value={editSlotOption}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setEditSlotOption(val)
+                    if (val !== 'Other') {
+                      setEditCustomSlot('')
+                    }
+                  }}
                   className="form-input text-sm"
                 >
                   {(EDIT_SLOTS[editSession] || []).map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                    <option key={s} value={s}>
+                      {s === 'Other' ? 'Others (Custom Timing)' : s}
+                    </option>
                   ))}
                 </select>
+                {editSlotOption === 'Other' && (
+                  <input
+                    type="text"
+                    value={editCustomSlot}
+                    onChange={(e) => setEditCustomSlot(e.target.value)}
+                    placeholder="Enter custom timing (e.g. 9:00 AM - 1:00 PM)"
+                    className="form-input text-sm mt-2"
+                    required
+                    autoFocus
+                  />
+                )}
               </div>
               <div>
                 <label className="form-label text-xs font-semibold">Category</label>
