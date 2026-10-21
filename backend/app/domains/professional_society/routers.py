@@ -51,10 +51,11 @@ def _society_assets_ready(society: ProfessionalSociety) -> bool:
 
 class SocietyEventCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str = Field(min_length=1)
     event_date: Optional[_datetime] = None
     event_time: Optional[str] = None
     session: Optional[str] = None  # "FN" or "AN"
+    slot: Optional[str] = None
     venue: Optional[str] = None
     category: Optional[str] = None
     academic_year: Optional[str] = None
@@ -74,6 +75,7 @@ class SocietyEventUpdate(BaseModel):
     event_date: Optional[_datetime] = None
     event_time: Optional[str] = None
     session: Optional[str] = None
+    slot: Optional[str] = None
     venue: Optional[str] = None
     category: Optional[str] = None
     academic_year: Optional[str] = None
@@ -189,6 +191,7 @@ async def get_society_events(
             "event_date": e.event_date,
             "event_time": e.event_time,
             "session": e.session,
+            "slot": e.slot,
             "venue": e.venue,
             "category": e.category,
             "status": e.status.value if hasattr(e.status, "value") else str(e.status),
@@ -227,6 +230,7 @@ async def create_society_event(
         event_date=body.event_date,
         event_time=body.event_time,
         session=body.session,
+        slot=body.slot,
         venue=body.venue,
         category=body.category,
         academic_year=body.academic_year,
@@ -274,6 +278,7 @@ async def get_society_event_detail(
         "event_date": event.event_date,
         "event_time": event.event_time,
         "session": event.session,
+        "slot": event.slot,
         "venue": event.venue,
         "category": event.category,
         "academic_year": event.academic_year,
@@ -368,6 +373,25 @@ async def upload_society_event_poster(
 
 
 # ─── Society Assets (Logo & Signature) ────────────────────────────────────────
+
+@router.get("/{society_id}/assets")
+async def get_society_assets(
+    society_id: PydanticObjectId,
+    _user: User = Depends(require_society_access),
+):
+    society = await ProfessionalSociety.get(society_id)
+    if not society:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional Society not found")
+
+    assets = society.assets
+    return {
+        "logo_url": assets.logo_url,
+        "logo_hash": assets.logo_hash,
+        "signature_url": assets.signature_url,
+        "signature_hash": assets.signature_hash,
+        "is_configured": _society_assets_ready(society),
+    }
+
 
 @router.post("/{society_id}/assets")
 async def update_society_assets(

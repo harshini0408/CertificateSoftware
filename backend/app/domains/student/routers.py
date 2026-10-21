@@ -891,16 +891,18 @@ async def list_upcoming_events(
     now = datetime.utcnow()
     today_start = datetime(now.year, now.month, now.day)
 
-    # Auto-complete past active/closed events
+    # Auto-complete past published events.
     past_active = await Event.find({
-        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "is_published": True,
+        "status": {"$ne": EventStatus.COMPLETED.value},
         "event_date": {"$lt": today_start},
     }).to_list()
     for pe in past_active:
         await pe.set({"status": EventStatus.COMPLETED.value})
 
     events = await Event.find({
-        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "is_published": True,
+        "status": {"$ne": EventStatus.COMPLETED.value},
         "event_date": {"$gte": today_start},
     }).sort(+Event.event_date).to_list()
 
@@ -975,7 +977,7 @@ async def list_upcoming_events(
             "team_name": my_reg.get("team_name") if my_reg else None,
             "team_role": my_reg.get("team_role") if my_reg else None,
             "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
-            "registered_count": reg_counts.get(eid, 0),
+            "registered_count": participant_counts.get(eid, 0),
             "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
             "volunteers_registered": volunteer_counts.get(eid, 0),
             "registration_stopped": getattr(e, "registration_stopped", False) or False,
@@ -991,7 +993,7 @@ async def register_for_event(
 ):
     """Register for an upcoming event. Validates against duplicate registration and same-day same-session collision."""
     event = await Event.get(event_id)
-    if not event or event.status != EventStatus.ACTIVE:
+    if not event or not event.is_published or event.status == EventStatus.COMPLETED:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
 
     if getattr(event, "registration_stopped", False):
@@ -1620,7 +1622,7 @@ async def list_upcoming_society_events(
             "team_name": my_reg.get("team_name") if my_reg else None,
             "team_role": my_reg.get("team_role") if my_reg else None,
             "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
-            "registered_count": reg_counts.get(eid, 0),
+            "registered_count": participant_counts.get(eid, 0),
             "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
             "volunteers_registered": volunteer_counts.get(eid, 0),
             "registration_stopped": getattr(e, "registration_stopped", False) or False,
@@ -1958,4 +1960,3 @@ async def cancel_society_event_registration(
         await event.set({"participant_count": total_participants})
 
     return {"message": "Registration cancelled successfully"}
-

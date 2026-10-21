@@ -71,6 +71,44 @@ async def create_participant(
     return _resp(p)
 
 
+@router.get("/columns")
+async def get_participant_columns(
+    club_id: PydanticObjectId, event_id: PydanticObjectId,
+    _user: User = Depends(require_event_access),
+):
+    """Return uploaded participant field headers and a representative row."""
+    participants = await Participant.find({
+        "event_id": event_id,
+        "club_id": club_id,
+    }).to_list()
+
+    columns: list[str] = []
+    sample: dict[str, str] = {}
+    for participant in participants:
+        fields = participant.fields or {}
+        if not sample and fields:
+            sample = fields
+        for column in fields:
+            if column not in columns:
+                columns.append(column)
+
+    return {"columns": columns, "sample": sample}
+
+
+@router.get("/mapping")
+async def get_field_mapping(
+    club_id: PydanticObjectId, event_id: PydanticObjectId,
+    _user: User = Depends(require_event_access),
+):
+    """Return the saved field mapping for an event's participants."""
+    participant = await Participant.find_one({
+        "event_id": event_id,
+        "club_id": club_id,
+        "field_mapping": {"$ne": {}},
+    })
+    return {"mapping": participant.field_mapping if participant else {}}
+
+
 @router.delete("/{participant_id}")
 async def delete_participant(
     club_id: PydanticObjectId, event_id: PydanticObjectId,

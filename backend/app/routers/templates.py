@@ -284,6 +284,7 @@ async def list_club_presets(
 
 
 
+@router.post("/clubs/{club_id}/templates", response_model=TemplateResponse, status_code=201)
 async def create_template(
     club_id: PydanticObjectId,
     body: TemplateCreate,

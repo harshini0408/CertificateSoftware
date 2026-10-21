@@ -61,6 +61,13 @@ const VENUE_OPTIONS = [
   'Other',
 ]
 
+const SESSION_SLOTS = {
+  'Morning (FN)': ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
+  'Afternoon (AN)': ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM'],
+}
+
+const isValidSocietyId = (value) => /^[a-f\d]{24}$/i.test(String(value || ''))
+
 // ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab({ societyId, dashboard, isLoading }) {
   const navigate = useNavigate()
@@ -76,6 +83,8 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
   const [editingEvent, setEditingEvent] = useState(null)
   const [posterUploadEvent, setPosterUploadEvent] = useState(null)
   const [posterFile, setPosterFile] = useState(null)
+  const [selectedPosterFile, setSelectedPosterFile] = useState(null)
+  const [posterError, setPosterError] = useState('')
   const [selectedVenueOption, setSelectedVenueOption] = useState('')
   const [customVenue, setCustomVenue] = useState('')
 
@@ -91,8 +100,8 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       name: '',
       description: '',
       event_date: '',
-      event_time: '',
-      session: 'FN',
+      session_type: 'Morning (FN)',
+      slot: '8:45 AM - 10:15 AM',
       venue: '',
       category: 'Workshop',
       max_participants: '',
@@ -105,13 +114,41 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
     },
   })
 
+  const selectedSessionType = watch('session_type') || 'Morning (FN)'
+  const availableSlots = SESSION_SLOTS[selectedSessionType] || SESSION_SLOTS['Morning (FN)']
+
+  useEffect(() => {
+    if (!availableSlots.includes(watch('slot'))) {
+      setValue('slot', availableSlots[0] || '')
+    }
+  }, [availableSlots, setValue, watch])
+
+  const handleCreatePosterChange = (event) => {
+    const file = event.target.files?.[0] || null
+    if (file && file.size > 2 * 1024 * 1024) {
+      setPosterError('Poster size must be 2MB or less.')
+      setSelectedPosterFile(null)
+      event.target.value = ''
+      return
+    }
+    setPosterError('')
+    setSelectedPosterFile(file)
+  }
+
   const onSubmitEvent = async (formData) => {
+    if (selectedPosterFile && selectedPosterFile.size > 2 * 1024 * 1024) {
+      setPosterError('Poster size must be 2MB or less.')
+      return
+    }
+    const session = formData.session_type?.includes('AN') ? 'AN' : 'FN'
+    const eventTime = formData.slot ? `${formData.session_type} | ${formData.slot}` : formData.session_type
     const payload = {
       name: formData.name.trim(),
-      description: formData.description?.trim() || null,
+      description: formData.description.trim(),
       event_date: formData.event_date ? new Date(formData.event_date).toISOString() : null,
-      event_time: formData.event_time?.trim() || null,
-      session: formData.session || 'FN',
+      event_time: eventTime,
+      session,
+      slot: formData.slot,
       venue: formData.venue?.trim() || null,
       category: formData.category || 'Workshop',
       max_participants: formData.max_participants ? parseInt(formData.max_participants, 10) : null,
@@ -127,11 +164,18 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       await updateEvent.mutateAsync({ eventId: editingEvent.id, ...payload })
       setEditingEvent(null)
     } else {
-      await createEvent.mutateAsync(payload)
+      const response = await createEvent.mutateAsync(payload)
+      const createdEvent = response?.data ?? response
+      const eventId = createdEvent?.id ?? createdEvent?._id
+      if (selectedPosterFile && eventId) {
+        await uploadPoster.mutateAsync({ eventId, posterFile: selectedPosterFile })
+      }
     }
     reset()
     setSelectedVenueOption('')
     setCustomVenue('')
+    setSelectedPosterFile(null)
+    setPosterError('')
     setIsModalOpen(false)
   }
 
@@ -152,8 +196,8 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       name: ev.name || '',
       description: ev.description || '',
       event_date: ev.event_date ? String(ev.event_date).split('T')[0] : '',
-      event_time: ev.event_time || '',
-      session: ev.session || 'FN',
+      session_type: ev.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)',
+      slot: ev.slot || (ev.session === 'AN' ? '1:10 PM - 2:50 PM' : '8:45 AM - 10:15 AM'),
       venue: ev.venue || '',
       category: ev.category || 'Workshop',
       max_participants: ev.max_participants != null ? String(ev.max_participants) : '',
@@ -245,8 +289,8 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
               name: '',
               description: '',
               event_date: '',
-              event_time: '',
-              session: 'FN',
+              session_type: 'Morning (FN)',
+              slot: '8:45 AM - 10:15 AM',
               venue: '',
               category: 'Workshop',
               max_participants: '',
@@ -257,6 +301,8 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
               max_teams: '',
               is_published: true,
             })
+            setSelectedPosterFile(null)
+            setPosterError('')
             setIsModalOpen(true)
           }}
           className="btn-primary text-xs flex items-center gap-1.5 self-start sm:self-auto"
@@ -458,42 +504,47 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
               </div>
 
               <div>
-                <label className="form-label">Description</label>
+                <label className="form-label">Description *</label>
                 <textarea
                   rows={3}
                   className="form-input text-sm"
                   placeholder="Brief overview of the event, agenda, and speakers…"
-                  {...register('description')}
+                  {...register('description', { required: 'Description is required' })}
                 />
+                {errors.description && <p className="form-error">{errors.description.message}</p>}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="form-label">Event Date</label>
+                  <label className="form-label">Event Date *</label>
                   <input
                     type="date"
                     className="form-input text-sm"
-                    {...register('event_date')}
+                    {...register('event_date', { required: 'Event date is required' })}
                   />
+                  {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
                 </div>
                 <div>
-                  <label className="form-label">Time</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 10:00 AM"
+                  <label className="form-label">Event Session *</label>
+                  <select
                     className="form-input text-sm"
-                    {...register('event_time')}
-                  />
+                    {...register('session_type', { required: 'Event session is required' })}
+                  >
+                    <option value="Morning (FN)">Morning (FN)</option>
+                    <option value="Afternoon (AN)">Afternoon (AN)</option>
+                  </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="form-label">Session *</label>
-                  <select className="form-input text-sm" {...register('session')}>
-                    <option value="FN">Morning (FN)</option>
-                    <option value="AN">Afternoon (AN)</option>
+                  <label className="form-label">Event Slot *</label>
+                  <select className="form-input text-sm" {...register('slot', { required: 'Event slot is required' })}>
+                    {availableSlots.map((slot) => (
+                      <option key={slot} value={slot}>{slot}</option>
+                    ))}
                   </select>
+                  {errors.slot && <p className="form-error">{errors.slot.message}</p>}
                 </div>
                 <div>
                   <label className="form-label">Category</label>
@@ -504,6 +555,21 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                   </select>
                 </div>
               </div>
+
+              {!editingEvent && (
+                <div className="space-y-1">
+                  <label className="form-label">Event Poster (PNG, JPEG, PDF · Max 2MB)</label>
+                  <input
+                    type="file"
+                    accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+                    onChange={handleCreatePosterChange}
+                    className="form-input text-xs"
+                  />
+                  <p className="text-[11px] text-gray-500">Optional. The poster is displayed in the Upcoming Events feed.</p>
+                  {posterError && <p className="form-error">{posterError}</p>}
+                  {selectedPosterFile && <p className="text-xs font-medium text-teal-700">✓ Selected: {selectedPosterFile.name}</p>}
+                </div>
+              )}
 
               <div>
                 <label className="form-label">Venue</label>
@@ -1312,9 +1378,14 @@ function SettingsTab({ societyId, dashboard }) {
   const handleUploadAssets = async (e) => {
     e.preventDefault()
     if (!logoFile && !signatureFile) return
-    await updateAssets.mutateAsync({ logoFile, signatureFile })
-    setLogoFile(null)
-    setSignatureFile(null)
+    try {
+      await updateAssets.mutateAsync({ logoFile, signatureFile })
+      setLogoFile(null)
+      setSignatureFile(null)
+    } catch {
+      // The mutation hook shows the server error in a toast. Avoid an unhandled
+      // promise when an expired session prevents the protected upload.
+    }
   }
 
   const handlePwSubmit = (e) => {
@@ -1496,9 +1567,11 @@ export default function ProfessionalSocietyDashboard() {
   const navigate = useNavigate()
 
   // For coordinator, lock to their assigned society_id; for superadmin, allow viewing route society
-  const societyId = (role === 'professional_society_coordinator' && userSocietyId)
-    ? userSocietyId
-    : (routeSocietyId || userSocietyId)
+  const storedSocietyId = isValidSocietyId(userSocietyId) ? userSocietyId : null
+  const requestedSocietyId = isValidSocietyId(routeSocietyId) ? routeSocietyId : null
+  const societyId = role === 'professional_society_coordinator'
+    ? (storedSocietyId || requestedSocietyId)
+    : (requestedSocietyId || storedSocietyId)
 
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'events'
@@ -1507,10 +1580,10 @@ export default function ProfessionalSocietyDashboard() {
 
   // Auto-correct route URL if coordinator is on a different/stale URL
   useEffect(() => {
-    if (role === 'professional_society_coordinator' && userSocietyId && routeSocietyId && routeSocietyId !== userSocietyId) {
-      navigate(`/society/${userSocietyId}`, { replace: true })
+    if (role === 'professional_society_coordinator' && storedSocietyId && requestedSocietyId && requestedSocietyId !== storedSocietyId) {
+      navigate(`/society/${storedSocietyId}`, { replace: true })
     }
-  }, [role, userSocietyId, routeSocietyId, navigate])
+  }, [role, storedSocietyId, requestedSocietyId, navigate])
 
   const handleTabChange = (tab) => {
     setSearchParams(tab === 'events' ? {} : { tab })

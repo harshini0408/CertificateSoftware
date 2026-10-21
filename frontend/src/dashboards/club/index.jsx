@@ -191,6 +191,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       min_team_size: 2,
       max_team_size: 4,
       max_teams: '',
+      volunteers_required: 0,
     },
   })
 
@@ -577,16 +578,16 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   </p>
                 </div>
                 <div>
-                  <label className="form-label" htmlFor="dash-volunteers-required">Volunteers Required</label>
+                  <label className="form-label" htmlFor="dash-volunteers-required">Volunteers Required (Optional)</label>
                   <input
                     id="dash-volunteers-required"
                     type="number"
                     min="0"
                     className={`form-input ${errors.volunteers_required ? 'form-input-error' : ''}`}
-                    placeholder="0"
+                    placeholder="0 (no volunteers needed)"
                     onWheel={(e) => e.target.blur()}
                     {...register('volunteers_required', {
-                      valueAsNumber: true,
+                      setValueAs: (v) => (v === '' || v == null ? 0 : Number(v)),
                       min: { value: 0, message: 'Cannot be negative' }
                     })}
                   />

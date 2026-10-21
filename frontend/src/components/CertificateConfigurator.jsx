@@ -15,7 +15,7 @@ const CertificateConfigurator = () => {
   const fetchTemplates = async () => {
     try {
       setLoading(true);
-      const res = await axiosInstance.get('/api/admin/certificate-config/templates');
+      const res = await axiosInstance.get('/api/certificate-config/templates');
       setTemplates(res.data);
     } catch (err) {
       console.error("Error fetching templates:", err);

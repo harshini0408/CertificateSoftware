@@ -18,6 +18,13 @@ export const societyKeys = {
   stats: () => ['society-coordinator', 'stats'],
 }
 
+const requireSocietyId = (societyId) => {
+  if (!/^[a-f\d]{24}$/i.test(String(societyId || ''))) {
+    throw new Error('Your professional society assignment is unavailable. Please sign in again.')
+  }
+  return societyId
+}
+
 // ── Admin Hooks ───────────────────────────────────────────────────────────────
 export function useAdminSocieties(filters = {}) {
   return useQuery({
@@ -141,7 +148,7 @@ export function useCreateSocietyEvent(societyId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: (payload) => axiosInstance.post(`/societies/${societyId}/events`, payload),
+    mutationFn: (payload) => axiosInstance.post(`/societies/${requireSocietyId(societyId)}/events`, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: societyKeys.events(societyId) })
       qc.invalidateQueries({ queryKey: societyKeys.dashboard(societyId) })
@@ -159,7 +166,7 @@ export function useUpdateSocietyEvent(societyId) {
 
   return useMutation({
     mutationFn: ({ eventId, ...payload }) =>
-      axiosInstance.patch(`/societies/${societyId}/events/${eventId}`, payload),
+      axiosInstance.patch(`/societies/${requireSocietyId(societyId)}/events/${eventId}`, payload),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: societyKeys.events(societyId) })
       qc.invalidateQueries({ queryKey: societyKeys.eventDetail(societyId, vars.eventId) })
@@ -177,7 +184,7 @@ export function useDeleteSocietyEvent(societyId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: (eventId) => axiosInstance.delete(`/societies/${societyId}/events/${eventId}`),
+    mutationFn: (eventId) => axiosInstance.delete(`/societies/${requireSocietyId(societyId)}/events/${eventId}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: societyKeys.events(societyId) })
       qc.invalidateQueries({ queryKey: societyKeys.dashboard(societyId) })
@@ -198,7 +205,7 @@ export function useUploadSocietyEventPoster(societyId) {
       const formData = new FormData()
       formData.append('poster', posterFile)
       const { data } = await axiosInstance.post(
-        `/societies/${societyId}/events/${eventId}/poster`,
+        `/societies/${requireSocietyId(societyId)}/events/${eventId}/poster`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } }
       )
@@ -224,13 +231,14 @@ export function useUpdateSocietyAssets(societyId) {
       const formData = new FormData()
       if (logoFile) formData.append('logo', logoFile)
       if (signatureFile) formData.append('signature', signatureFile)
-      const { data } = await axiosInstance.post(`/societies/${societyId}/assets`, formData, {
+      const { data } = await axiosInstance.post(`/societies/${requireSocietyId(societyId)}/assets`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       return data
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: societyKeys.dashboard(societyId) })
+      qc.invalidateQueries({ queryKey: ['auth', 'me'] })
       addToast({ type: 'success', message: 'Society assets updated successfully.' })
     },
     onError: (err) => {

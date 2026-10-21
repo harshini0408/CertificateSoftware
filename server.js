@@ -30,6 +30,8 @@ const backendPrefixes = [
   '/image-templates',
   '/principal',
   '/role-presets',
+  '/societies',
+  '/society-coordinator',
   '/static',
   '/storage',
   '/student',

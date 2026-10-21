@@ -221,6 +221,7 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
         min_team_size=body.min_team_size or 2,
         max_team_size=body.max_team_size or 4,
         max_teams=body.max_teams,
+        status=EventStatus.ACTIVE if body.is_published else EventStatus.DRAFT,
         is_published=body.is_published,
     )
     await event.insert()
@@ -337,6 +338,8 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         updates["template_map"] = {k: v for k, v in updates["template_map"].items()}
     if "status" in updates:
         updates["status"] = EventStatus(updates["status"])
+    if "is_published" in updates and "status" not in updates:
+        updates["status"] = EventStatus.ACTIVE if updates["is_published"] else EventStatus.DRAFT
     if updates:
         await event.set(updates)
         event = await Event.get(event_id)

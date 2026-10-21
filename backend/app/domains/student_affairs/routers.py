@@ -516,20 +516,22 @@ async def list_upcoming_events(
     category: Optional[str] = None,
     _user: User = _affairs,
 ):
-    """List active/closed club events (visible in upcoming feed — not draft or completed)."""
+    """List published, upcoming club events (excluding completed events)."""
     now = datetime.utcnow()
     today_start = datetime(now.year, now.month, now.day)
 
-    # Auto-complete past active/closed events
+    # Auto-complete past published events.
     past_active = await Event.find({
-        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "is_published": True,
+        "status": {"$ne": EventStatus.COMPLETED.value},
         "event_date": {"$lt": today_start},
     }).to_list()
     for pe in past_active:
         await pe.set({"status": EventStatus.COMPLETED.value})
 
     query: dict = {
-        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
+        "is_published": True,
+        "status": {"$ne": EventStatus.COMPLETED.value},
         "event_date": {"$gte": today_start},
     }
     if club_id:
