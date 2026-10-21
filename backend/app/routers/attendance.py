@@ -284,16 +284,23 @@ async def get_attendance_session_info(
         raise HTTPException(status.HTTP_409_CONFLICT, "You have already marked attendance for this event.")
 
     event = await Event.get(event_id)
+    club = None
+    society = None
     if not event:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found.")
-
-    from ..models.club import Club
-    club = await Club.get(event.club_id)
+        from ..models.society_event import SocietyEvent
+        event = await SocietyEvent.get(event_id)
+        if not event:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found.")
+        from ..models.professional_society import ProfessionalSociety
+        society = await ProfessionalSociety.get(event.society_id)
+    else:
+        from ..models.club import Club
+        club = await Club.get(event.club_id)
 
     return AttendanceSessionInfoResponse(
         event_id=str(event_id),
         event_name=event.name,
-        club_name=club.name if club else None,
+        club_name=club.name if club else (society.name if society else None),
         event_date=str(event.event_date.date()) if event.event_date else None,
         venue=event.venue,
         student_name=current_user.name,
@@ -329,8 +336,15 @@ async def submit_attendance(
         raise HTTPException(status.HTTP_409_CONFLICT, "You have already marked attendance for this event.")
 
     event = await Event.get(event_id)
+    org_id = None
     if not event:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found.")
+        from ..models.society_event import SocietyEvent
+        event = await SocietyEvent.get(event_id)
+        if not event:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found.")
+        org_id = event.society_id
+    else:
+        org_id = event.club_id
 
     # Mark session as used
     await session.set({AttendanceSession.used: True})
@@ -339,7 +353,7 @@ async def submit_attendance(
     now = datetime.utcnow()
     attendance = Attendance(
         event_id=event_id,
-        club_id=event.club_id,
+        club_id=org_id,
         student_id=current_user.id,
         student_email=current_user.email,
         student_name=current_user.name,
@@ -348,6 +362,24 @@ async def submit_attendance(
         marked_at=now,
     )
     await attendance.insert()
+
+    if hasattr(event, "society_id"):
+        try:
+            from ..models.society_attendance import SocietyAttendance
+            soc_att = SocietyAttendance(
+                event_id=event_id,
+                society_id=org_id,
+                club_id=org_id,
+                student_id=current_user.id,
+                student_email=current_user.email,
+                student_name=current_user.name,
+                registration_number=getattr(current_user, "registration_number", None),
+                feedback=body.feedback or None,
+                marked_at=now,
+            )
+            await soc_att.insert()
+        except Exception:
+            pass
 
     # Mark the participant as verified (attendance confirmed) for certificate generation
     from ..models.participant import Participant, ParticipantSource
@@ -368,7 +400,7 @@ async def submit_attendance(
         # Create verified participant for this attendee
         participant = Participant(
             event_id=event.id,
-            club_id=event.club_id,
+            club_id=org_id,
             email=user_email_lower,
             registration_number=getattr(current_user, "registration_number", None),
             cert_type="participant",
@@ -383,6 +415,33 @@ async def submit_attendance(
             status="accepted",
         )
         await participant.insert()
+
+    if hasattr(event, "society_id"):
+        try:
+            from ..models.society_participant import SocietyParticipant
+            soc_part = await SocietyParticipant.find_one(
+                SocietyParticipant.event_id == event_id,
+                SocietyParticipant.email == user_email_lower,
+            )
+            if soc_part:
+                if not soc_part.verified:
+                    await soc_part.set({"verified": True, "status": "accepted"})
+            else:
+                soc_part = SocietyParticipant(
+                    event_id=event.id,
+                    society_id=org_id,
+                    club_id=org_id,
+                    email=user_email_lower,
+                    registration_number=getattr(current_user, "registration_number", None),
+                    cert_type="participant",
+                    fields=participant.fields,
+                    source=ParticipantSource.REGISTRATION,
+                    verified=True,
+                    status="accepted",
+                )
+                await soc_part.insert()
+        except Exception:
+            pass
 
     return SubmitAttendanceResponse(
         success=True,

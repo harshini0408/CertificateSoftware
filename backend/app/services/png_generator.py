@@ -154,6 +154,36 @@ async def generate_certificate_pillow(
         if sp.exists():
             sig_path = str(sp)
 
+    if not logo_path or not sig_path:
+        soc_id = getattr(event, "society_id", None) or getattr(event, "club_id", None)
+        if soc_id:
+            try:
+                from ..models.society_asset import SocietyAsset
+                from ..models.professional_society import ProfessionalSociety
+                from ..models.club import Club
+                soc_asset = await SocietyAsset.find_one(SocietyAsset.society_id == soc_id)
+                if soc_asset:
+                    if not logo_path and soc_asset.logo_path and Path(soc_asset.logo_path).exists():
+                        logo_path = str(Path(soc_asset.logo_path))
+                    if not sig_path and soc_asset.signature_path and Path(soc_asset.signature_path).exists():
+                        sig_path = str(Path(soc_asset.signature_path))
+                if not logo_path or not sig_path:
+                    soc = await ProfessionalSociety.get(soc_id)
+                    if soc and soc.assets:
+                        if not logo_path and soc.assets.logo_path and Path(soc.assets.logo_path).exists():
+                            logo_path = str(Path(soc.assets.logo_path))
+                        if not sig_path and soc.assets.signature_path and Path(soc.assets.signature_path).exists():
+                            sig_path = str(Path(soc.assets.signature_path))
+                if not logo_path or not sig_path:
+                    club_inst = await Club.get(soc_id)
+                    if club_inst and club_inst.assets:
+                        if not logo_path and club_inst.assets.logo_path and Path(club_inst.assets.logo_path).exists():
+                            logo_path = str(Path(club_inst.assets.logo_path))
+                        if not sig_path and club_inst.assets.signature_path and Path(club_inst.assets.signature_path).exists():
+                            sig_path = str(Path(club_inst.assets.signature_path))
+            except Exception:
+                pass
+
     display_fields: Dict[str, str] = dict(participant.fields or {})
     if preset and preset.display_label:
         display_fields["Role"] = preset.display_label

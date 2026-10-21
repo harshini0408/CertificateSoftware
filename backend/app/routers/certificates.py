@@ -75,7 +75,13 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
     try:
         participant = await Participant.get(cert.participant_id)
         club = await Club.get(cert.club_id)
+        if not club:
+            from ..models.professional_society import ProfessionalSociety
+            club = await ProfessionalSociety.get(cert.club_id)
         event = await Event.get(cert.event_id)
+        if not event:
+            from ..models.society_event import SocietyEvent
+            event = await SocietyEvent.get(cert.event_id)
         if not participant or not club or not event:
             await cert.set({"status": CertStatus.FAILED})
             return
@@ -120,17 +126,41 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
         )
 
         if preset:
-            assets = getattr(event, "assets", None)
+            event_assets = getattr(event, "assets", None)
+            club_assets = getattr(club, "assets", None)
+            from ..models.society_asset import SocietyAsset
+            soc_asset = await SocietyAsset.find_one(
+                {"$or": [
+                    {"society_id": getattr(event, "society_id", None)},
+                    {"society_id": getattr(cert, "club_id", None)},
+                    {"society_id": getattr(club, "id", None)},
+                ]}
+            )
+
             logo_path = None
             sig_path = None
-            if assets and getattr(assets, "logo_path", None):
-                lp = Path(assets.logo_path)
-                if lp.exists():
-                    logo_path = str(lp)
-            if assets and getattr(assets, "signature_path", None):
-                sp = Path(assets.signature_path)
-                if sp.exists():
-                    sig_path = str(sp)
+
+            for lp_c in [
+                getattr(event_assets, "logo_path", None) if event_assets else None,
+                getattr(soc_asset, "logo_path", None) if soc_asset else None,
+                getattr(club_assets, "logo_path", None) if club_assets else None,
+            ]:
+                if lp_c:
+                    lp = Path(lp_c)
+                    if lp.exists():
+                        logo_path = str(lp)
+                        break
+
+            for sp_c in [
+                getattr(event_assets, "signature_path", None) if event_assets else None,
+                getattr(soc_asset, "signature_path", None) if soc_asset else None,
+                getattr(club_assets, "signature_path", None) if club_assets else None,
+            ]:
+                if sp_c:
+                    sp = Path(sp_c)
+                    if sp.exists():
+                        sig_path = str(sp)
+                        break
 
             await generate_certificate_from_role_preset(
                 role_name=preset.role_name,
@@ -148,20 +178,29 @@ async def _generate_one(cert_id: PydanticObjectId) -> None:
                 event=event,
                 participant=participant,
                 output_path=tmp_path,
-                club_slug=club.slug,
+                club_slug=getattr(club, "slug", "society"),
                 cert_number=cert.cert_number,
                 cert_type=role_name,
             )
 
         png_bytes = Path(tmp_path).read_bytes()
-        png_url = save_cert_png(png_bytes, club.slug, year, cert.cert_number)
+        png_url = save_cert_png(png_bytes, getattr(club, "slug", "society"), year, cert.cert_number)
         Path(tmp_path).unlink(missing_ok=True)
 
+        now_dt = datetime.utcnow()
         await cert.set({
             "png_url": png_url,
             "status": CertStatus.GENERATED,
-            "issued_at": datetime.utcnow(),
+            "issued_at": now_dt,
         })
+        from ..models.society_certificate import SocietyCertificate
+        sc = await SocietyCertificate.find_one(SocietyCertificate.cert_number == cert.cert_number)
+        if sc:
+            await sc.set({
+                "png_url": png_url,
+                "status": CertStatus.GENERATED,
+                "issued_at": now_dt,
+            })
 
     except Exception as exc:
         await cert.set({"status": CertStatus.FAILED})
