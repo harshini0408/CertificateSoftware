@@ -463,107 +463,163 @@ export default function CertificateIssue({
   const certColumns = [
     {
       key: 'cert_number',
-      header: 'Cert Number',
+      header: 'Cert No.',
+      sortable: true,
       searchKey: true,
-      render: (v) => <span className="font-mono text-xs font-semibold text-foreground">{v}</span>,
+      render: (v) => (
+        <span className="font-mono text-xs font-semibold text-navy">{v ?? '—'}</span>
+      ),
     },
     {
-      key: 'recipient_name',
-      header: 'Recipient',
+      key: 'participant_email',
+      header: 'Participant',
+      sortable: true,
       searchKey: true,
-      render: (v, row) => (
-        <div>
-          <p className="font-medium text-foreground">{v}</p>
-          <p className="text-xs text-gray-400">{row.recipient_email}</p>
-        </div>
-      ),
+      render: (v, row) => {
+        const name = row.participant_name || row.snapshot?.name || '—'
+        const email = row.participant_email || row.snapshot?.email || v || ''
+        return (
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-foreground">{name}</span>
+            {email && <span className="text-xs text-gray-400">{email}</span>}
+          </div>
+        )
+      },
     },
     {
       key: 'cert_type',
       header: 'Type',
-      render: (v) => <span className="capitalize">{v?.replace(/_/g, ' ')}</span>,
+      render: (v, row) => {
+        const type = v || row.snapshot?.cert_type || 'participant'
+        return (
+          <span className="text-xs font-medium capitalize text-gray-600">
+            {type.replace(/_/g, ' ')}
+          </span>
+        )
+      },
     },
     {
       key: 'status',
       header: 'Status',
       align: 'center',
-      render: (v) => <StatusBadge status={v} />,
-    },
-    {
-      key: 'generated_at',
-      header: 'Generated',
-      render: (v) => formatDateTime(v),
-    },
-    {
-      key: 'emailed_at',
-      header: 'Emailed',
-      render: (v) => formatDateTime(v),
-    },
-    {
-      key: '_actions',
-      header: 'Actions',
-      align: 'right',
-      searchKey: false,
-      render: (_, row) => (
-        <div className="flex items-center justify-end gap-2">
-          {/* Retry email if failed */}
-          {row.status === 'failed' && (
-            <button
-              id={`retry-cert-${row.id}`}
-              className="text-xs font-semibold text-red-600 hover:text-red-800 transition-colors"
-              disabled={resendMutation.isPending}
-              onClick={() => resendMutation.mutate(row.id)}
-            >
-              Retry
-            </button>
-          )}
-
-          {/* Download cert */}
-          {row.png_url && (
-            <a
-              id={`download-cert-${row.id}`}
-              href={`${BACKEND_URL}${row.png_url}`}
-              download={`${row.cert_number}.png`}
-              className="text-xs font-semibold text-navy hover:underline"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Download
-            </a>
+      render: (v, row) => (
+        <div className="flex flex-col gap-0.5 items-center">
+          <StatusBadge status={v} />
+          {v === 'failed' && row.failure_reason && (
+            <span className="max-w-[260px] truncate text-[11px] text-red-500" title={row.failure_reason}>
+              {row.failure_reason}
+            </span>
           )}
         </div>
       ),
     },
-  ]
+    {
+      key: 'issued_at',
+      header: 'Generated',
+      render: (v, row) => formatDateTime(v || row.generated_at || row.created_at),
+    },
+    {
+      key: 'id',
+      header: 'Actions',
+      align: 'center',
+      searchKey: false,
+      render: (certId, row) => {
+        const fileUrl = row.png_url || row.pdf_url
+        return (
+          <div className="flex items-center justify-center gap-2">
+            {/* Preview certificate */}
+            {['generated', 'emailed'].includes(row.status) && fileUrl && (
+              <a
+                href={`${BACKEND_URL}${fileUrl}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded p-1 text-navy hover:bg-navy/10 transition-colors"
+                title="Preview certificate"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7c-1.274 4.057-5.065 7-9.542 7s-8.268-2.943-9.542-7z" />
+                </svg>
+              </a>
+            )}
 
-  const showCertTable = (certs?.length ?? 0) > 0
+            {/* Resend email for failed / generated(not-emailed) */}
+            {['failed', 'generated'].includes(row.status) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  resendMutation.mutate(certId)
+                }}
+                disabled={resendMutation.isPending}
+                className="rounded p-1 text-amber-500 hover:bg-amber-50 transition-colors"
+                title={row.status === 'failed' ? 'Retry email' : 'Send email'}
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 8-16 8V4z" />
+                </svg>
+              </button>
+            )}
+
+            {/* Download cert */}
+            {fileUrl && (
+              <a
+                id={`download-cert-${row.id}`}
+                href={`${BACKEND_URL}${fileUrl}`}
+                download={`${row.cert_number || 'certificate'}.png`}
+                className="rounded p-1 text-gray-500 hover:text-navy hover:bg-navy/10 transition-colors"
+                title="Download certificate"
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </a>
+            )}
+          </div>
+        )
+      },
+    },
+  ]
 
   return (
     <div className="space-y-6">
-      {/* ── Summary Stats ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="stat-card">
-          <p className="stat-card-label">Eligible Participants</p>
-          <p className="stat-card-value text-blue-600">{verifiedParticipantsCount}</p>
+      {/* ── 1. Participant review list (Identical to Club Dashboard) ──────── */}
+      <div className="card p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Participant Review Before Generation</p>
+            <span className="text-xs text-gray-500">
+              {(participants ?? []).length} participant{(participants ?? []).length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowUploadModal(true)}
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Upload Excel Sheet
+          </button>
         </div>
-        <div className="stat-card">
-          <p className="stat-card-label">Certificates Generated</p>
-          <p className="stat-card-value text-navy">{generatedCount}</p>
-        </div>
-        <div className="stat-card">
-          <p className="stat-card-label">Emails Dispatched</p>
-          <p className="stat-card-value text-green-600">{emailedCount}</p>
-        </div>
-        <div className="stat-card">
-          <p className="stat-card-label">Pending / In-Progress</p>
-          <p className="stat-card-value text-amber-500">{pendingCount + pendingEmailCount}</p>
-        </div>
+
+        <DataTable
+          columns={participantColumns}
+          data={participants ?? []}
+          isLoading={participantsLoading}
+          emptyMessage="No participants found for this event."
+          searchable
+          searchPlaceholder="Search participants by name, email, reg no..."
+          rowKey="id"
+        />
       </div>
 
-      {/* ── Progress bar (visible while generating/emailing) ──────────────── */}
-      <GenerationProgress certs={certs} />
-
-      {/* ── Pre-flight checklist ─────────────────────────────────────────── */}
+      {/* ── 2. Pre-flight checklist ───────────────────────────────────────── */}
       <div className="card p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
@@ -571,61 +627,14 @@ export default function CertificateIssue({
               Pre-flight Checklist
             </p>
             <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <PreflightItem ok={hasParticipants} label="Participants imported & eligible" />
-                {!hasParticipants && (
-                  <button
-                    type="button"
-                    onClick={() => setShowUploadModal(true)}
-                    className="text-xs font-semibold text-navy hover:underline flex items-center gap-1 ml-1"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    Upload Excel
-                  </button>
-                )}
-              </div>
-              <PreflightItem ok={hasAssets}       label="Logo & signature configured" />
+              <PreflightItem ok={hasParticipants} label="Participants imported & eligible" />
+              <PreflightItem ok={hasAssets}       label="Logo & signature uploaded" />
             </div>
           </div>
 
           <div className="flex flex-col items-end gap-3">
             {/* Action buttons row */}
             <div className="flex items-center gap-3">
-              <button
-                id="upload-excel-cert-tab-btn"
-                type="button"
-                className="btn-secondary flex items-center gap-2"
-                onClick={() => setShowUploadModal(true)}
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Upload Excel Sheet
-              </button>
-
-              {generatedCount > 0 && (
-                <button
-                  id="download-all-zip-btn"
-                  className="btn-secondary"
-                  disabled={downloadingZip}
-                  onClick={handleDownloadAllZip}
-                >
-                  {downloadingZip ? (
-                    <><LoadingSpinner size="sm" label="" /> Preparing ZIP…</>
-                  ) : (
-                    <>
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      Download All (ZIP)
-                    </>
-                  )}
-                </button>
-              )}
-
-              {/* Generate button */}
               <button
                 id="generate-certs-btn"
                 className="btn-primary"
@@ -644,13 +653,34 @@ export default function CertificateIssue({
                   </>
                 )}
               </button>
+
+              {/* Download all zip button */}
+              {generatedCount > 0 && (
+                <button
+                  id="download-all-zip-btn"
+                  className="btn-secondary text-sm flex items-center gap-2"
+                  disabled={downloadingZip}
+                  onClick={handleDownloadAllZip}
+                >
+                  {downloadingZip ? (
+                    <><LoadingSpinner size="sm" label="" /> Preparing ZIP…</>
+                  ) : (
+                    <>
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Download All (ZIP)
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
-            {/* Send remaining emails */}
+            {/* Send remaining emails (Approve & Send Emails button) */}
             {pendingEmailCount > 0 && (
               <button
                 id="send-remaining-btn"
-                className="btn-secondary text-sm"
+                className="btn-secondary text-sm flex items-center gap-2"
                 disabled={sendMutation.isPending}
                 onClick={() => sendMutation.mutate()}
               >
@@ -685,7 +715,7 @@ export default function CertificateIssue({
         )}
       </div>
 
-      {/* ── Email Delivery Speed & Calculation Notice ──────────────────────── */}
+      {/* ── 3. Email Delivery Speed & Calculation Notice (Identical to Club Dashboard) ── */}
       <div className="card p-5 border-l-4 border-l-blue-600 bg-gradient-to-r from-blue-50/60 via-white to-white">
         <div className="flex items-start gap-3.5">
           <div className="rounded-xl bg-blue-100 p-2.5 text-blue-700 shrink-0 mt-0.5 shadow-xs">
@@ -693,78 +723,88 @@ export default function CertificateIssue({
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <div className="space-y-1.5 flex-1">
-            <h4 className="text-sm font-bold text-gray-900 tracking-tight">Email Dispatch Throughput Notice</h4>
-            <p className="text-xs leading-relaxed text-gray-600">
-              Certificates are queued and dispatched safely via SMTP in background batches. Dispatch throughput averages approximately <span className="font-semibold text-gray-900">5 to 10 certificates per minute</span> to ensure deliverability and comply with mail server rate limits.
-            </p>
+          <div className="space-y-3 flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                Note: Certificate Mailing Delivery Speed & Process
+              </h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
+                ⚡ Rate Throttled: 3 certs / minute
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="rounded-lg bg-white border border-gray-200/90 p-3 shadow-xs">
+                <span className="font-semibold text-foreground block mb-1">⏱️ Sending Rate Calculation</span>
+                <p className="text-gray-600 leading-relaxed">
+                  Due to institutional mail server limits and anti-spam protection, certificates are dispatched at a rate of <strong>3 certificates per minute</strong> (approx. 20 seconds per email).
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-blue-50/80 border border-blue-200/70 p-3">
+                <span className="font-semibold text-blue-950 block mb-1">📊 Example Estimation</span>
+                <p className="text-blue-900 leading-relaxed">
+                  For an event with <strong>80 certificates</strong>, the automated mailing process will take approximately <strong>~27 minutes</strong> (80 ÷ 3 ≈ 26.6 mins) to complete all deliveries.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-amber-50 border border-amber-200/90 p-3 flex items-start gap-2.5">
+              <span className="text-base shrink-0">⚠️</span>
+              <p className="text-xs font-medium text-amber-900 leading-relaxed">
+                <strong>Crucial:</strong> Please <strong>keep this browser tab open and active</strong> during the mailing process to ensure uninterrupted, seamless certificate delivery to all students.
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── Table (shows participants before generation, certificates after) ─ */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">
-            {showCertTable
-              ? `Issued Certificates (${certs.length})`
-              : `Participants (${participants?.length ?? 0})`}
-          </h3>
-          <div className="flex items-center gap-2">
-            {!showCertTable && (
-              <button
-                type="button"
-                onClick={() => setShowUploadModal(true)}
-                className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 font-medium"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Upload Excel Sheet
-              </button>
-            )}
-            {showCertTable && (
-              <span className="text-xs text-gray-400">
-                Auto-refreshing while jobs are running
+      {/* ── 4. Generation progress (visible while generating/emailing) ─────── */}
+      {certs && certs.length > 0 && (
+        <GenerationProgress certs={certs} />
+      )}
+
+      {/* ── 5. Certificates Table (Identical to Club Dashboard) ───────────── */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="section-title">
+            Certificates
+            {certs?.length ? (
+              <span className="ml-2 rounded-full bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy">
+                {certs.length}
               </span>
-            )}
-          </div>
+            ) : null}
+          </h2>
+
+          {/* Quick stats */}
+          {certs?.length > 0 && (
+            <div className="flex items-center gap-4 text-xs">
+              {[
+                { label: 'Generated', n: generatedCount,  color: 'text-navy' },
+                { label: 'Emailed',   n: emailedCount,    color: 'text-green-600' },
+                { label: 'Failed',    n: failedCount,     color: 'text-red-500' },
+              ].map((s) => s.n > 0 && (
+                <span key={s.label} className={`font-semibold ${s.color}`}>
+                  {s.n} {s.label}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
-        {showCertTable ? (
-          <DataTable
-            columns={certColumns}
-            data={certs}
-            keyField="id"
-            searchPlaceholder="Search certificates by name, email, cert number…"
-            pagination
-            emptyMessage="No certificates found."
-          />
-        ) : (
-          <DataTable
-            columns={participantColumns}
-            data={participants ?? []}
-            keyField="id"
-            searchPlaceholder="Search participants by name, email, reg no…"
-            pagination
-            loading={participantsLoading}
-            emptyMessage={
-              <div className="py-8 text-center space-y-3">
-                <p className="text-sm text-gray-500">No participants added yet.</p>
-                <button
-                  type="button"
-                  onClick={() => setShowUploadModal(true)}
-                  className="btn-primary text-xs mx-auto flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  Upload Participants Excel
-                </button>
-              </div>
-            }
-          />
-        )}
+        <DataTable
+          columns={certColumns}
+          data={certs ?? []}
+          isLoading={isLoading}
+          emptyMessage={
+            allReady
+              ? "No certificates yet. Click 'Generate All Certificates' to start."
+              : 'Complete the checklist above to enable certificate generation.'
+          }
+          searchable
+          searchPlaceholder="Search by cert no., email, or name…"
+          rowKey="id"
+        />
       </div>
 
       {/* ── Excel Upload Modal ─────────────────────────────────────────────── */}

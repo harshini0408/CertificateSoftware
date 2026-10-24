@@ -185,18 +185,46 @@ def _participant_resp(p: Participant) -> ParticipantResponse:
     )
 
 
-def _cert_resp(c: Certificate) -> CertificateResponse:
+def _cert_resp(c: Any, latest_error_by_cert: Optional[Dict[str, str]] = None) -> CertificateResponse:
+    snapshot_dict: Dict[str, Any] = {}
+    if hasattr(c, "snapshot") and c.snapshot:
+        if hasattr(c.snapshot, "model_dump"):
+            snapshot_dict = c.snapshot.model_dump()
+        elif hasattr(c.snapshot, "dict"):
+            snapshot_dict = c.snapshot.dict()
+        elif isinstance(c.snapshot, dict):
+            snapshot_dict = c.snapshot
+
+    name = None
+    email = None
+    cert_type = None
+    if hasattr(c, "snapshot") and c.snapshot:
+        name = getattr(c.snapshot, "name", None) or snapshot_dict.get("name")
+        email = getattr(c.snapshot, "email", None) or snapshot_dict.get("email")
+        cert_type = getattr(c.snapshot, "cert_type", None) or snapshot_dict.get("cert_type")
+
+    status_str = c.status.value if hasattr(c.status, "value") else str(c.status)
+    err = (latest_error_by_cert or {}).get(str(c.id))
+    file_url = storage_path_to_url(c.png_url) if getattr(c, "png_url", None) else None
+
     return CertificateResponse(
         id=str(c.id),
-        cert_number=c.cert_number,
+        cert_number=c.cert_number or "",
         participant_id=str(c.participant_id),
         event_id=str(c.event_id),
-        club_id=str(c.club_id),
-        status=c.status.value if hasattr(c.status, "value") else str(c.status),
-        png_url=c.png_url,
-        snapshot=c.snapshot,
-        issued_at=c.issued_at,
-        created_at=getattr(c, "created_at", None),
+        template_id=str(getattr(c, "template_id", c.id) or c.id),
+        club_id=str(getattr(c, "club_id", getattr(c, "society_id", ""))),
+        participant_name=name,
+        participant_email=email,
+        cert_type=cert_type,
+        snapshot=snapshot_dict,
+        status=status_str,
+        failure_reason=err,
+        pdf_url=file_url,
+        png_url=file_url,
+        generated_at=getattr(c, "issued_at", None),
+        issued_at=getattr(c, "issued_at", None),
+        revoked_at=getattr(c, "revoked_at", None),
     )
 
 
@@ -1843,6 +1871,7 @@ async def generate_society_certificates(
         f"Skipped missing template: {skipped_no_template}."
     )
     return GenerateResponse(
+        queued_count=queued,
         queued=queued,
         skipped_existing=skipped_existing,
         skipped_no_template=skipped_no_template,
@@ -1862,7 +1891,23 @@ async def list_society_certificates(
     if status:
         query["status"] = status
     certs = await Certificate.find(query).to_list()
-    return [_cert_resp(c) for c in certs]
+    if not certs:
+        soc_certs = await SocietyCertificate.find(query).to_list()
+        if soc_certs:
+            certs = soc_certs
+
+    cert_ids = [c.id for c in certs]
+    latest_error_by_cert: Dict[str, str] = {}
+    if cert_ids:
+        logs = await EmailLog.find(
+            {"certificate_id": {"$in": cert_ids}}
+        ).sort(-EmailLog.id).to_list()
+        for log in logs:
+            cid = str(log.certificate_id)
+            if cid not in latest_error_by_cert and log.error_msg:
+                latest_error_by_cert[cid] = log.error_msg
+
+    return [_cert_resp(c, latest_error_by_cert) for c in certs]
 
 
 @router.get("/{society_id}/events/{event_id}/certificates/counts")
@@ -1873,6 +1918,10 @@ async def get_society_certificate_counts(
     _user: User = Depends(require_society_event_access),
 ):
     certs = await Certificate.find(Certificate.event_id == event_id).to_list()
+    if not certs:
+        soc_certs = await SocietyCertificate.find(SocietyCertificate.event_id == event_id).to_list()
+        if soc_certs:
+            certs = soc_certs
     generated = sum(1 for c in certs if c.status in [CertStatus.GENERATED, CertStatus.EMAILED])
     emailed = sum(1 for c in certs if c.status == CertStatus.EMAILED)
     pending = sum(1 for c in certs if c.status == CertStatus.PENDING)
