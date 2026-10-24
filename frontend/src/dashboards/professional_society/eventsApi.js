@@ -23,6 +23,8 @@ export const eventKeys = {
   detail: (societyId, eventId)      => ['events', societyId, eventId],
 }
 
+const isValidHexId = (val) => Boolean(val && val !== 'null' && val !== 'undefined' && /^[a-f\d]{24}$/i.test(String(val)))
+
 // ── useEvents ──────────────────────────────────────────────────────────────
 /**
  * GET /societies/:society_id/events
@@ -35,7 +37,7 @@ export function useEvents(societyId) {
       const { data } = await axiosInstance.get(`/societies/${societyId}/events`)
       return data
     },
-    enabled: !!societyId,
+    enabled: isValidHexId(societyId),
   })
 }
 
@@ -53,7 +55,7 @@ export function useEvent(societyId, eventId) {
       )
       return data
     },
-    enabled: !!societyId && !!eventId,
+    enabled: isValidHexId(societyId) && isValidHexId(eventId),
   })
 }
 

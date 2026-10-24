@@ -1806,7 +1806,11 @@ export default function ProfessionalSocietyDashboard() {
   const normalizedRole = String(role || '').trim().toLowerCase().replace(/\s+/g, '_')
   const isClubCoordinator = normalizedRole === 'professional_society_coordinator' || normalizedRole === 'club_coordinator'
 
-  const effectiveClubId = isClubCoordinator && authClubId ? authClubId : (society_id || club_id)
+  const isValidHexId = (val) => Boolean(val && val !== 'null' && val !== 'undefined' && /^[a-f\d]{24}$/i.test(String(val)))
+
+  const effectiveClubId = isClubCoordinator && isValidHexId(authClubId)
+    ? authClubId
+    : (isValidHexId(society_id) ? society_id : (isValidHexId(club_id) ? club_id : null))
 
   const activeTab = TABS.includes(searchParams.get('tab'))
     ? searchParams.get('tab')
@@ -1820,10 +1824,10 @@ export default function ProfessionalSocietyDashboard() {
   const missingClubAssignment = isClubCoordinator && !effectiveClubId
 
   useEffect(() => {
-    if (isClubCoordinator && authClubId && club_id && authClubId !== club_id) {
+    if (isClubCoordinator && isValidHexId(authClubId) && (!isValidHexId(society_id) || authClubId !== society_id)) {
       navigate(`/society/${authClubId}`, { replace: true })
     }
-  }, [isClubCoordinator, authClubId, club_id, navigate])
+  }, [isClubCoordinator, authClubId, society_id, navigate])
 
   useEffect(() => {
     // Refresh persisted auth snapshot so dashboard uses the latest club assignment.
@@ -1835,6 +1839,10 @@ export default function ProfessionalSocietyDashboard() {
         const { data } = await axiosInstance.get('/auth/me')
         if (!cancelled && data?.role) {
           setAuth(data)
+          const sid = data.society_id || (data.role === 'professional_society_coordinator' ? data.club_id : null)
+          if (sid && isValidHexId(sid) && (!isValidHexId(society_id) || society_id !== sid)) {
+            navigate(`/society/${sid}`, { replace: true })
+          }
         }
       } catch {
         // ProtectedRoute will handle auth failures.
@@ -1844,7 +1852,7 @@ export default function ProfessionalSocietyDashboard() {
     return () => {
       cancelled = true
     }
-  }, [isClubCoordinator, setAuth])
+  }, [isClubCoordinator, setAuth, society_id, navigate])
 
   useEffect(() => {
     if (requiresProfileSetup && activeTab !== 'settings') {

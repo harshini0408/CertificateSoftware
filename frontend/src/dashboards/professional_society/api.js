@@ -111,6 +111,8 @@ export function useSocieties(filters = {}) {
   })
 }
 
+const isValidHexId = (val) => Boolean(val && val !== 'null' && val !== 'undefined' && /^[a-f\d]{24}$/i.test(String(val)))
+
 export function useSociety(societyId) {
   return useQuery({
     queryKey: societyKeys.detail(societyId),
@@ -118,7 +120,7 @@ export function useSociety(societyId) {
       const { data } = await axiosInstance.get(`/societies/${societyId}`)
       return data
     },
-    enabled: !!societyId,
+    enabled: isValidHexId(societyId),
   })
 }
 
@@ -129,7 +131,7 @@ export function useSocietyDashboard(societyId) {
       const { data } = await axiosInstance.get(`/societies/${societyId}/dashboard`)
       return data
     },
-    enabled: !!societyId,
+    enabled: isValidHexId(societyId),
   })
 }
 
@@ -140,7 +142,7 @@ export function useSocietyAssets(societyId) {
       const { data } = await axiosInstance.get(`/societies/${societyId}/assets`)
       return data
     },
-    enabled: !!societyId,
+    enabled: isValidHexId(societyId),
   })
 }
 

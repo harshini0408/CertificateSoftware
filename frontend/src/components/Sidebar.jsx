@@ -109,8 +109,12 @@ function useNavItems() {
   const { role, club_id, society_id } = useAuthStore()
   const params = useParams()
   const location = useLocation()
-  const effectiveClubId = club_id ?? params.club_id
-  const effectiveSocietyId = society_id ?? params.society_id
+  const isValidHexId = (val) => Boolean(val && val !== 'null' && val !== 'undefined' && /^[a-f\d]{24}$/i.test(String(val)))
+  const effectiveClubId = isValidHexId(club_id) ? club_id : (isValidHexId(params.club_id) ? params.club_id : '')
+  const rawSocietyId = isValidHexId(society_id)
+    ? society_id
+    : (isValidHexId(club_id) ? club_id : (isValidHexId(params.society_id) ? params.society_id : ''))
+  const effectiveSocietyId = isValidHexId(rawSocietyId) ? rawSocietyId : ''
 
   switch (role) {
     case 'super_admin':
