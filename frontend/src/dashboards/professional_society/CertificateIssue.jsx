@@ -1,17 +1,19 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import DataTable from '../../components/DataTable'
 import StatusBadge from '../../components/StatusBadge'
 import LoadingSpinner from '../../components/LoadingSpinner'
+import FileUpload from '../../components/FileUpload'
 import {
   useCertificates,
   useGenerateCerts,
   useSendRemaining,
   useResendCert,
+  certKeys,
 } from './certificatesApi'
 import { BACKEND_URL } from '../../utils/axiosInstance'
-import { useParticipants, useDeleteParticipant } from './participantsApi'
+import { useParticipants, useDeleteParticipant, participantKeys } from './participantsApi'
 import axiosInstance from '../../utils/axiosInstance'
 import { useToastStore } from '../../store/uiStore'
 
@@ -99,6 +101,197 @@ function GenerationProgress({ certs }) {
   )
 }
 
+// ── Excel Upload Modal ─────────────────────────────────────────────────────
+function ExcelUploadModal({ isOpen, onClose, societyId, eventId }) {
+  const addToast = useToastStore((s) => s.addToast)
+  const qc = useQueryClient()
+  const [file, setFile] = useState(null)
+  const [result, setResult] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+
+  if (!isOpen) return null
+
+  const downloadTemplate = async () => {
+    setDownloading(true)
+    try {
+      const a = document.createElement('a')
+      a.href = `${BACKEND_URL}/societies/${societyId}/events/${eventId}/excel-template`
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      a.download = ''
+      a.click()
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Failed to download template.'
+      addToast({ type: 'error', message: msg })
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const uploadExcel = async () => {
+    if (!file) {
+      addToast({ type: 'warning', message: 'Please select an Excel file first.' })
+      return
+    }
+    setUploading(true)
+    setResult(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const { data } = await axiosInstance.post(
+        `/societies/${societyId}/events/${eventId}/participants/upload`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['participants', societyId, eventId] }),
+        qc.invalidateQueries({ queryKey: participantKeys.list(societyId, eventId) }),
+        qc.invalidateQueries({ queryKey: certKeys.list(societyId, eventId) }),
+        qc.invalidateQueries({ queryKey: ['events', societyId, eventId] }),
+        qc.invalidateQueries({ queryKey: ['society-events', societyId] }),
+      ])
+
+      setResult(data)
+      addToast({
+        type: 'success',
+        message: `${data.created ?? 0} participant(s) imported successfully.`,
+      })
+      setTimeout(() => {
+        onClose()
+      }, 1200)
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Upload failed.'
+      addToast({ type: 'error', message: msg })
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+      <div className="card w-full max-w-xl p-6 space-y-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between border-b pb-3">
+          <div>
+            <h3 className="text-base font-bold text-foreground">Upload Participants Excel</h3>
+            <p className="text-xs text-gray-500">Import participants to issue certificates</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Step 1: Download Template */}
+        <div className="card p-4 border border-gray-100">
+          <div className="flex items-start gap-3">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-navy/10 text-xs font-bold text-navy">
+              1
+            </div>
+            <div className="flex-1">
+              <p className="text-xs font-semibold text-foreground">Step 1 — Download Excel Template</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Standard columns: Name, Email, Registration Number, Role.
+              </p>
+              <button
+                type="button"
+                onClick={downloadTemplate}
+                disabled={downloading}
+                className="btn-secondary mt-2 text-xs py-1.5 px-3 flex items-center gap-1.5"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                {downloading ? 'Downloading…' : 'Download Template (.xlsx)'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Step 2: Upload Filled File */}
+        <div className="card p-4 border border-gray-100">
+          <div className="flex items-start gap-3">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-navy/10 text-xs font-bold text-navy">
+              2
+            </div>
+            <div className="flex-1 space-y-3">
+              <div>
+                <p className="text-xs font-semibold text-foreground">Step 2 — Upload Filled Sheet</p>
+                <p className="text-[11px] text-gray-500 mt-0.5">Accepts .xlsx or .xls files up to 10 MB.</p>
+              </div>
+
+              <FileUpload
+                id="modal-participant-excel-upload"
+                accept=".xlsx,.xls"
+                label="Drop Excel file here"
+                hint=".xlsx or .xls · max 10 MB"
+                maxSizeMB={10}
+                onFile={setFile}
+              />
+
+              {file && (
+                <div className="flex items-center justify-between text-xs text-gray-700 bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="text-green-600 font-bold">📄</span>
+                    <span className="font-medium truncate">{file.name}</span>
+                    <span className="text-gray-400 shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFile(null)}
+                    className="text-xs text-red-500 hover:text-red-700 ml-2 shrink-0 font-medium"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+
+              {result && (
+                <div className={`p-3 rounded-lg text-xs space-y-1 ${
+                  (result.errors?.length ?? 0) > 0 ? 'bg-amber-50 text-amber-900 border border-amber-200' : 'bg-green-50 text-green-800 border border-green-200'
+                }`}>
+                  <p className="font-semibold">✓ Upload Processed:</p>
+                  <p>• Added: {result.created ?? 0} participant(s)</p>
+                  {(result.skipped ?? 0) > 0 && <p>• Skipped duplicates: {result.skipped}</p>}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 pt-2 border-t">
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn-secondary text-xs px-4 py-2"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="modal-upload-excel-btn"
+            onClick={uploadExcel}
+            disabled={uploading || !file}
+            className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5"
+          >
+            {uploading ? (
+              <><LoadingSpinner size="sm" label="" /> Uploading…</>
+            ) : (
+              'Upload & Import'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── CertificateIssue ───────────────────────────────────────────────────────
 /**
  * Used as:
@@ -120,6 +313,7 @@ export default function CertificateIssue({
   // Poll every 4 s while there are pending certs
   const [polling, setPolling] = useState(false)
   const [downloadingZip, setDownloadingZip] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
 
   const {
     data: certs,
@@ -377,7 +571,21 @@ export default function CertificateIssue({
               Pre-flight Checklist
             </p>
             <div className="space-y-2">
-              <PreflightItem ok={hasParticipants} label="Participants imported & eligible" />
+              <div className="flex items-center gap-3">
+                <PreflightItem ok={hasParticipants} label="Participants imported & eligible" />
+                {!hasParticipants && (
+                  <button
+                    type="button"
+                    onClick={() => setShowUploadModal(true)}
+                    className="text-xs font-semibold text-navy hover:underline flex items-center gap-1 ml-1"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Upload Excel
+                  </button>
+                )}
+              </div>
               <PreflightItem ok={hasAssets}       label="Logo & signature configured" />
             </div>
           </div>
@@ -385,6 +593,18 @@ export default function CertificateIssue({
           <div className="flex flex-col items-end gap-3">
             {/* Action buttons row */}
             <div className="flex items-center gap-3">
+              <button
+                id="upload-excel-cert-tab-btn"
+                type="button"
+                className="btn-secondary flex items-center gap-2"
+                onClick={() => setShowUploadModal(true)}
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Upload Excel Sheet
+              </button>
+
               {generatedCount > 0 && (
                 <button
                   id="download-all-zip-btn"
@@ -490,11 +710,25 @@ export default function CertificateIssue({
               ? `Issued Certificates (${certs.length})`
               : `Participants (${participants?.length ?? 0})`}
           </h3>
-          {showCertTable && (
-            <span className="text-xs text-gray-400">
-              Auto-refreshing while jobs are running
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {!showCertTable && (
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(true)}
+                className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 font-medium"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Upload Excel Sheet
+              </button>
+            )}
+            {showCertTable && (
+              <span className="text-xs text-gray-400">
+                Auto-refreshing while jobs are running
+              </span>
+            )}
+          </div>
         </div>
 
         {showCertTable ? (
@@ -514,10 +748,32 @@ export default function CertificateIssue({
             searchPlaceholder="Search participants by name, email, reg no…"
             pagination
             loading={participantsLoading}
-            emptyMessage="No participants added yet. Import an Excel list in the Participants tab."
+            emptyMessage={
+              <div className="py-8 text-center space-y-3">
+                <p className="text-sm text-gray-500">No participants added yet.</p>
+                <button
+                  type="button"
+                  onClick={() => setShowUploadModal(true)}
+                  className="btn-primary text-xs mx-auto flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Upload Participants Excel
+                </button>
+              </div>
+            }
           />
         )}
       </div>
+
+      {/* ── Excel Upload Modal ─────────────────────────────────────────────── */}
+      <ExcelUploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        societyId={societyId}
+        eventId={eventId}
+      />
     </div>
   )
 }

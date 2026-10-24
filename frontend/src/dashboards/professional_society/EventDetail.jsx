@@ -1153,7 +1153,6 @@ function ManualEntryTab({ societyId, eventId, event }) {
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Excel Upload Sub-tab
 // ─────────────────────────────────────────────────────────────────────────────
 function ExcelUploadTab({ societyId, eventId }) {
@@ -1196,14 +1195,31 @@ function ExcelUploadTab({ societyId, eventId }) {
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
+
+      // Keep all dependent queries in sync without manual page refresh.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: participantKeys.list(societyId, eventId) }),
+        qc.invalidateQueries({ queryKey: participantKeys.columns(societyId, eventId) }),
+        qc.invalidateQueries({ queryKey: certKeys.list(societyId, eventId) }),
+        qc.invalidateQueries({ queryKey: eventKeys.detail(societyId, eventId) }),
+        qc.invalidateQueries({ queryKey: ['participants', societyId, eventId] }),
+        qc.invalidateQueries({ queryKey: ['events', societyId, eventId] }),
+        qc.invalidateQueries({ queryKey: ['society-events', societyId] }),
+      ])
+
       setResult(data)
-      qc.invalidateQueries({ queryKey: ['participants', societyId, eventId] })
       addToast({
         type: 'success',
-        message: `Import complete: ${data.created ?? 0} participants added.`,
+        message: `${data.created ?? 0} participant(s) imported successfully.`,
       })
+      if ((data.created ?? 0) > 0) {
+        addToast({ type: 'info', message: 'Participants imported. Proceed to Certificates.' })
+      }
     } catch (err) {
-      const msg = err?.response?.data?.detail || 'Excel upload failed.'
+      const msg =
+        err?.response?.data?.detail ||
+        err?.message ||
+        'Upload failed.'
       addToast({ type: 'error', message: msg })
     } finally {
       setUploading(false)
@@ -1211,60 +1227,124 @@ function ExcelUploadTab({ societyId, eventId }) {
   }
 
   return (
-    <div className="max-w-xl space-y-6">
-      {/* Step 1: Download Template */}
-      <div className="card p-6 space-y-3">
-        <h3 className="text-sm font-semibold text-foreground">Step 1 — Download Excel Template</h3>
-        <p className="text-xs text-gray-500">
-          The template contains standard columns (Name, Email, Registration Number, Role). Fill it in and upload below.
-        </p>
-        <button
-          type="button"
-          onClick={downloadTemplate}
-          disabled={downloading}
-          className="btn-secondary text-xs flex items-center gap-2"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          {downloading ? 'Preparing…' : 'Download Template (.xlsx)'}
-        </button>
-      </div>
-
-      {/* Step 2: Upload */}
-      <div className="card p-6 space-y-4">
-        <h3 className="text-sm font-semibold text-foreground">Step 2 — Upload Filled Sheet</h3>
-        <FileUpload
-          accept=".xlsx,.xls,.csv"
-          onFileSelect={(f) => setFile(f)}
-          label="Drop your participants Excel file here, or browse"
-        />
-
-        {file && (
-          <div className="flex items-center justify-between text-xs text-gray-600 bg-gray-50 p-2.5 rounded-lg border border-gray-200">
-            <span className="font-medium truncate">{file.name}</span>
+    <div className="space-y-6 max-w-xl">
+      {/* Step 1 — download template */}
+      <div className="card p-5">
+        <div className="flex items-start gap-4">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-navy/10 text-sm font-bold text-navy">
+            1
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-foreground">
+              Download the Excel template
+            </p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              Fill in the downloaded file with participant data and re-upload below.
+            </p>
             <button
-              type="button"
-              onClick={uploadExcel}
-              disabled={uploading}
-              className="btn-primary text-xs px-3 py-1"
+              id="download-excel-template"
+              className="btn-secondary mt-3 text-sm"
+              onClick={downloadTemplate}
+              disabled={downloading}
             >
-              {uploading ? 'Processing…' : 'Upload & Import'}
+              {downloading ? (
+                <><LoadingSpinner size="sm" label="" /> Downloading…</>
+              ) : (
+                <>
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download Template (.xlsx)
+                </>
+              )}
             </button>
           </div>
-        )}
-
-        {result && (
-          <div className="mt-3 p-3 rounded-lg bg-green-50 border border-green-200 text-xs text-green-800 space-y-1">
-            <p className="font-semibold">✓ Upload Processed:</p>
-            <p>• Added: {result.created ?? 0}</p>
-            <p>• Skipped (duplicates): {result.skipped ?? 0}</p>
-            {result.errors?.length > 0 && (
-              <p className="text-red-600">• Errors: {result.errors.length} rows</p>
-            )}
-          </div>
-        )}
+        </div>
       </div>
+
+      {/* Step 2 — upload filled file */}
+      <div className="card p-5">
+        <div className="flex items-start gap-4">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-navy/10 text-sm font-bold text-navy">
+            2
+          </div>
+          <div className="flex-1 space-y-4">
+            <div>
+              <p className="text-sm font-medium text-foreground">Upload filled file</p>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Accepts .xlsx or .xls files up to 10 MB.
+              </p>
+            </div>
+            <FileUpload
+              id="participant-excel-upload"
+              accept=".xlsx,.xls"
+              label="Drop Excel file here"
+              hint=".xlsx or .xls · max 10 MB"
+              maxSizeMB={10}
+              onFile={setFile}
+            />
+
+            {file && (
+              <div className="flex items-center justify-between text-xs text-gray-700 bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-green-600 font-bold">📄</span>
+                  <span className="font-medium truncate">{file.name}</span>
+                  <span className="text-gray-400 shrink-0">({(file.size / 1024).toFixed(1)} KB)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFile(null)}
+                  className="text-xs text-red-500 hover:text-red-700 ml-2 shrink-0 font-medium"
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                id="upload-excel-btn"
+                className="btn-primary"
+                onClick={uploadExcel}
+                disabled={uploading || !file}
+              >
+                {uploading ? (
+                  <><LoadingSpinner size="sm" label="" /> Uploading…</>
+                ) : (
+                  'Upload & Import'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Result panel */}
+      {result && (
+        <div className={`card p-5 border-l-4 ${
+          (result.errors?.length ?? 0) > 0 ? 'border-amber-400' : 'border-green-500'
+        }`}>
+          <p className="text-sm font-semibold text-foreground mb-2">Upload Result</p>
+          <p className="text-sm text-gray-600">
+            ✅ <strong>{result.created ?? 0}</strong> participant(s) imported
+            {(result.skipped ?? 0) > 0 && (
+              <span> · ⚠️ <strong>{result.skipped}</strong> skipped (duplicate)</span>
+            )}
+          </p>
+          {result.errors?.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-semibold text-amber-700 mb-1">
+                Rows with errors ({result.errors.length}):
+              </p>
+              <ul className="text-xs text-amber-900 space-y-0.5 max-h-32 overflow-y-auto">
+                {result.errors.map((e, i) => (
+                  <li key={i}>• {e}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
