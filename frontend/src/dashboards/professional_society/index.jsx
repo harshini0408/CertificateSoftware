@@ -40,8 +40,8 @@ import { BACKEND_URL } from '../../utils/axiosInstance'
 const TABS = ['events', 'active_members', 'members', 'office_bearers', 'settings']
 
 export const SESSION_SLOTS = {
-  'Morning (FN)': ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
-  'Afternoon (AN)': ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM'],
+  'Morning (FN)': ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM', 'Other'],
+  'Afternoon (AN)': ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM', 'Other'],
 }
 
 export const EVENT_CATEGORIES = [
@@ -184,6 +184,8 @@ function DashboardTab({ societyId, clubId: propClubId, dashboard, isLoading }) {
   const [posterError, setPosterError] = useState('')
   const [selectedVenueOption, setSelectedVenueOption] = useState('')
   const [customVenue, setCustomVenue] = useState('')
+  const [selectedSlotOption, setSelectedSlotOption] = useState('8:45 AM - 10:15 AM')
+  const [customSlot, setCustomSlot] = useState('')
 
   const { register, handleSubmit, reset, watch, setValue, formState: { isSubmitting, errors } } = useForm({
     defaultValues: {
@@ -203,11 +205,15 @@ function DashboardTab({ societyId, clubId: propClubId, dashboard, isLoading }) {
   const availableSlots = SESSION_SLOTS[selectedSessionType] || SESSION_SLOTS['Morning (FN)']
 
   useEffect(() => {
-    const currentSlot = watch('slot')
-    if (!availableSlots.includes(currentSlot)) {
-      setValue('slot', availableSlots[0] || '')
+    if (selectedSlotOption !== 'Other') {
+      const validSlots = availableSlots.filter((s) => s !== 'Other')
+      if (!validSlots.includes(selectedSlotOption)) {
+        const next = validSlots[0] || '8:45 AM - 10:15 AM'
+        setSelectedSlotOption(next)
+        setValue('slot', next)
+      }
     }
-  }, [selectedSessionType, setValue, watch, availableSlots])
+  }, [selectedSessionType, availableSlots, selectedSlotOption, setValue])
 
   const handleAcadYearToggle = (year) => {
     setSelectedAcademicYears((prev) => {
@@ -245,14 +251,15 @@ function DashboardTab({ societyId, clubId: propClubId, dashboard, isLoading }) {
     }
 
     const sessionCode = data.session_type?.includes('AN') ? 'AN' : 'FN'
-    const eventTimeStr = data.slot ? `${data.session_type} | ${data.slot}` : data.session_type
+    const finalSlot = selectedSlotOption === 'Other' ? customSlot.trim() : (data.slot || selectedSlotOption)
+    const eventTimeStr = finalSlot ? `${data.session_type} | ${finalSlot}` : data.session_type
 
     const payload = {
       ...data,
       max_teams: data.is_team_event && data.max_teams ? parseInt(data.max_teams, 10) : null,
       session: sessionCode,
-      slot: data.slot,
-      event_time: data.timing ? `${eventTimeStr} (${data.timing})` : eventTimeStr,
+      slot: finalSlot,
+      event_time: eventTimeStr,
       academic_years: selectedAcademicYears,
       academic_year: selectedAcademicYears.join(', '),
     }
@@ -274,6 +281,8 @@ function DashboardTab({ societyId, clubId: propClubId, dashboard, isLoading }) {
         }
         setIsModalOpen(false)
         reset()
+        setSelectedSlotOption('8:45 AM - 10:15 AM')
+        setCustomSlot('')
         setSelectedVenueOption('')
         setCustomVenue('')
         setSelectedAcademicYears([])
@@ -540,18 +549,43 @@ function DashboardTab({ societyId, clubId: propClubId, dashboard, isLoading }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="form-label" htmlFor="dash-event-slot">Event Slot *</label>
+                  <label className="form-label" htmlFor="dash-event-slot">Event Slot / Timing *</label>
                   <select
                     id="dash-event-slot"
-                    className={`form-input ${errors.slot ? 'form-input-error' : ''}`}
-                    {...register('slot', { required: 'Event slot is required' })}
+                    className="form-input"
+                    value={selectedSlotOption}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setSelectedSlotOption(val)
+                      if (val !== 'Other') {
+                        setValue('slot', val, { shouldValidate: true })
+                        setCustomSlot('')
+                      } else {
+                        setValue('slot', customSlot.trim(), { shouldValidate: true })
+                      }
+                    }}
                   >
                     {availableSlots.map((s) => (
                       <option key={s} value={s}>
-                        {s}
+                        {s === 'Other' ? 'Others (Custom Timing)' : s}
                       </option>
                     ))}
                   </select>
+                  {selectedSlotOption === 'Other' && (
+                    <input
+                      type="text"
+                      className="form-input text-xs mt-2"
+                      placeholder="Enter custom timing (e.g. 9:00 AM - 1:00 PM)"
+                      value={customSlot}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setCustomSlot(val)
+                        setValue('slot', val.trim(), { shouldValidate: true })
+                      }}
+                      required
+                      autoFocus
+                    />
+                  )}
                   {errors.slot && <p className="form-error">{errors.slot.message}</p>}
                 </div>
                 <div>
