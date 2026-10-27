@@ -21,6 +21,8 @@ from .dept_event import DeptEvent, DeptEventStatus
 from .dept_template import DeptTemplate
 from .guest_session import GuestSession
 from .faculty_session import FacultySession
+from .faculty_certificate import FacultyCertificate
+from .faculty_field_position import FacultyFieldPosition
 from .role_template_preset import RoleTemplatePreset
 from .user_otp import OTPRequest
 from .manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
@@ -63,6 +65,8 @@ ALL_MODELS = [
     DeptTemplate,
     GuestSession,
     FacultySession,
+    FacultyCertificate,
+    FacultyFieldPosition,
     RoleTemplatePreset,
     OTPRequest,
     ManualCreditSubmission,
@@ -103,6 +107,8 @@ __all__ = [
     "DeptEvent", "DeptEventStatus",
     "GuestSession",
     "FacultySession",
+    "FacultyCertificate",
+    "FacultyFieldPosition",
     "RoleTemplatePreset",
     "OTPRequest",
     "ManualCreditSubmission", "ManualSubmissionStatus",

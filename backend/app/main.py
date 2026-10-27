@@ -211,6 +211,7 @@ from .routers.role_presets import router as role_presets_router
 from .domains.student.routers import router as student_router
 from .domains.tutor.routers import router as tutor_router
 from .domains.guest.routers import router as guest_router
+from .domains.faculty.routers import router as faculty_router
 from .domains.dept.routers import router as dept_router
 from .domains.principal.routers import router as principal_router
 from .domains.hod.routers import router as hod_router
@@ -239,6 +240,7 @@ app.include_router(principal_router)
 app.include_router(hod_router)
 app.include_router(image_templates.router)
 app.include_router(guest_router)
+app.include_router(faculty_router)
 app.include_router(role_presets_router)
 app.include_router(student_affairs_router)
 app.include_router(club_attendance_router)

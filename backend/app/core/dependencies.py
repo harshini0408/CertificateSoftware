@@ -74,6 +74,23 @@ async def require_cert_generator(
     return current_user
 
 
+FACULTY_ROLES = {
+    UserRole.FACULTY,
+    UserRole.TUTOR,
+    UserRole.HOD,
+    UserRole.SUPER_ADMIN,
+}
+
+
+async def require_faculty(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allow access to faculty, tutor, hod, or super_admin users."""
+    if current_user.role not in FACULTY_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Faculty access denied")
+    return current_user
+
+
 async def require_guest(
     current_user: User = Depends(get_current_user),
 ) -> User:

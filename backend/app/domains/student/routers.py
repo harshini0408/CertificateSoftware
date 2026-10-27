@@ -15,6 +15,7 @@ from ...models.user import User, UserRole
 from ...models.student_credit import StudentCredit
 from ...models.certificate import Certificate, CertStatus
 from ...models.dept_certificate import DeptCertificate
+from ...models.faculty_certificate import FacultyCertificate
 from ...models.credit_rule import CreditRule
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.event import Event, EventStatus
@@ -391,6 +392,23 @@ async def get_my_certificates(current_user: User = Depends(require_role(UserRole
             "issued_at": dc.emailed_at or dc.created_at,
             "status": "emailed" if dc.emailed_at else "generated",
             "png_url": dc.png_url,
+            "pdf_url": None,
+        })
+
+    # Get faculty certificates
+    fac_certs = await FacultyCertificate.find({
+        "recipient_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}
+    }).to_list()
+    for fc in fac_certs:
+        results.append({
+            "_id": str(fc.id),
+            "cert_number": fc.cert_number,
+            "cert_type": "faculty",
+            "event_name": fc.event_name or "Faculty Event",
+            "club_name": "Faculty Event",
+            "issued_at": fc.emailed_at or fc.created_at,
+            "status": fc.status,
+            "png_url": fc.png_url,
             "pdf_url": None,
         })
 
