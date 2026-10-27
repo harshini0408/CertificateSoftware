@@ -23,7 +23,7 @@ from ...models.club import Club
 from ...models.professional_society import ProfessionalSociety
 from ...models.society_event import SocietyEvent, SocietyEventStatus
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
-from ...models.student_society_membership import StudentSocietyMembership
+from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
 from ...models.event_registration import EventRegistration
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
@@ -595,6 +595,23 @@ async def get_my_club_memberships(current_user: User = Depends(require_role(User
 
 # ── /students/me/societies ───────────────────────────────────────────────────
 
+@router.get("/students/me/societies/available")
+async def get_available_societies(
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Return all active professional societies available for students to join."""
+    societies = await ProfessionalSociety.find(ProfessionalSociety.is_active == True).sort("+name").to_list()
+    return [
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "slug": s.slug,
+            "contact_email": s.contact_email or "",
+        }
+        for s in societies
+    ]
+
+
 @router.get("/students/me/societies")
 async def get_my_society_memberships(current_user: User = Depends(require_role(UserRole.STUDENT))):
     """Return all professional society membership applications for the current student."""
@@ -606,7 +623,7 @@ async def get_my_society_memberships(current_user: User = Depends(require_role(U
             "id": str(m.id),
             "society_id": str(m.society_id),
             "society_name": m.society_name or "",
-            "status": m.status.value,
+            "status": m.status.value if hasattr(m.status, "value") else str(m.status),
             "applied_at": m.applied_at,
             "updated_at": m.updated_at,
             "review_note": m.review_note,
@@ -614,6 +631,71 @@ async def get_my_society_memberships(current_user: User = Depends(require_role(U
         }
         for m in memberships
     ]
+
+
+@router.post("/students/me/societies/apply")
+async def apply_for_society(
+    body: dict,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Apply to join a professional society. A student may apply to any number of professional societies."""
+    society_id_str = (body.get("society_id") or "").strip()
+    if not society_id_str:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "society_id is required")
+
+    from beanie import PydanticObjectId as ObjId
+    try:
+        society_oid = ObjId(society_id_str)
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid society_id")
+
+    society = await ProfessionalSociety.get(society_oid)
+    if not society or not society.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional society not found or inactive")
+
+    # Check for duplicate active application to this society
+    existing_for_society = await StudentSocietyMembership.find_one({
+        "student_id": current_user.id,
+        "society_id": society_oid,
+        "status": {"$in": [SocietyMembershipStatus.PENDING.value, SocietyMembershipStatus.APPROVED.value]},
+    })
+    if existing_for_society:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "You already have an active application or membership for this professional society",
+        )
+
+    membership = await StudentSocietyMembership(
+        student_id=current_user.id,
+        student_name=current_user.name,
+        student_email=(current_user.email or "").strip().lower(),
+        society_id=society_oid,
+        society_name=society.name,
+        status=SocietyMembershipStatus.PENDING,
+    ).insert()
+
+    return {
+        "message": "Application submitted. Awaiting coordinator approval.",
+        "id": str(membership.id),
+        "society_name": society.name,
+        "status": membership.status.value,
+    }
+
+
+@router.delete("/students/me/societies/{membership_id}")
+async def leave_society_membership(
+    membership_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """Allow a student to withdraw their pending or approved professional society membership."""
+    membership = await StudentSocietyMembership.get(membership_id)
+    if not membership:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Membership not found")
+    if membership.student_id != current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This membership does not belong to you")
+    society_name = membership.society_name or "the professional society"
+    await membership.delete()
+    return {"message": f"Successfully withdrawn from {society_name}"}
 
 
 

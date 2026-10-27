@@ -20,6 +20,10 @@ import {
   useMyClubMemberships,
   useApplyForClub,
   useAvailableClubs,
+  useMySocietyMemberships,
+  useAvailableSocieties,
+  useApplyForSociety,
+  useLeaveSocietyMembership,
   useStudentUpcomingEvents,
   useRegisterForEvent,
   useCancelEventRegistration,
@@ -717,10 +721,14 @@ export default function StudentDashboard() {
   const { data: manualSubmissions, isLoading: submissionsLoading } = useMyManualCreditSubmissions()
   const { data: clubMemberships, isLoading: membershipsLoading } = useMyClubMemberships()
   const { data: availableClubs } = useAvailableClubs()
+  const { data: societyMemberships, isLoading: societyMembershipsLoading } = useMySocietyMemberships()
+  const { data: availableSocieties } = useAvailableSocieties()
   const { data: upcomingEvents, isLoading: upcomingLoading } = useStudentUpcomingEvents()
   const { data: upcomingSocietyEvents, isLoading: upcomingSocietyLoading } = useUpcomingSocietyEvents()
   const applyForClub = useApplyForClub()
   const leaveClubMembership = useLeaveClubMembership()
+  const applyForSociety = useApplyForSociety()
+  const leaveSocietyMembership = useLeaveSocietyMembership()
   const createSubmission = useCreateManualCreditSubmission()
   const updateSubmission = useUpdateManualCreditSubmission()
   const deleteSubmission = useDeleteManualCreditSubmission()
@@ -734,8 +742,10 @@ export default function StudentDashboard() {
   const [editingSubmission, setEditingSubmission] = useState(null)
   const [editForm, setEditForm] = useState({ cert_type: '', event_date: '', certificate_image: null })
   const [leavingMembershipId, setLeavingMembershipId] = useState(null)
+  const [leavingSocietyMembershipId, setLeavingSocietyMembershipId] = useState(null)
 
   const [selectedClubId, setSelectedClubId] = useState('')
+  const [selectedSocietyId, setSelectedSocietyId] = useState('')
   const [registeringEventId, setRegisteringEventId] = useState(null)
   const [cancellingEventId, setCancellingEventId] = useState(null)
   const [eventSearch, setEventSearch] = useState('')
@@ -2037,28 +2047,117 @@ export default function StudentDashboard() {
               })()}
             </div>
 
-            {/* ─── Professional Circle Membership ─────────────────────── */}
+            {/* ─── Professional Society Memberships ─────────────────────── */}
             <div className="card p-5 space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="section-title">Professional Circle Membership</h2>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700 ring-1 ring-teal-200">
-                  <span className="h-1.5 w-1.5 rounded-full bg-teal-500 animate-pulse" />
-                  Coming Soon
-                </span>
+                <h2 className="section-title">Professional Society Memberships</h2>
+                {societyMemberships && societyMemberships.length > 0 && (
+                  <span className="text-xs text-gray-500">
+                    {societyMemberships.length} society membership{societyMemberships.length === 1 ? '' : 's'}
+                  </span>
+                )}
               </div>
-              <div className="rounded-xl border border-dashed border-teal-200 bg-teal-50/50 p-6 text-center">
-                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-teal-100 text-teal-700 mb-2">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
+
+              {/* Current society memberships */}
+              {societyMembershipsLoading ? (
+                <div className="flex justify-center py-4">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-navy border-t-transparent" />
                 </div>
-                <p className="text-sm font-semibold text-teal-900">
-                  Feature will be available soon to use by the students.
-                </p>
-                <p className="mt-1 text-xs text-teal-700/80">
-                  Registration and enrollment into professional societies (IEEE, ACM, CSI, etc.) will open shortly.
-                </p>
-              </div>
+              ) : societyMemberships && societyMemberships.length > 0 ? (
+                <div className="divide-y divide-gray-100">
+                  {societyMemberships.map((m) => (
+                    <div key={m.id} className="flex items-center justify-between py-2.5">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-foreground">{m.society_name || '—'}</p>
+                          {m.office_bearer_role && (
+                            <span className="inline-flex rounded bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy">
+                              {m.office_bearer_role}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Applied {m.applied_at ? new Date(m.applied_at).toLocaleDateString('en-IN') : '—'}
+                          {m.review_note ? ` • ${m.review_note}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${
+                          m.status === 'approved' ? 'bg-green-100 text-green-700' :
+                          m.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                          'bg-amber-100 text-amber-700'
+                        }`}>
+                          {m.status}
+                        </span>
+                        {(m.status === 'pending' || m.status === 'approved') && (
+                          <button
+                            className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100"
+                            disabled={leavingSocietyMembershipId === m.id || leaveSocietyMembership.isPending}
+                            onClick={() => {
+                              if (window.confirm(`Withdraw from ${m.society_name}? You can apply again anytime.`)) {
+                                setLeavingSocietyMembershipId(m.id)
+                                leaveSocietyMembership.mutate(m.id, { onSettled: () => setLeavingSocietyMembershipId(null) })
+                              }
+                            }}
+                          >
+                            {leavingSocietyMembershipId === m.id ? '…' : 'Leave'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">You haven't applied to any professional societies yet.</p>
+              )}
+
+              {/* Apply section — student can apply to any number of societies */}
+              {(() => {
+                const appliedSocietyIds = new Set(
+                  (societyMemberships || [])
+                    .filter((m) => m.status === 'pending' || m.status === 'approved')
+                    .map((m) => m.society_id)
+                )
+                const eligibleSocieties = (availableSocieties || []).filter(
+                  (s) => !appliedSocietyIds.has(s.id)
+                )
+
+                if (eligibleSocieties.length === 0 && (availableSocieties || []).length > 0) {
+                  return (
+                    <p className="text-xs text-gray-400 border-t border-gray-100 pt-3">
+                      You have applied to all available professional societies.
+                    </p>
+                  )
+                }
+
+                return (
+                  <div className="flex items-center gap-3 border-t border-gray-100 pt-4">
+                    <select
+                      className="form-input flex-1"
+                      value={selectedSocietyId}
+                      onChange={(e) => setSelectedSocietyId(e.target.value)}
+                    >
+                      <option value="">Select a professional society to join…</option>
+                      {eligibleSocieties.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      id="apply-society-btn"
+                      className="btn-primary whitespace-nowrap"
+                      disabled={!selectedSocietyId || applyForSociety.isPending}
+                      onClick={() => {
+                        if (!selectedSocietyId) return
+                        applyForSociety.mutate(selectedSocietyId, {
+                          onSuccess: () => setSelectedSocietyId('')
+                        })
+                      }}
+                    >
+                      {applyForSociety.isPending ? 'Applying…' : 'Apply'}
+                    </button>
+                  </div>
+                )
+              })()}
             </div>
 
             <div>

@@ -2099,7 +2099,11 @@ async def get_membership_requests(
     society_id = current_user.society_id
     query: dict[str, Any] = {}
     if society_id:
-        query["society_id"] = society_id
+        try:
+            oid = ObjectId(str(society_id))
+            query["$or"] = [{"society_id": oid}, {"society_id": str(society_id)}]
+        except Exception:
+            query["society_id"] = society_id
 
     memberships = await StudentSocietyMembership.find(query).sort("-applied_at").to_list()
     return [
@@ -2131,7 +2135,7 @@ async def review_single_membership(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Membership request not found")
 
     if current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR:
-        if current_user.society_id != membership.society_id:
+        if str(current_user.society_id) != str(membership.society_id):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this membership")
 
     action = (body.action or body.status or "").lower()
@@ -2174,7 +2178,7 @@ async def bulk_approve_memberships(
         if not membership:
             continue
 
-        if current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR and membership.society_id != society_id:
+        if current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR and str(membership.society_id) != str(society_id):
             continue
 
         membership.status = SocietyMembershipStatus.APPROVED
@@ -2204,7 +2208,7 @@ async def remove_society_member(
     try:
         oid = ObjectId(identifier)
         membership = await StudentSocietyMembership.get(oid)
-        if membership and current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR and membership.society_id != society_id:
+        if membership and current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR and str(membership.society_id) != str(society_id):
             membership = None
     except Exception:
         pass
@@ -2247,7 +2251,7 @@ async def delete_society_membership(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Membership request not found")
 
     if current_user.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR:
-        if current_user.society_id != membership.society_id:
+        if str(current_user.society_id) != str(membership.society_id):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this membership")
 
     await membership.delete()

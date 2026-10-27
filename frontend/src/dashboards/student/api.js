@@ -419,12 +419,66 @@ export function useUpdateStudentRegNo() {
 // Legacy alias kept for any internal usage during refactor — can be removed after testing
 export { useSubmitAttendance as useMarkAttendance }
 
+export function useAvailableSocieties() {
+  return useQuery({
+    queryKey: ['societies', 'available'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/students/me/societies/available')
+      return data
+    },
+  })
+}
+
 export function useMySocietyMemberships() {
   return useQuery({
     queryKey: ['societies', 'me', 'memberships'],
     queryFn: async () => {
       const { data } = await axiosInstance.get('/students/me/societies')
       return data
+    },
+  })
+}
+
+export function useApplyForSociety() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (society_id) => {
+      const { data } = await axiosInstance.post('/students/me/societies/apply', { society_id })
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['societies', 'me', 'memberships'] })
+      addToast({ type: 'success', message: 'Application submitted! Awaiting coordinator approval.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to apply for professional society.',
+      })
+    },
+  })
+}
+
+export function useLeaveSocietyMembership() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (membership_id) => {
+      const { data } = await axiosInstance.delete(`/students/me/societies/${membership_id}`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['societies', 'me', 'memberships'] })
+      addToast({ type: 'success', message: data?.message || 'Withdrawn successfully.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to withdraw from society.',
+      })
     },
   })
 }
