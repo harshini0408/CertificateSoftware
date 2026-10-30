@@ -22,6 +22,7 @@ from ...models.student_club_membership import StudentClubMembership, MembershipS
 from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
+from ...services.credit_service import capped_credit_points
 
 router = APIRouter(tags=["Tutor"])
 
@@ -830,22 +831,29 @@ async def verify_credit_point_submission(
 
     cert_number = f"STU-MANUAL-{str(submission.id)[-8:].upper()}"
     semester = submission.semester or (await get_current_semester() or "Unknown")
+    awarded_points = await capped_credit_points(
+        student_doc,
+        submission.cert_type,
+        semester,
+        int(rule.points or 0),
+    )
     entry = CreditHistoryEntry(
         cert_number=cert_number,
         event_name="Student Manual Submission",
         club_name="Student Upload",
         cert_type=submission.cert_type,
-        points_awarded=int(rule.points or 0),
+        points_awarded=awarded_points,
+        eligible_points=int(rule.points or 0),
         semester=semester,
         awarded_at=datetime.utcnow(),
     )
     student_doc.credit_history.append(entry)
-    student_doc.total_credits = int(student_doc.total_credits or 0) + int(rule.points or 0)
+    student_doc.total_credits = int(student_doc.total_credits or 0) + awarded_points
     student_doc.last_updated = datetime.utcnow()
     await student_doc.save()
 
     submission.status = ManualSubmissionStatus.VERIFIED
-    submission.points_awarded = int(rule.points or 0)
+    submission.points_awarded = awarded_points
     submission.reviewed_at = datetime.utcnow()
     submission.reviewed_by = str(current_user.id)
     submission.reviewed_by_name = current_user.name
@@ -854,9 +862,13 @@ async def verify_credit_point_submission(
     await submission.save()
 
     return {
-        "message": "Submission verified and credits awarded",
+        "message": (
+            "Submission verified, but the semester certificate limit was reached; no credits were awarded"
+            if awarded_points == 0 and rule.points > 0
+            else "Submission verified and credits awarded"
+        ),
         "student_email": student_doc.student_email,
-        "points_awarded": int(rule.points or 0),
+        "points_awarded": awarded_points,
         "total_credits": student_doc.total_credits,
     }
 
@@ -989,13 +1001,23 @@ async def tutor_update_credit_submission(
     if student_doc:
         # Case 1: transitioning to verified from non-verified
         if target_status == ManualSubmissionStatus.VERIFIED.value and not was_verified:
-            semester = await get_current_semester() or "Unknown"
+            semester = submission.semester or (await get_current_semester() or "Unknown")
+            cert_type = updates.get("cert_type", submission.cert_type)
+            eligible_points = target_points
+            target_points = await capped_credit_points(
+                student_doc,
+                cert_type,
+                semester,
+                target_points,
+            )
+            updates["points_awarded"] = target_points
             entry = CreditHistoryEntry(
                 cert_number=cert_number,
                 event_name="External/Manual Certificate Verification",
                 club_name="Manual Verification",
-                cert_type=updates.get("cert_type", submission.cert_type),
+                cert_type=cert_type,
                 points_awarded=target_points,
+                eligible_points=eligible_points,
                 semester=semester,
                 awarded_at=datetime.utcnow(),
             )
@@ -1015,10 +1037,29 @@ async def tutor_update_credit_submission(
 
         # Case 3: remains verified, but points or cert_type changed
         elif target_status == ManualSubmissionStatus.VERIFIED.value and was_verified:
+            existing_entry = next(
+                (entry for entry in student_doc.credit_history if entry.cert_number == cert_number),
+                None,
+            )
+            semester = (
+                existing_entry.semester if existing_entry and existing_entry.semester
+                else submission.semester or (await get_current_semester() or "Unknown")
+            )
+            cert_type = updates.get("cert_type", submission.cert_type)
+            eligible_points = target_points
+            target_points = await capped_credit_points(
+                student_doc,
+                cert_type,
+                semester,
+                target_points,
+                exclude_cert_number=cert_number,
+            )
+            updates["points_awarded"] = target_points
             for entry in student_doc.credit_history:
                 if entry.cert_number == cert_number:
                     diff = target_points - int(entry.points_awarded or 0)
                     entry.points_awarded = target_points
+                    entry.eligible_points = eligible_points
                     if "cert_type" in updates:
                         entry.cert_type = updates["cert_type"]
                     student_doc.total_credits = max(0, int(student_doc.total_credits or 0) + diff)
@@ -1115,18 +1156,25 @@ async def add_manual_tutor_certificate(
         cert_number = f"MANUAL-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     semester = await get_current_semester() or "Unknown"
+    awarded_points = await capped_credit_points(
+        student,
+        cert_type,
+        semester,
+        int(rule.points or 0),
+    )
     entry = CreditHistoryEntry(
         cert_number=cert_number,
         event_name="Manual Entry",
         club_name=(current_user.department or "Tutor Dashboard"),
         cert_type=cert_type,
-        points_awarded=rule.points,
+        points_awarded=awarded_points,
+        eligible_points=int(rule.points or 0),
         semester=semester,
         awarded_at=datetime.utcnow(),
     )
 
     student.credit_history.append(entry)
-    student.total_credits = int(student.total_credits or 0) + int(rule.points)
+    student.total_credits = int(student.total_credits or 0) + awarded_points
     student.last_updated = datetime.utcnow()
     await student.save()
 
@@ -1135,6 +1183,6 @@ async def add_manual_tutor_certificate(
         "student_email": student.student_email,
         "cert_type": cert_type,
         "cert_number": cert_number,
-        "points_awarded": rule.points,
+        "points_awarded": awarded_points,
         "total_credits": student.total_credits,
     }

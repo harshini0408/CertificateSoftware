@@ -44,6 +44,7 @@ from ...models.user import User, UserRole
 from ...services.storage_service import storage_path_to_url
 from ...services.semester_service import get_current_semester
 from ...services.email_service import send_certificate_email
+from ...services.credit_service import capped_credit_points
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -185,12 +186,19 @@ async def _award_guest_credits(
 
     credit_doc = await StudentCredit.find_one(StudentCredit.student_email == email)
     semester = await get_current_semester() or "Unknown"
+    awarded_points = await capped_credit_points(
+        credit_doc,
+        cert_type,
+        semester,
+        points,
+    )
     entry = CreditHistoryEntry(
         cert_number=cert_number,
         event_name=event_name,
         club_name=club_name,
         cert_type=cert_type,
-        points_awarded=points,
+        points_awarded=awarded_points,
+        eligible_points=points,
         semester=semester,
         awarded_at=datetime.utcnow(),
     )
@@ -198,7 +206,7 @@ async def _award_guest_credits(
     if credit_doc:
         if any(h.cert_number == cert_number for h in credit_doc.credit_history):
             return
-        credit_doc.total_credits += points
+        credit_doc.total_credits += awarded_points
         credit_doc.credit_history.append(entry)
         credit_doc.last_updated = datetime.utcnow()
         await credit_doc.save()
@@ -206,7 +214,7 @@ async def _award_guest_credits(
         await StudentCredit(
             student_email=email,
             student_name=student_name,
-            total_credits=points,
+            total_credits=awarded_points,
             credit_history=[entry],
             last_updated=datetime.utcnow(),
         ).insert()

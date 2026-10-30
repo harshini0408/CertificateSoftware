@@ -92,6 +92,9 @@ Thumbs.db
 *.crt
 *.p12
 *.pfx
+credentials.json
+token.json
+secrets.json
 
 # Logs
 *.log

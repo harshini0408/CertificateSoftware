@@ -119,17 +119,7 @@ async def _seed_credit_rules() -> None:
                 break
 
         if existing:
-            updates = {}
-            if int(existing.points or 0) != target_points:
-                updates["points"] = target_points
-            if existing.cert_type != target_cert_type:
-                updates["cert_type"] = target_cert_type
-            if updates:
-                updates["updated_at"] = datetime.utcnow()
-                await existing.set(updates)
-                print(f"[SEED] Credit rule ensured: {target_cert_type} = {target_points} (updated)")
-            else:
-                print(f"[SEED] Credit rule ensured: {target_cert_type} = {target_points} (already present)")
+            print(f"[SEED] Credit rule preserved: {existing.cert_type} = {existing.points}")
             continue
 
         await CreditRule(
@@ -220,29 +210,36 @@ from .domains.superadmin.routers import router as superadmin_router
 from .domains.student_affairs.routers import router as student_affairs_router
 from .certificate_config.routes import router as cert_config_router
 
-app.include_router(auth.router)
-app.include_router(superadmin_router)
-app.include_router(cert_config_router, prefix="/api")
-app.include_router(club_router)
-app.include_router(club_coordinator_router)
-app.include_router(society_router)
-app.include_router(society_coordinator_router)
-app.include_router(events.router)
-app.include_router(participants.router)
-app.include_router(templates.router)
-app.include_router(certificates.router)
-app.include_router(verify.router)
-app.include_router(student_router)
-app.include_router(tutor_router)
-app.include_router(dept_router)
-app.include_router(principal_router)
-app.include_router(hod_router)
-app.include_router(image_templates.router)
-app.include_router(guest_router)
-app.include_router(role_presets_router)
-app.include_router(student_affairs_router)
-app.include_router(club_attendance_router)
-app.include_router(student_attendance_router)
+routers_to_mount = [
+    auth.router,
+    superadmin_router,
+    club_router,
+    club_coordinator_router,
+    society_router,
+    society_coordinator_router,
+    events.router,
+    participants.router,
+    templates.router,
+    certificates.router,
+    verify.router,
+    student_router,
+    tutor_router,
+    dept_router,
+    principal_router,
+    hod_router,
+    image_templates.router,
+    role_presets_router,
+    student_affairs_router,
+    club_attendance_router,
+    student_attendance_router,
+    guest_router,
+    cert_config_router,
+]
+
+for r in routers_to_mount:
+    app.include_router(r)
+    app.include_router(r, prefix="/api")
+
 
 # ── Static files (PNG templates, fonts, etc.) ────────────────────────────────
 from pathlib import Path
@@ -269,6 +266,7 @@ async def root():
 
 # ── Visitor Counter ──────────────────────────────────────────────────────────
 @app.get("/api/visitor-count")
+@app.get("/visitor-count")
 async def get_visitor_count():
     try:
         from .database import get_database
@@ -280,6 +278,7 @@ async def get_visitor_count():
 
 
 @app.post("/api/visitor-count")
+@app.post("/visitor-count")
 async def increment_visitor_count():
     try:
         from .database import get_database
@@ -293,4 +292,3 @@ async def increment_visitor_count():
         return {"count": res.get("count", 1) if res else 1}
     except Exception:
         return {"count": 1}
-

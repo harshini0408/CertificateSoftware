@@ -147,16 +147,20 @@ function useNavItems() {
 
     case 'club_coordinator':
       return [
-        { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard, label: 'Dashboard', end: true },
-        { to: `/club/${effectiveClubId}?tab=active_members`,   icon: icons.users,     label: 'Active Members' },
-        { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
+        { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard,   label: 'Dashboard', end: true },
+        { to: `/club/${effectiveClubId}?tab=members`,          icon: icons.users,       label: 'Membership Requests' },
+        { to: `/club/${effectiveClubId}?tab=active_members`,   icon: icons.users,       label: 'Active Members' },
+        { to: `/club/${effectiveClubId}?tab=office_bearers`,   icon: icons.performance, label: 'Office Bearers' },
+        { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,    label: 'Settings' },
       ]
 
     case 'professional_society_coordinator':
       return [
-        { to: `/society/${effectiveSocietyId}`,                    icon: icons.dashboard, label: 'Dashboard', end: true },
-        { to: `/society/${effectiveSocietyId}?tab=active_members`, icon: icons.users,     label: 'Active Members' },
-        { to: `/society/${effectiveSocietyId}?tab=settings`,       icon: icons.settings,  label: 'Settings' },
+        { to: `/society/${effectiveSocietyId}`,                    icon: icons.dashboard,   label: 'Dashboard', end: true },
+        { to: `/society/${effectiveSocietyId}?tab=members`,        icon: icons.users,       label: 'Membership Requests' },
+        { to: `/society/${effectiveSocietyId}?tab=active_members`, icon: icons.users,       label: 'Active Members' },
+        { to: `/society/${effectiveSocietyId}?tab=office_bearers`, icon: icons.performance, label: 'Office Bearers' },
+        { to: `/society/${effectiveSocietyId}?tab=settings`,       icon: icons.settings,    label: 'Settings' },
       ]
 
     case 'guest':
@@ -182,6 +186,7 @@ function useNavItems() {
         { to: '/student',                       icon: icons.certificate, label: 'My Certificates',         end: true },
         { to: '/student?tab=cert_verification', icon: icons.creditCard,  label: 'Certificate Verification', end: false },
         { to: '/student?tab=upcoming',          icon: icons.calendar,    label: 'Upcoming Events',         end: false },
+        { to: '/student?tab=teams',             icon: icons.users,       label: 'Team Hub & Invites',      end: false },
         { to: '/student?tab=settings',          icon: icons.settings,    label: 'Settings',                end: false },
       ]
 

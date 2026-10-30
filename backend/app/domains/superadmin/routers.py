@@ -31,6 +31,7 @@ from ...models.student_credit import StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...services.semester_service import get_current_semester, set_current_semester
+from ...services.credit_service import recalculate_credit_rule_cap
 from ...schemas.club import ClubCreate, ClubUpdate, ClubResponse
 from ...schemas.professional_society import SocietyCreate, SocietyUpdate, SocietyResponse
 from ...schemas.department import DepartmentCreate, DepartmentUpdate, DepartmentResponse
@@ -2521,21 +2522,54 @@ async def recent_activity(_user: User = _admin):
 async def get_credit_rules(_user: User = _admin):
     rules = await CreditRule.find_all().to_list()
     return [CreditRuleResponse(id=str(r.id), cert_type=r.cert_type, points=r.points,
+                               max_certificates=r.max_certificates,
                                updated_by=str(r.updated_by) if r.updated_by else None,
                                updated_at=r.updated_at) for r in rules]
 
 
 @router.put("/credit-rules")
 async def upsert_credit_rules(body: CreditRulesUpdateRequest, admin: User = _admin):
+    recalculation = {"students_updated": 0, "certificates_updated": 0, "points_adjusted": 0}
     for rule in body.rules:
         existing = await _find_credit_rule(rule.cert_type)
         if existing:
-            await existing.set({"cert_type": rule.cert_type, "points": rule.points, "updated_by": admin.id,
-                                "updated_at": datetime.utcnow()})
+            previous_cap = existing.max_certificates
+            updates = {
+                "cert_type": rule.cert_type,
+                "points": rule.points,
+                "updated_by": admin.id,
+                "updated_at": datetime.utcnow(),
+            }
+            if "max_certificates" in rule.model_fields_set:
+                updates["max_certificates"] = rule.max_certificates
+            await existing.set(updates)
+            if (
+                "max_certificates" in rule.model_fields_set
+                and previous_cap != rule.max_certificates
+            ):
+                result = await recalculate_credit_rule_cap(existing)
+                for key in recalculation:
+                    recalculation[key] += result[key]
         else:
-            await CreditRule(cert_type=rule.cert_type, points=rule.points,
-                             updated_by=admin.id, updated_at=datetime.utcnow()).insert()
-    return {"message": f"{len(body.rules)} credit rules upserted"}
+            created = await CreditRule(
+                cert_type=rule.cert_type,
+                points=rule.points,
+                max_certificates=rule.max_certificates,
+                updated_by=admin.id,
+                updated_at=datetime.utcnow(),
+            ).insert()
+            if "max_certificates" in rule.model_fields_set and rule.max_certificates is not None:
+                result = await recalculate_credit_rule_cap(created)
+                for key in recalculation:
+                    recalculation[key] += result[key]
+    return {
+        "message": (
+            f"{len(body.rules)} credit rules upserted. "
+            f"Recalculated {recalculation['certificates_updated']} existing certificate entries; "
+            f"{recalculation['points_adjusted']} credit points adjusted."
+        ),
+        **recalculation,
+    }
 
 
 @router.delete("/credit-rules/{rule_id}")

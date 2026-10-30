@@ -1252,6 +1252,7 @@ function CreditRulesTab() {
   const [editValue, setEditValue] = useState('')
   const [newRuleType, setNewRuleType] = useState('')
   const [newRulePoints, setNewRulePoints] = useState('0')
+  const [newRuleMaxCertificates, setNewRuleMaxCertificates] = useState('')
   const [deletingRuleId, setDeletingRuleId] = useState(null)
 
   useEffect(() => {
@@ -1272,6 +1273,12 @@ function CreditRulesTab() {
       .replace(/_+/g, '_')
       .replace(/^_+|_+$/g, '')
 
+  const isValidCertificateCap = (value) =>
+    value === '' || value == null || (Number.isInteger(Number(value)) && Number(value) >= 1)
+
+  const parseCertificateCap = (value) =>
+    value === '' || value == null ? null : Number(value)
+
   const startEdit = (idx, value) => {
     setEditingIndex(idx)
     setEditValue(value)
@@ -1288,29 +1295,41 @@ function CreditRulesTab() {
   const handleAddRule = () => {
     const certType = normalizeRuleType(newRuleType)
     const points = Math.min(1000, Math.max(0, parseInt(newRulePoints) || 0))
-    if (!certType) return
+    if (!certType || !isValidCertificateCap(newRuleMaxCertificates)) return
 
     const exists = localRules.some((r) => normalizeRuleType(r.cert_type) === certType)
     if (exists) return
 
-    const nextRules = [...localRules, { cert_type: certType, points }].sort((a, b) =>
+    const nextRules = [...localRules, {
+      cert_type: certType,
+      points,
+      max_certificates: parseCertificateCap(newRuleMaxCertificates),
+    }].sort((a, b) =>
       String(a?.cert_type || '').localeCompare(String(b?.cert_type || ''), undefined, { sensitivity: 'base' }),
     )
     setLocalRules(nextRules)
     setNewRuleType('')
     setNewRulePoints('0')
+    setNewRuleMaxCertificates('')
   }
 
   const handleSaveAll = () => {
+    if (localRules.some((rule) => !isValidCertificateCap(rule.max_certificates))) return
     const map = new Map()
     for (const rule of localRules) {
       const certType = normalizeRuleType(rule?.cert_type)
       if (!certType) continue
       const points = Math.min(1000, Math.max(0, parseInt(rule?.points) || 0))
-      map.set(certType, { cert_type: certType, points })
+      map.set(certType, {
+        cert_type: certType,
+        points,
+        max_certificates: parseCertificateCap(rule.max_certificates),
+      })
     }
     updateRules.mutate(Array.from(map.values()))
   }
+
+  const canSaveRules = localRules.every((rule) => isValidCertificateCap(rule.max_certificates))
 
   const handleDeleteRule = async (rule) => {
     if (!rule?.id) return
@@ -1341,14 +1360,14 @@ function CreditRulesTab() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Credit Points Configuration</h1>
         <p className="mt-1 text-sm text-gray-500">
-          These point values apply globally across all clubs, tutors, and students.
+          Set points and optional per-semester certificate caps. Saving a changed cap recalculates existing credits in certificate order; certificates remain available even when they earn no points.
         </p>
       </div>
 
       <div className="card p-4">
         <h2 className="text-sm font-semibold text-foreground">Add New Credit Rule</h2>
-        <p className="mt-1 text-xs text-gray-500">Example: hackathon with 3 points. This will appear in tutor and student role selections after saving.</p>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
+        <p className="mt-1 text-xs text-gray-500">Example: hackathon with 3 points. Leave the cap blank for unlimited certificates.</p>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
           <div className="sm:col-span-2">
             <label className="form-label">Rule Name</label>
             <input
@@ -1369,11 +1388,23 @@ function CreditRulesTab() {
               onChange={(e) => setNewRulePoints(e.target.value)}
             />
           </div>
+          <div>
+            <label className="form-label">Max certificates / semester</label>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              className="form-input"
+              value={newRuleMaxCertificates}
+              onChange={(e) => setNewRuleMaxCertificates(e.target.value)}
+              placeholder="Unlimited"
+            />
+          </div>
           <div className="flex items-end">
             <button
               type="button"
               className="btn-primary w-full"
-              disabled={!canAddRule}
+              disabled={!canAddRule || !isValidCertificateCap(newRuleMaxCertificates)}
               onClick={handleAddRule}
             >
               Add Rule
@@ -1387,14 +1418,29 @@ function CreditRulesTab() {
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {localRules.map((rule, idx) => (
-            <div key={rule.cert_type} className="card p-5 flex items-center justify-between shadow-sm">
+            <div key={rule.cert_type} className="card p-5 flex flex-col gap-4 shadow-sm">
               <div>
                 <p className="text-sm font-semibold text-foreground capitalize">
                   {rule.cert_type.replace(/_/g, ' ')}
                 </p>
-                <p className="text-xs text-gray-500">Base points per certificate</p>
+                <p className="text-xs text-gray-500">Certificates over the cap remain available but earn no points.</p>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <label className="form-label">Max certificates per student / semester</label>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className="form-input w-36"
+                    value={rule.max_certificates ?? ''}
+                    onChange={(e) => setLocalRules((prev) => prev.map((item, itemIndex) =>
+                      itemIndex === idx ? { ...item, max_certificates: e.target.value } : item,
+                    ))}
+                    placeholder="Unlimited"
+                    aria-label={`${rule.cert_type} certificate cap per semester`}
+                  />
+                </div>
                 {editingIndex === idx ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1406,6 +1452,7 @@ function CreditRulesTab() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-500">Points / certificate</span>
                     <span className="text-3xl font-black text-navy">{rule.points}</span>
                     <button onClick={() => startEdit(idx, rule.points)} className="p-1 text-gray-400 hover:text-navy transition-colors">
                       ✎
@@ -1428,9 +1475,10 @@ function CreditRulesTab() {
       )}
 
       <div className="flex justify-start">
-        <button className="btn-primary min-w-[200px]" onClick={handleSaveAll} disabled={updateRules.isPending}>
+        <button className="btn-primary min-w-[200px]" onClick={handleSaveAll} disabled={updateRules.isPending || !canSaveRules}>
           {updateRules.isPending ? <LoadingSpinner size="sm" label="" /> : 'Save All Changes'}
         </button>
+        {!canSaveRules && <p className="self-center text-sm text-red-600">Certificate caps must be whole numbers greater than zero.</p>}
       </div>
     </div>
   )

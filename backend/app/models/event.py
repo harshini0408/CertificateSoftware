@@ -35,6 +35,11 @@ class Event(Document):
     academic_years: List[str] = Field(default_factory=list)
     status: EventStatus = EventStatus.DRAFT
 
+    # Activity and team configuration
+    activity_type: str = "individual"  # "individual" or "group"
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
+
     # Upcoming event publishing
     poster_path: Optional[str] = None
     poster_url: Optional[str] = None

@@ -41,7 +41,7 @@ On first startup the server will:
 
 Login at `POST /auth/login` with:
 ```json
-{ "username": "superadmin", "password": "Admin@123456" }
+{ "username": "superadmin", "password": "Dtipl@25" }
 ```
 
 ### API Documentation
@@ -82,7 +82,7 @@ app/
 
 ## Key Features & Workflows
 1. **Club Event Reports**: Mandatory event report submission before certificates can be generated or issued.
-2. **Activity Points & Credit Rules**: Configurable credit points auto-awarded upon certificate generation/emailing, plus manual verification workflow via tutors.
+2. **Activity Points & Credit Rules**: Configure credit points and optional per-semester certificate caps. Saving a changed cap recalculates existing credits in certificate order. App-issued and tutor-verified certificates share the cap; certificates beyond it remain accepted but earn no additional points.
 3. **Student Registration Number Policy**:
    - Students starting with temporary IDs (e.g. `T24Z108`) can update to their official 12-digit university registration number **once** in Settings.
    - Assigned tutors can edit a mapped student's registration number up to **2 times**.

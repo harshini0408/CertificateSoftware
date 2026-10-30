@@ -187,6 +187,9 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       slot: '8:45 AM - 10:15 AM',
       timing: '',
       venue: '',
+      activity_type: 'individual',
+      min_team_size: 2,
+      max_team_size: 4,
     },
   })
 
@@ -309,12 +312,19 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
   const eventColumns = [
     { key: 'name', header: 'Event', sortable: true, searchKey: true,
       render: (v, row) => (
-        <button
-          className="text-sm font-semibold text-navy hover:underline text-left"
-          onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)}
-        >
-          {v}
-        </button>
+        <div className="flex flex-col items-start gap-1">
+          <button
+            className="text-sm font-semibold text-navy hover:underline text-left"
+            onClick={() => navigate(`/club/${clubId}/events/${row.id ?? row._id}`)}
+          >
+            {v}
+          </button>
+          {row.activity_type === 'group' && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+              👥 Group ({row.min_team_size || 2}-{row.max_team_size || 4})
+            </span>
+          )}
+        </div>
       )
     },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
@@ -569,6 +579,61 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   {errors.team_size && <p className="form-error">{errors.team_size.message}</p>}
                   <p className="mt-1 text-xs text-gray-500">Includes the student creating the team.</p>
                 </div>
+              </div>
+
+              {/* Activity Type / Group Event Settings */}
+              <div className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/60 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="form-label mb-0" htmlFor="dash-activity-type">Participation Format *</label>
+                    <p className="text-[11px] text-gray-500">Choose whether participants register individually or as a team</p>
+                  </div>
+                  <select
+                    id="dash-activity-type"
+                    className="form-input sm:w-56 text-xs font-semibold"
+                    {...register('activity_type')}
+                  >
+                    <option value="individual">👤 Individual Participation</option>
+                    <option value="group">👥 Group / Team Activity</option>
+                  </select>
+                </div>
+
+                {watch('activity_type') === 'group' && (
+                  <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-gray-200 animate-in fade-in duration-150">
+                    <div>
+                      <label className="form-label" htmlFor="dash-min-team-size">Min Team Size *</label>
+                      <input
+                        id="dash-min-team-size"
+                        type="number"
+                        min="2"
+                        max="20"
+                        className="form-input text-xs"
+                        placeholder="2"
+                        {...register('min_team_size', {
+                          valueAsNumber: true,
+                          min: { value: 2, message: 'Minimum team size is 2' },
+                        })}
+                      />
+                      {errors.min_team_size && <p className="form-error">{errors.min_team_size.message}</p>}
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="dash-max-team-size">Max Team Size *</label>
+                      <input
+                        id="dash-max-team-size"
+                        type="number"
+                        min="2"
+                        max="30"
+                        className="form-input text-xs"
+                        placeholder="4"
+                        {...register('max_team_size', {
+                          valueAsNumber: true,
+                          min: { value: 2, message: 'Minimum is 2' },
+                        })}
+                      />
+                      {errors.max_team_size && <p className="form-error">{errors.max_team_size.message}</p>}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>

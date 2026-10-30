@@ -8,6 +8,10 @@ from ..models.user import User, UserRole
 from ..services.semester_service import get_current_semester
 
 
+def _same_credit_rule(left: CreditRule | None, right: CreditRule) -> bool:
+    return bool(left and str(left.id) == str(right.id))
+
+
 def _norm_email(value: str | None) -> str:
     return (value or "").strip().lower()
 
@@ -42,6 +46,147 @@ async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
         if rule:
             return rule
     return None
+
+
+async def capped_credit_points(
+    student_credit: StudentCredit | None,
+    cert_type: str,
+    semester: str,
+    requested_points: int,
+    exclude_cert_number: str | None = None,
+) -> int:
+    """Return zero when this student has already reached the rule's semester cap."""
+    if requested_points <= 0:
+        return 0
+
+    rule = await _resolve_credit_rule(cert_type)
+    if not rule or rule.max_certificates is None or not student_credit:
+        return requested_points
+
+    matching_count = 0
+    resolved_types: dict[str, bool] = {}
+    for entry in student_credit.credit_history:
+        if (
+            entry.semester != semester
+            or entry.points_awarded <= 0
+            or entry.cert_number == exclude_cert_number
+        ):
+            continue
+
+        normalized_type = _norm_cert_type(entry.cert_type)
+        if normalized_type not in resolved_types:
+            prior_rule = await _resolve_credit_rule(entry.cert_type)
+            resolved_types[normalized_type] = bool(
+                prior_rule and str(prior_rule.id) == str(rule.id)
+            )
+        if resolved_types[normalized_type]:
+            matching_count += 1
+            if matching_count >= rule.max_certificates:
+                return 0
+
+    return requested_points
+
+
+async def recalculate_credit_rule_cap(rule: CreditRule) -> dict[str, int]:
+    """Reapply a rule's certificate cap to existing credit history."""
+    credit_docs = await StudentCredit.find_all().to_list()
+    parent = list(range(len(credit_docs)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    identity_owner: dict[tuple[str, str], int] = {}
+    for index, credit_doc in enumerate(credit_docs):
+        identities = []
+        email = _norm_email(credit_doc.student_email)
+        registration_number = (credit_doc.registration_number or "").strip().lower()
+        if email:
+            identities.append(("email", email))
+        if registration_number:
+            identities.append(("registration_number", registration_number))
+        for identity in identities:
+            previous = identity_owner.setdefault(identity, index)
+            union(index, previous)
+
+    grouped_docs: dict[int, list[StudentCredit]] = {}
+    for index, credit_doc in enumerate(credit_docs):
+        grouped_docs.setdefault(find(index), []).append(credit_doc)
+
+    students_updated = 0
+    certificates_updated = 0
+    points_adjusted = 0
+    rule_cache: dict[str, bool] = {}
+
+    for student_docs in grouped_docs.values():
+        entries_by_semester: dict[str, dict[str, list[tuple[StudentCredit, CreditHistoryEntry]]]] = {}
+        for credit_doc in student_docs:
+            for entry in credit_doc.credit_history or []:
+                normalized_type = _norm_cert_type(entry.cert_type)
+                if normalized_type not in rule_cache:
+                    entry_rule = await _resolve_credit_rule(entry.cert_type)
+                    rule_cache[normalized_type] = _same_credit_rule(entry_rule, rule)
+                if not rule_cache[normalized_type]:
+                    continue
+
+                semester = (entry.semester or "Unknown").strip() or "Unknown"
+                certificate_key = entry.cert_number or f"manual::{entry.awarded_at.isoformat()}::{normalized_type}"
+                entries_by_semester.setdefault(semester, {}).setdefault(certificate_key, []).append(
+                    (credit_doc, entry)
+                )
+
+        docs_changed: set[str] = set()
+        for certificate_entries in entries_by_semester.values():
+            certificate_groups = []
+            for certificate_key, linked_entries in certificate_entries.items():
+                eligible_points = max(
+                    int(entry.eligible_points if entry.eligible_points is not None else entry.points_awarded or 0)
+                    for _, entry in linked_entries
+                )
+                awarded_at = min(entry.awarded_at for _, entry in linked_entries)
+                certificate_groups.append((awarded_at, certificate_key, eligible_points, linked_entries))
+
+            certificate_groups.sort(key=lambda item: (item[0], item[1]))
+            eligible_count = 0
+            for _, _, eligible_points, linked_entries in certificate_groups:
+                capped_points = 0
+                if eligible_points > 0 and (
+                    rule.max_certificates is None or eligible_count < rule.max_certificates
+                ):
+                    capped_points = eligible_points
+                    if rule.max_certificates is not None:
+                        eligible_count += 1
+
+                for credit_doc, entry in linked_entries:
+                    old_points = int(entry.points_awarded or 0)
+                    if entry.eligible_points != eligible_points or old_points != capped_points:
+                        entry.eligible_points = eligible_points
+                        entry.points_awarded = capped_points
+                        docs_changed.add(str(credit_doc.id))
+                        certificates_updated += 1
+                        points_adjusted += abs(old_points - capped_points)
+
+        for credit_doc in student_docs:
+            if str(credit_doc.id) not in docs_changed:
+                continue
+            credit_doc.total_credits = sum(int(entry.points_awarded or 0) for entry in credit_doc.credit_history)
+            credit_doc.last_updated = datetime.utcnow()
+            await credit_doc.save()
+            students_updated += 1
+
+    return {
+        "students_updated": students_updated,
+        "certificates_updated": certificates_updated,
+        "points_adjusted": points_adjusted,
+    }
 
 
 async def award_credits(certificate: Certificate) -> None:
@@ -92,16 +237,6 @@ async def award_credits(certificate: Certificate) -> None:
         })
 
     semester = await get_current_semester() or "Unknown"
-    entry = CreditHistoryEntry(
-        cert_number=certificate.cert_number,
-        event_name=certificate.snapshot.event_name,
-        club_name=certificate.snapshot.club_name,
-        cert_type=certificate.snapshot.cert_type,
-        points_awarded=rule.points,
-        semester=semester,
-        awarded_at=datetime.utcnow(),
-    )
-
     if credit_doc:
         if any(h.cert_number == certificate.cert_number for h in credit_doc.credit_history):
             return
@@ -131,7 +266,25 @@ async def award_credits(certificate: Certificate) -> None:
             await credit_doc.set(updates)
             credit_doc = await StudentCredit.get(credit_doc.id)
 
-        credit_doc.total_credits += rule.points
+    awarded_points = await capped_credit_points(
+        credit_doc,
+        cert_type_raw,
+        semester,
+        rule.points,
+    )
+    entry = CreditHistoryEntry(
+        cert_number=certificate.cert_number,
+        event_name=certificate.snapshot.event_name,
+        club_name=certificate.snapshot.club_name,
+        cert_type=certificate.snapshot.cert_type,
+        points_awarded=awarded_points,
+        eligible_points=rule.points,
+        semester=semester,
+        awarded_at=datetime.utcnow(),
+    )
+
+    if credit_doc:
+        credit_doc.total_credits += awarded_points
         credit_doc.credit_history.append(entry)
         credit_doc.last_updated = datetime.utcnow()
         await credit_doc.save()
@@ -145,7 +298,7 @@ async def award_credits(certificate: Certificate) -> None:
             department=(user_student.department if user_student else None),
             batch=(user_student.batch if user_student else None),
             section=(user_student.section if user_student else None),
-            total_credits=rule.points,
+            total_credits=awarded_points,
             credit_history=[entry],
             last_updated=datetime.utcnow(),
         ).insert()

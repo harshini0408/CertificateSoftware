@@ -43,7 +43,6 @@ export function useMyCredits() {
     },
   })
 }
-
 /**
  * GET /students/me/credits/history
  */
@@ -653,6 +652,114 @@ export function useCancelSocietyEventRegistration() {
     },
     onError: (err) => {
       const msg = err?.response?.data?.detail || 'Failed to cancel registration.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+// ── Group Activities / Team Registration Hooks ──────────────────────────────
+
+export function useSearchTeammates({ eventId, query, enabled = true }) {
+  return useQuery({
+    queryKey: ['student', 'search-teammates', eventId, query],
+    queryFn: async () => {
+      if (!query || query.trim().length < 2) return []
+      const { data } = await axiosInstance.get('/student/search-teammates', {
+        params: { event_id: eventId, q: query.trim() },
+      })
+      return data
+    },
+    enabled: Boolean(enabled && eventId && query && query.trim().length >= 2),
+    staleTime: 5000,
+  })
+}
+
+export function useCreateTeam() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ eventId, team_name, member_user_ids }) => {
+      const { data } = await axiosInstance.post(`/student/events/${eventId}/create-team`, {
+        team_name,
+        member_user_ids,
+      })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'my-teams'] })
+      addToast({ type: 'success', message: data?.message || 'Team created and invites sent!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to create team.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useMyTeamInvites() {
+  return useQuery({
+    queryKey: ['student', 'team-invites'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/student/team-invites')
+      return data
+    },
+    refetchInterval: 15_000,
+  })
+}
+
+export function useRespondTeamInvite() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ token, action }) => {
+      const { data } = await axiosInstance.post(`/student/team-invites/${token}/respond`, {
+        action,
+      })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'team-invites'] })
+      qc.invalidateQueries({ queryKey: ['student', 'my-teams'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({ type: 'success', message: data?.message || 'Response recorded successfully!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to submit response.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useMyTeams() {
+  return useQuery({
+    queryKey: ['student', 'my-teams'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/student/my-teams')
+      return data
+    },
+    refetchInterval: 15_000,
+  })
+}
+
+export function useCancelTeam() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (teamId) => {
+      const { data } = await axiosInstance.delete(`/student/teams/${teamId}`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'my-teams'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({ type: 'success', message: data?.message || 'Team registration disbanded.' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to disband team.'
       addToast({ type: 'error', message: msg })
     },
   })

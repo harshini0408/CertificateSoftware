@@ -14,6 +14,7 @@ The app is prepared for deployment under a subpath:
 
 ## Key Capabilities & Recent Features
 - **Activity Points Management**: Track, calculate, and roll over student activity credits semester by semester.
+- **Credit Rule Certificate Caps**: Superadmins can set per-semester limits on how many certificates of each type earn points per student. Saving a changed cap recalculates existing credits in certificate order. Extra certificates remain available but add no points; app-issued and tutor-verified certificates share the cap.
 - **Club Dashboard**: Mandatory event completion report submission before certificates can be issued; live semester and cumulative completed event counts.
 - **Club Event Team Registration**: Coordinators can optionally require a team size; students invite the remaining members by student search, see each teammate's Accepted/Pending/Declined status, and can replace invitees who decline or become unavailable. A team registers only after every required invitee accepts.
 - **Student Dashboard**: 1-time registration number update for students admitted with temporary IDs (e.g., `T24Z108` → 12-digit permanent ID); credit breakdown, event registration, and certificate verification submissions.
@@ -27,7 +28,8 @@ The app is prepared for deployment under a subpath:
 1. Create and activate a Python virtual environment.
 2. Install dependencies from `backend/requirements.txt`.
 3. Copy `backend/.env.example` to `backend/.env` and update values.
-4. Run:
+4. To deliver OTPs to real inboxes, set `EMAIL_PROVIDER=gmail_smtp`, `SMTP_USER` to the sending Gmail address, and `SMTP_PASSWORD` to that account's Google App Password. Set `EMAIL_SENDER` to the same address (or a verified Gmail alias). The `console` provider only logs locally; it does not send email. Restart the backend after changing `.env`.
+5. Run:
 
 ```bash
 cd backend

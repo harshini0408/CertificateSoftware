@@ -12,9 +12,9 @@ async def reset_admin():
     if admin:
         admin.password_hash = hash_password(settings.superadmin_password)
         await admin.save()
-        print(f"✅ Password for '{settings.superadmin_username}' reset to '{settings.superadmin_password}'")
+        print(f"[SUCCESS] Password for '{settings.superadmin_username}' reset to '{settings.superadmin_password}'")
     else:
-        print(f"❌ User '{settings.superadmin_username}' not found. Seeding new one...")
+        print(f"[ERROR] User '{settings.superadmin_username}' not found. Seeding new one...")
         from app.models.user import UserRole
         await User(
             username=settings.superadmin_username,
@@ -23,7 +23,7 @@ async def reset_admin():
             password_hash=hash_password(settings.superadmin_password),
             role=UserRole.SUPER_ADMIN,
         ).insert()
-        print(f"✅ Super-admin '{settings.superadmin_username}' created")
+        print(f"[SUCCESS] Super-admin '{settings.superadmin_username}' created")
         
     await disconnect_db()
 
