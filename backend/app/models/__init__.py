@@ -25,6 +25,7 @@ from .user_otp import OTPRequest
 from .manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from .student_club_membership import StudentClubMembership, MembershipStatus
 from .event_registration import EventRegistration
+from .event_team import EventTeam, EventTeamClaim, EventTeamInvitation
 from .attendance import Attendance
 from .attendance_session import AttendanceSession
 from .professional_society import ProfessionalSociety, SocietyAssets
@@ -60,6 +61,9 @@ ALL_MODELS = [
     ManualCreditSubmission,
     StudentClubMembership,
     EventRegistration,
+    EventTeam,
+    EventTeamClaim,
+    EventTeamInvitation,
     Attendance,
     AttendanceSession,
     CertificateTemplateConfig,
@@ -92,6 +96,7 @@ __all__ = [
     "OTPRequest",
     "ManualCreditSubmission", "ManualSubmissionStatus",
     "StudentClubMembership", "MembershipStatus",
+    "EventTeam", "EventTeamClaim", "EventTeamInvitation",
     "Attendance",
     "AttendanceSession",
     "ALL_MODELS",

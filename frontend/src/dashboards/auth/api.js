@@ -2,7 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import axiosInstance from '../../utils/axiosInstance'
 import { useAuthStore } from '../../store/authStore'
 import { useToastStore } from '../../store/uiStore'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import queryClient from '../../utils/queryClient'
 
 // ── Role → redirect path ──────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ const roleRedirect = (data) => {
 export function useLogin() {
   const setAuth = useAuthStore((s) => s.setAuth)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
@@ -52,7 +53,13 @@ export function useLogin() {
     onSuccess: ({ data }) => {
       setAuth(data)
       if (!data.requires_password_change) {
-        navigate(roleRedirect(data), { replace: true })
+        const requestedPath = searchParams.get('from')
+        const studentReturnPath = data.role === 'student'
+          && requestedPath?.startsWith('/student')
+          && !requestedPath.startsWith('//')
+          ? requestedPath
+          : null
+        navigate(studentReturnPath || roleRedirect(data), { replace: true })
       }
     },
 
@@ -292,4 +299,3 @@ export function useFirstLoginResendOtp() {
     },
   })
 }
-

@@ -15,6 +15,7 @@ The app is prepared for deployment under a subpath:
 ## Key Capabilities & Recent Features
 - **Activity Points Management**: Track, calculate, and roll over student activity credits semester by semester.
 - **Club Dashboard**: Mandatory event completion report submission before certificates can be issued; live semester and cumulative completed event counts.
+- **Club Event Team Registration**: Coordinators can optionally require a team size; students invite the remaining members by student search, see each teammate's Accepted/Pending/Declined status, and can replace invitees who decline or become unavailable. A team registers only after every required invitee accepts.
 - **Student Dashboard**: 1-time registration number update for students admitted with temporary IDs (e.g., `T24Z108` → 12-digit permanent ID); credit breakdown, event registration, and certificate verification submissions.
 - **Tutor Dashboard**: Class credit monitoring, external certificate verification, and mapped student registration number editing (strictly up to 2 times).
 - **Semester Reset / Roll-over**: Superadmin credit reset that sets the new academic semester, resets current semester totals to zero, and archives all past semester credits and certificates.

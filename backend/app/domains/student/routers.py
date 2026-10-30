@@ -1,14 +1,16 @@
 from pathlib import Path
 import re
 from datetime import date, datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from beanie import PydanticObjectId
+from bson.errors import InvalidId
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from pymongo.errors import DuplicateKeyError
 from ...config import get_settings
 from ...core.dependencies import require_role
 from ...models.user import User, UserRole
@@ -24,6 +26,9 @@ from ...models.society_event import SocietyEvent, SocietyEventStatus
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
 from ...models.event_registration import EventRegistration
+from ...models.event_team import EventTeam, EventTeamClaim, EventTeamInvitation
+from ...models.participant import Participant, ParticipantSource
+from ...services.email_service import send_event_team_email
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
 
@@ -883,6 +888,285 @@ def _normalize_session(time_str: Optional[str]) -> str:
     return "FN"
 
 
+class EventTeamCreateRequest(BaseModel):
+    invitee_ids: List[str] = Field(..., min_length=1)
+
+
+class EventTeamInvitationDecision(BaseModel):
+    decision: Literal["accept", "decline"]
+
+
+def _event_date_string(event: Event) -> str:
+    return event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
+
+
+def _event_team_url(invitation_id: PydanticObjectId) -> str:
+    settings = get_settings()
+    frontend = settings.frontend_url.rstrip("/")
+    if not frontend:
+        if settings.app_env == "development":
+            frontend = "http://localhost:2848"
+        else:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Frontend URL is not configured for team invitations.",
+            )
+
+    base_url = settings.base_url.rstrip("/")
+    if base_url.startswith(frontend) and base_url.endswith("/api"):
+        frontend = base_url[:-4]
+    return f"{frontend}/#/student?tab=upcoming&team_invite={invitation_id}"
+
+
+async def _student_has_event_registration(event_id: PydanticObjectId, student: User) -> bool:
+    email = _norm_email(student.email)
+    registration = await EventRegistration.find_one({
+        "event_id": event_id,
+        "$or": [
+            {"student_id": student.id},
+            {"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+        ],
+    })
+    if registration:
+        return True
+    participant = await Participant.find_one({
+        "event_id": event_id,
+        "email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+    })
+    return participant is not None
+
+
+async def _student_event_conflict(event: Event, student: User) -> Optional[str]:
+    event_date = _event_date_string(event)
+    session = getattr(event, "session", None) or _normalize_session(event.event_time)
+    slot = getattr(event, "slot", None)
+    email = _norm_email(student.email)
+
+    if slot:
+        collision = await EventRegistration.find_one({
+            "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            "event_date_str": event_date,
+            "$or": [
+                {"slot": slot},
+                {"session": session, "slot": None},
+                {"session": session, "slot": {"$exists": False}},
+            ],
+        })
+    else:
+        collision = await EventRegistration.find_one({
+            "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            "event_date_str": event_date,
+            "session": session,
+        })
+    if collision:
+        conflicting_event = await Event.get(collision.event_id)
+        if not conflicting_event:
+            conflicting_event = await SocietyEvent.get(collision.event_id)
+        return conflicting_event.name if conflicting_event else "another event"
+
+    claims = await EventTeamClaim.find(
+        EventTeamClaim.student_id == student.id,
+    ).to_list()
+    for claim in claims:
+        if claim.event_id == event.id:
+            continue
+        if claim.team_id:
+            team = await EventTeam.get(claim.team_id)
+            if not team or team.status not in {"pending", "registered"}:
+                continue
+        other_event = await Event.get(claim.event_id)
+        if not other_event or _event_date_string(other_event) != event_date:
+            continue
+        other_session = getattr(other_event, "session", None) or _normalize_session(other_event.event_time)
+        other_slot = getattr(other_event, "slot", None)
+        if (slot and other_slot == slot) or (
+            session == other_session and (not slot or not other_slot)
+        ):
+            return other_event.name
+    return None
+
+
+async def _event_capacity_reserved(event: Event, additional_members: int, exclude_team_id=None) -> bool:
+    max_participants = getattr(event, "max_participants", None)
+    if not max_participants or max_participants <= 0:
+        return False
+    registrations_count = await EventRegistration.find(
+        EventRegistration.event_id == event.id,
+    ).count()
+    current_count = max(event.participant_count or 0, registrations_count)
+    pending_teams = await EventTeam.find({
+        "event_id": event.id,
+        "status": {"$in": ["pending", "registering"]},
+    }).to_list()
+    reserved = sum(
+        team.team_size
+        for team in pending_teams
+        if exclude_team_id is None or team.id != exclude_team_id
+    )
+    return current_count + reserved + additional_members > max_participants
+
+
+async def _send_team_inviter_notice(team: EventTeam, event: Event, message: str) -> bool:
+    return await send_event_team_email(
+        team.creator_email,
+        f"Team registration update: {event.name}",
+        f"Hello {team.creator_name},\n\n{message}\n\nEvent: {event.name}",
+    )
+
+
+async def _cancel_event_team(team: EventTeam) -> None:
+    team.status = "cancelled"
+    await team.save()
+    pending_invitations = await EventTeamInvitation.find({
+        "team_id": team.id,
+        "status": "pending",
+    }).to_list()
+    for pending in pending_invitations:
+        pending.status = "cancelled"
+        pending.responded_at = datetime.utcnow()
+        await pending.save()
+    await EventTeamClaim.find({"team_id": team.id}).delete()
+
+
+async def _team_invitation_progress(team: EventTeam) -> dict:
+    invitations = await EventTeamInvitation.find({"team_id": team.id}).sort("+created_at").to_list()
+    active_invitee_ids = {str(student_id) for student_id in team.invitee_ids}
+    inviter = await User.get(team.creator_student_id)
+    participants = [{
+        "id": str(team.creator_student_id),
+        "name": team.creator_name,
+        "email": team.creator_email,
+        "registration_number": inviter.registration_number if inviter else None,
+        "class": inviter.section if inviter else None,
+        "department": inviter.department if inviter else None,
+        "year": inviter.batch if inviter else None,
+        "status": "Accepted",
+        "is_inviter": True,
+    }]
+    seen_invitee_ids = set()
+    accepted_count = sum(
+        1
+        for invitation in invitations
+        if invitation.status == "accepted"
+        and str(invitation.invitee_student_id) in active_invitee_ids
+    )
+    pending_count = sum(
+        1
+        for invitation in invitations
+        if invitation.status == "pending"
+        and str(invitation.invitee_student_id) in active_invitee_ids
+    )
+    for invitation in invitations:
+        if invitation.status == "removed":
+            continue
+        invitee_id = str(invitation.invitee_student_id)
+        if invitee_id in seen_invitee_ids:
+            continue
+        seen_invitee_ids.add(invitee_id)
+        invitee = await User.get(invitation.invitee_student_id)
+        status = invitation.status
+        if status == "unavailable":
+            display_status = "Not Available"
+        elif invitee_id not in active_invitee_ids or status in {"declined", "cancelled"}:
+            display_status = "Declined"
+        elif status == "accepted":
+            display_status = "Accepted"
+        else:
+            display_status = "Pending"
+        participants.append({
+            "id": invitee_id,
+            "invitation_id": str(invitation.id),
+            "name": invitation.invitee_name,
+            "email": invitation.invitee_email,
+            "registration_number": invitee.registration_number if invitee else None,
+            "class": invitee.section if invitee else None,
+            "department": invitee.department if invitee else None,
+            "year": invitee.batch if invitee else None,
+            "status": display_status,
+            "is_inviter": False,
+        })
+    return {
+        "accepted_members": min(team.team_size, accepted_count + 1),
+        "required_members": team.team_size,
+        "open_slots": max(0, team.team_size - 1 - accepted_count - pending_count),
+        "participants": participants,
+    }
+
+
+async def _release_team_invitee(team: EventTeam, invitation: EventTeamInvitation) -> None:
+    team.invitee_ids = [
+        student_id
+        for student_id in team.invitee_ids
+        if student_id != invitation.invitee_student_id
+    ]
+    await team.save()
+    await EventTeamClaim.find_one({
+        "event_id": team.event_id,
+        "student_id": invitation.invitee_student_id,
+        "team_id": team.id,
+    }).delete()
+
+
+async def _mark_team_invitee_unavailable(
+    team: EventTeam,
+    event: Event,
+    invitation: EventTeamInvitation,
+    reason: str,
+) -> dict:
+    invitation.status = "cancelled"
+    invitation.responded_at = datetime.utcnow()
+    await invitation.save()
+    await _release_team_invitee(team, invitation)
+    await _send_team_inviter_notice(
+        team,
+        event,
+        f"{invitation.invitee_name} is no longer available: {reason} "
+        "The team remains open so you can invite a replacement.",
+    )
+    progress = await _team_invitation_progress(team)
+    return {
+        "message": f"You are unavailable for this team: {reason} The inviter can select a replacement.",
+        "team_status": team.status,
+        "team_size": team.team_size,
+        **progress,
+    }
+
+
+async def _remove_creator_competing_invitations(team: EventTeam, event: Event) -> None:
+    invitations = await EventTeamInvitation.find({
+        "event_id": event.id,
+        "invitee_student_id": team.creator_student_id,
+        "status": "pending",
+        "team_id": {"$ne": team.id},
+    }).to_list()
+    notified_teams = set()
+    for invitation in invitations:
+        invitation.status = "unavailable"
+        invitation.responded_at = datetime.utcnow()
+        await invitation.save()
+
+        competing_team = await EventTeam.get(invitation.team_id)
+        if competing_team and competing_team.status == "pending":
+            await _release_team_invitee(competing_team, invitation)
+            team_key = str(competing_team.id)
+            if team_key not in notified_teams:
+                notified_teams.add(team_key)
+                await _send_team_inviter_notice(
+                    competing_team,
+                    event,
+                    f"{team.creator_name} is no longer available because their own team "
+                    "has been confirmed. Your team remains open so you can invite a replacement.",
+                )
+
+        await send_event_team_email(
+            invitation.invitee_email,
+            f"Team invitation no longer available: {event.name}",
+            f"Hello {invitation.invitee_name},\n\n"
+            f"You are now registered with another team for {event.name}, so "
+            f"{invitation.inviter_name}'s pending invitation is no longer available.",
+        )
+
+
 @router.get("/student/upcoming-events")
 async def list_upcoming_events(
     current_user: User = Depends(require_role(UserRole.STUDENT)),
@@ -902,6 +1186,7 @@ async def list_upcoming_events(
     events = await Event.find({
         "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
         "event_date": {"$gte": today_start},
+        "is_published": True,
     }).sort(+Event.event_date).to_list()
 
     clubs = await Club.find().to_list()
@@ -920,7 +1205,29 @@ async def list_upcoming_events(
             "id": str(r.id),
             "type": reg_type,
             "status": reg_status,
+            "team_id": str(r.team_id) if getattr(r, "team_id", None) else None,
+            "team_size": None,
         }
+
+    event_ids = [event.id for event in events]
+    claims = await EventTeamClaim.find({
+        "event_id": {"$in": event_ids},
+        "student_id": current_user.id,
+        "team_id": {"$ne": None},
+    }).to_list() if event_ids else []
+    team_ids = [claim.team_id for claim in claims if claim.team_id]
+    teams = await EventTeam.find({"_id": {"$in": team_ids}}).to_list() if team_ids else []
+    team_map = {str(team.id): team for team in teams}
+    pending_team_by_event = {
+        str(claim.event_id): team_map.get(str(claim.team_id))
+        for claim in claims
+        if claim.team_id and team_map.get(str(claim.team_id))
+    }
+    for registration in registrations:
+        if registration.team_id:
+            team = team_map.get(str(registration.team_id))
+            if team:
+                student_reg_map[str(registration.event_id)]["team_size"] = team.team_size
 
     # Count registrations per event
     all_regs = await EventRegistration.find().to_list()
@@ -940,6 +1247,12 @@ async def list_upcoming_events(
         session = getattr(e, "session", None) or _normalize_session(e.event_time)
         slot = getattr(e, "slot", None)
         my_reg = student_reg_map.get(eid)
+        pending_team = pending_team_by_event.get(eid)
+        team_progress = (
+            await _team_invitation_progress(pending_team)
+            if pending_team and pending_team.status in {"pending", "registering", "registered"}
+            else None
+        )
         results.append({
             "id": eid,
             "name": e.name,
@@ -953,10 +1266,42 @@ async def list_upcoming_events(
             "venue": e.venue,
             "category": e.category,
             "poster_url": e.poster_url,
+            "team_size": getattr(e, "team_size", None),
             "is_registered": my_reg is not None,
             "registration_id": my_reg["id"] if my_reg else None,
             "registration_type": my_reg["type"] if my_reg else None,
             "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
+            "team_id": my_reg["team_id"] if my_reg else None,
+            "registration_team_size": my_reg["team_size"] if my_reg else None,
+            "team_registration_status": (
+                pending_team_by_event[eid].status
+                if eid in pending_team_by_event
+                and pending_team_by_event[eid].status in {"pending", "registering", "registered"}
+                else None
+            ),
+            "team_registration_id": (
+                str(pending_team_by_event[eid].id)
+                if eid in pending_team_by_event
+                and pending_team_by_event[eid].status in {"pending", "registering", "registered"}
+                else None
+            ),
+            "team_registration_is_creator": (
+                pending_team.creator_student_id == current_user.id
+                if pending_team and team_progress
+                else False
+            ),
+            "team_registration_accepted_members": (
+                team_progress["accepted_members"] if team_progress else None
+            ),
+            "team_registration_required_members": (
+                team_progress["required_members"] if team_progress else None
+            ),
+            "team_registration_open_slots": (
+                team_progress["open_slots"] if team_progress else 0
+            ),
+            "team_registration_participants": (
+                team_progress["participants"] if team_progress else []
+            ),
             "registered_count": reg_counts.get(eid, 0),
             "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
             "volunteers_registered": volunteer_counts.get(eid, 0),
@@ -975,6 +1320,12 @@ async def register_for_event(
     event = await Event.get(event_id)
     if not event or event.status != EventStatus.ACTIVE:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
+
+    if (getattr(event, "team_size", None) or 1) > 1 and type == "participant":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This event requires team registration. Create a team and invite the required members.",
+        )
 
     if getattr(event, "registration_stopped", False):
         raise HTTPException(
@@ -1048,6 +1399,18 @@ async def register_for_event(
         ).count()
         if volunteers_registered >= (event.volunteers_required or 0):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Maximum volunteers already registered for this event")
+
+    try:
+        await EventTeamClaim(
+            event_id=event.id,
+            student_id=current_user.id,
+            kind="individual",
+        ).insert()
+    except DuplicateKeyError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "You already have a pending or completed registration for this event.",
+        )
 
     # Create registration
     reg = EventRegistration(
@@ -1135,21 +1498,847 @@ async def cancel_event_registration(
     if not reg:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
 
-    await reg.delete()
-
-    from ...models.participant import Participant, ParticipantSource
-    p = await Participant.find_one(
-        Participant.event_id == event_id,
-        Participant.email == student_email
-    )
-    if p and p.source == ParticipantSource.REGISTRATION:
-        await p.delete()
-
     event = await Event.get(event_id)
+    if reg.team_id:
+        team = await EventTeam.get(reg.team_id)
+        team_regs = await EventRegistration.find({
+            "event_id": event_id,
+            "team_id": reg.team_id,
+        }).to_list()
+        for team_reg in team_regs:
+            await team_reg.delete()
+            participant = await Participant.find_one({
+                "event_id": event_id,
+                "email": {"$regex": f"^{re.escape(_norm_email(team_reg.student_email))}$", "$options": "i"},
+            })
+            if participant and participant.source == ParticipantSource.REGISTRATION:
+                await participant.delete()
+        await EventTeamClaim.find({
+            "event_id": event_id,
+            "team_id": reg.team_id,
+        }).delete()
+        if team:
+            team.status = "cancelled"
+            await team.save()
+        if event and team_regs:
+            await event.set({
+                "participant_count": max(0, (event.participant_count or 0) - len(team_regs)),
+            })
+        return {"message": "Team registration cancelled for all members"}
+
+    await reg.delete()
+    participant = await Participant.find_one({
+        "event_id": event_id,
+        "email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"},
+    })
+    if participant and participant.source == ParticipantSource.REGISTRATION:
+        await participant.delete()
+    await EventTeamClaim.find_one({
+        "event_id": event_id,
+        "student_id": reg.student_id,
+        "kind": "individual",
+    }).delete()
     if event and event.participant_count > 0:
         await event.set({"participant_count": max(0, event.participant_count - 1)})
 
     return {"message": "Registration cancelled successfully"}
+
+
+@router.get("/student/events/{event_id}/team-candidates")
+async def search_event_team_candidates(
+    event_id: PydanticObjectId,
+    q: str = Query(..., min_length=2, max_length=100),
+    team_id: Optional[PydanticObjectId] = Query(None),
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    event = await Event.get(event_id)
+    if not event or event.status != EventStatus.ACTIVE:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
+    if (getattr(event, "team_size", None) or 1) < 2:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This event is not configured for team registration")
+
+    previously_invited_ids = set()
+    if team_id:
+        team = await EventTeam.get(team_id)
+        if not team or team.creator_student_id != current_user.id or team.event_id != event.id or team.status != "pending":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Pending team registration not found.")
+        previous_invitations = await EventTeamInvitation.find({"team_id": team.id}).to_list()
+        previously_invited_ids = {
+            str(item.invitee_student_id)
+            for item in previous_invitations
+            if item.status != "removed"
+        }
+
+    search = re.escape(q.strip())
+    students = await User.find({
+        "role": UserRole.STUDENT.value,
+        "is_active": True,
+        "_id": {"$ne": current_user.id},
+        "$or": [
+            {"registration_number": {"$regex": search, "$options": "i"}},
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+        ],
+    }).sort(+User.name).limit(20).to_list()
+
+    results = []
+    for student in students:
+        previously_invited = str(student.id) in previously_invited_ids
+        registration_exists = await _student_has_event_registration(event.id, student)
+        claim = await EventTeamClaim.find_one({
+            "event_id": event.id,
+            "student_id": student.id,
+        })
+        conflict = await _student_event_conflict(event, student)
+        available = not previously_invited and not registration_exists and claim is None and conflict is None
+        results.append({
+            "id": str(student.id),
+            "name": student.name,
+            "registration_number": student.registration_number,
+            "email": student.email,
+            "class": student.section,
+            "department": student.department,
+            "year": student.batch,
+            "available": available,
+            "unavailable_reason": (
+                "Already invited to this team"
+                if previously_invited
+                else "Already registered or committed to a team for this event"
+                if registration_exists or claim
+                else f"Conflicts with {conflict}" if conflict else None
+            ),
+        })
+    return results
+
+
+@router.post("/student/events/{event_id}/team-invitations")
+async def create_event_team_invitations(
+    event_id: PydanticObjectId,
+    body: EventTeamCreateRequest,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    event = await Event.get(event_id)
+    if not event or event.status != EventStatus.ACTIVE:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
+    team_size = getattr(event, "team_size", None) or 1
+    if team_size < 2:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This event is not configured for team registration")
+    if len(body.invitee_ids) != team_size - 1:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Select exactly {team_size - 1} teammates. Team size includes you.",
+        )
+    if len(set(body.invitee_ids)) != len(body.invitee_ids):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Each teammate can only be selected once.")
+    if await _student_has_event_registration(event.id, current_user):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event.")
+    if await EventTeamClaim.find_one({
+        "event_id": event.id,
+        "student_id": current_user.id,
+    }):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You already have a pending team request for this event.")
+    conflict = await _student_event_conflict(event, current_user)
+    if conflict:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Your schedule conflicts with {conflict}.")
+    if await _event_capacity_reserved(event, team_size):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "There is not enough event capacity for a team of this size.",
+        )
+
+    invitee_ids = []
+    invitees = []
+    for raw_id in body.invitee_ids:
+        try:
+            student_id = PydanticObjectId(raw_id)
+        except (InvalidId, TypeError):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid student selection.")
+        if student_id == current_user.id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "You cannot invite yourself.")
+        student = await User.get(student_id)
+        if not student or student.role != UserRole.STUDENT or not student.is_active:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "One of the selected students is unavailable.")
+        if await _student_has_event_registration(event.id, student):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{student.name} is already registered for this event.")
+        if await EventTeamClaim.find_one({"event_id": event.id, "student_id": student.id}):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{student.name} is already committed to a team for this event.")
+        conflict = await _student_event_conflict(event, student)
+        if conflict:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{student.name} has a schedule conflict with {conflict}.")
+        invitee_ids.append(student.id)
+        invitees.append(student)
+
+    settings = get_settings()
+    if not settings.frontend_url and settings.app_env != "development":
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Frontend URL is not configured for team invitations.",
+        )
+
+    team = EventTeam(
+        event_id=event.id,
+        creator_student_id=current_user.id,
+        creator_name=current_user.name,
+        creator_email=_norm_email(current_user.email),
+        team_size=team_size,
+        invitee_ids=invitee_ids,
+    )
+    await team.insert()
+    try:
+        await EventTeamClaim(
+            event_id=event.id,
+            student_id=current_user.id,
+            team_id=team.id,
+            kind="team",
+        ).insert()
+    except DuplicateKeyError:
+        await team.delete()
+        raise HTTPException(status.HTTP_409_CONFLICT, "You already have a pending or completed event registration.")
+
+    event_date = event.event_date.strftime("%A, %d %B %Y") if event.event_date else "Date not specified"
+    session = getattr(event, "session", None) or _normalize_session(event.event_time)
+    session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
+    emailed = 0
+    failed_names = []
+    for invitee in invitees:
+        invitation = EventTeamInvitation(
+            event_id=event.id,
+            team_id=team.id,
+            inviter_student_id=current_user.id,
+            inviter_name=current_user.name,
+            inviter_email=_norm_email(current_user.email),
+            invitee_student_id=invitee.id,
+            invitee_name=invitee.name,
+            invitee_email=_norm_email(invitee.email),
+        )
+        await invitation.insert()
+        invitation_url = _event_team_url(invitation.id)
+        body_text = (
+            f"Hello {invitee.name},\n\n"
+            f"{current_user.name} has invited you to join a team for {event.name}.\n\n"
+            f"Invited by: {current_user.name}\n"
+            f"Registration number: {current_user.registration_number or 'Not available'}\n"
+            f"Class: {current_user.section or 'Not available'}\n"
+            f"Department: {current_user.department or 'Not available'}\n"
+            f"Year: {current_user.batch or 'Not available'}\n"
+            f"Event: {event.name}\n"
+            f"Date: {event_date}\n"
+            f"Session: {session_label}{f' - {event.slot}' if event.slot else ''}\n"
+            f"Venue: {event.venue or 'Not specified'}\n"
+            f"Team size: {team_size} (including the inviter)\n\n"
+            "Open the event page to accept or decline this invitation:\n"
+            f"{invitation_url}\n\n"
+            "The team will be registered only after every invited teammate accepts."
+        )
+        if await send_event_team_email(
+            invitation.invitee_email,
+            f"Team invitation: {event.name}",
+            body_text,
+            development_link=invitation_url,
+        ):
+            emailed += 1
+        else:
+            failed_names.append(invitee.name)
+
+    return {
+        "message": (
+            f"Team invitations sent to {emailed} of {len(invitees)} students."
+            if not failed_names
+            else f"Team created, but email delivery failed for: {', '.join(failed_names)}."
+        ),
+        "team_id": str(team.id),
+        "team_status": team.status,
+        "team_size": team_size,
+        "accepted_members": 1,
+        "required_members": team_size,
+        "open_slots": 0,
+        "invitees": len(invitees),
+        "emails_sent": emailed,
+        "email_failures": failed_names,
+    }
+
+
+@router.post("/student/event-teams/{team_id}/invitations")
+async def invite_replacement_event_team_members(
+    team_id: PydanticObjectId,
+    body: EventTeamCreateRequest,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    team = await EventTeam.get(team_id)
+    if not team or team.creator_student_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pending team registration not found.")
+    if team.status != "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT, "This team is no longer accepting invitations.")
+    event = await Event.get(team.event_id)
+    if not event or event.status != EventStatus.ACTIVE:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This event is no longer accepting team registrations.")
+
+    progress = await _team_invitation_progress(team)
+    if len(body.invitee_ids) != progress["open_slots"]:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Select exactly {progress['open_slots']} replacement member(s).",
+        )
+    if len(set(body.invitee_ids)) != len(body.invitee_ids):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Each teammate can only be selected once.")
+
+    invitees = []
+    for raw_id in body.invitee_ids:
+        try:
+            student_id = PydanticObjectId(raw_id)
+        except (InvalidId, TypeError):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid student selection.")
+        if student_id == current_user.id or student_id in team.invitee_ids:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Select a new teammate who is not already on this team.")
+        previous_invitation = await EventTeamInvitation.find_one({
+            "team_id": team.id,
+            "invitee_student_id": student_id,
+            "status": {"$ne": "removed"},
+        })
+        if previous_invitation:
+            raise HTTPException(status.HTTP_409_CONFLICT, "This student was already invited to this team. Select another replacement.")
+        student = await User.get(student_id)
+        if not student or student.role != UserRole.STUDENT or not student.is_active:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "One of the selected students is unavailable.")
+        if await _student_has_event_registration(event.id, student):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{student.name} is already registered for this event.")
+        if await EventTeamClaim.find_one({"event_id": event.id, "student_id": student.id}):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{student.name} is already committed to a team for this event.")
+        conflict = await _student_event_conflict(event, student)
+        if conflict:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{student.name} has a schedule conflict with {conflict}.")
+        invitees.append(student)
+
+    invitations = []
+    try:
+        for invitee in invitees:
+            invitation = EventTeamInvitation(
+                event_id=event.id,
+                team_id=team.id,
+                inviter_student_id=current_user.id,
+                inviter_name=current_user.name,
+                inviter_email=_norm_email(current_user.email),
+                invitee_student_id=invitee.id,
+                invitee_name=invitee.name,
+                invitee_email=_norm_email(invitee.email),
+            )
+            await invitation.insert()
+            invitations.append(invitation)
+    except Exception:
+        for invitation in invitations:
+            await invitation.delete()
+        raise
+
+    previous_invitee_ids = list(team.invitee_ids)
+    new_invitee_ids = [*previous_invitee_ids, *(invitee.id for invitee in invitees)]
+    updated = await EventTeam.get_motor_collection().update_one(
+        {"_id": team.id, "status": "pending", "invitee_ids": previous_invitee_ids},
+        {"$set": {"invitee_ids": new_invitee_ids}},
+    )
+    if updated.modified_count != 1:
+        for invitation in invitations:
+            await invitation.delete()
+        raise HTTPException(status.HTTP_409_CONFLICT, "The team changed while you were selecting replacements. Refresh and try again.")
+    team.invitee_ids = new_invitee_ids
+
+    event_date = event.event_date.strftime("%A, %d %B %Y") if event.event_date else "Date not specified"
+    session = getattr(event, "session", None) or _normalize_session(event.event_time)
+    session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
+    emailed = 0
+    failed_names = []
+    for invitee, invitation in zip(invitees, invitations):
+        invitation_url = _event_team_url(invitation.id)
+        body_text = (
+            f"Hello {invitee.name},\n\n"
+            f"{current_user.name} has invited you to join a team for {event.name}.\n\n"
+            f"Event: {event.name}\n"
+            f"Date: {event_date}\n"
+            f"Session: {session_label}{f' - {event.slot}' if event.slot else ''}\n"
+            f"Venue: {event.venue or 'Not specified'}\n"
+            f"Team size: {team.team_size} (including the inviter)\n\n"
+            "Open the event page to accept or decline this invitation:\n"
+            f"{invitation_url}\n\n"
+            "The team will be registered only after every invited teammate accepts."
+        )
+        if await send_event_team_email(
+            invitation.invitee_email,
+            f"Team invitation: {event.name}",
+            body_text,
+            development_link=invitation_url,
+        ):
+            emailed += 1
+        else:
+            failed_names.append(invitee.name)
+
+    remaining = await _team_invitation_progress(team)
+    return {
+        "message": (
+            f"Replacement invitations sent to {emailed} of {len(invitees)} students."
+            if not failed_names
+            else f"Team updated, but email delivery failed for: {', '.join(failed_names)}."
+        ),
+        "team_id": str(team.id),
+        "team_status": team.status,
+        **remaining,
+        "emails_sent": emailed,
+        "email_failures": failed_names,
+    }
+
+
+@router.delete("/student/event-teams/{team_id}/invitations/{invitation_id}")
+async def remove_pending_event_team_invitation(
+    team_id: PydanticObjectId,
+    invitation_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    team = await EventTeam.get(team_id)
+    invitation = await EventTeamInvitation.get(invitation_id)
+    if (
+        not team
+        or team.creator_student_id != current_user.id
+        or team.status != "pending"
+        or not invitation
+        or invitation.team_id != team.id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pending team invitation not found.")
+    if invitation.status != "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only pending invitations can be removed.")
+
+    event = await Event.get(team.event_id)
+    if not event:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "The event for this team no longer exists.")
+    invitation.status = "removed"
+    invitation.responded_at = datetime.utcnow()
+    await invitation.save()
+    await _release_team_invitee(team, invitation)
+    email_sent = await send_event_team_email(
+        invitation.invitee_email,
+        f"Team invitation withdrawn: {event.name}",
+        f"Hello {invitation.invitee_name},\n\n"
+        f"{team.creator_name} has withdrawn the invitation to join the team for {event.name}. "
+        "You are no longer expected to respond.",
+    )
+    progress = await _team_invitation_progress(team)
+    return {
+        "message": (
+            "Pending invitation removed. You can now invite a replacement."
+            if email_sent
+            else "Pending invitation removed, but the withdrawal email could not be sent. You can now invite a replacement."
+        ),
+        "team_id": str(team.id),
+        "team_status": team.status,
+        "email_sent": email_sent,
+        **progress,
+    }
+
+
+@router.delete("/student/event-teams/{team_id}")
+async def cancel_pending_event_team(
+    team_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    team = await EventTeam.get(team_id)
+    if not team or team.creator_student_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pending team registration not found.")
+    if team.status != "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT, "This team is no longer pending.")
+    event = await Event.get(team.event_id)
+    invitations = await EventTeamInvitation.find({"team_id": team.id}).to_list()
+    await _cancel_event_team(team)
+    if event:
+        for invitation in invitations:
+            if invitation.status in {"pending", "accepted"}:
+                await send_event_team_email(
+                    invitation.invitee_email,
+                    f"Team invitation cancelled: {event.name}",
+                    f"Hello {invitation.invitee_name},\n\n"
+                    f"{team.creator_name} cancelled the team registration for {event.name}. "
+                    "No team members were registered.",
+                )
+    return {"message": "Pending team registration cancelled. Reserved team places have been released."}
+
+
+@router.get("/student/event-team-invitations/{invitation_id}")
+async def get_event_team_invitation(
+    invitation_id: PydanticObjectId,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    invitation = await EventTeamInvitation.get(invitation_id)
+    if not invitation or invitation.invitee_student_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team invitation not found.")
+    event = await Event.get(invitation.event_id)
+    team = await EventTeam.get(invitation.team_id)
+    inviter = await User.get(invitation.inviter_student_id)
+    if not event or not team:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "The event or team invitation no longer exists.")
+    progress = await _team_invitation_progress(team)
+    return {
+        "id": str(invitation.id),
+        "status": invitation.status,
+        "team_status": team.status,
+        "team_size": team.team_size,
+        **progress,
+        "inviter": {
+            "name": invitation.inviter_name,
+            "email": invitation.inviter_email,
+            "registration_number": inviter.registration_number if inviter else None,
+            "class": inviter.section if inviter else None,
+            "department": inviter.department if inviter else None,
+            "year": inviter.batch if inviter else None,
+        },
+        "event": {
+            "id": str(event.id),
+            "name": event.name,
+            "event_date": event.event_date.isoformat() if event.event_date else None,
+            "event_time": event.event_time,
+            "session": getattr(event, "session", None) or _normalize_session(event.event_time),
+            "slot": event.slot,
+            "venue": event.venue,
+            "category": event.category,
+        },
+    }
+
+
+@router.get("/student/event-team-invitations")
+async def list_event_team_invitations(
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    """List actionable team invitations for the authenticated student."""
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    invitations = await EventTeamInvitation.find({
+        "invitee_student_id": current_user.id,
+        "status": "pending",
+    }).sort("-created_at").to_list()
+
+    results = []
+    for invitation in invitations:
+        team = await EventTeam.get(invitation.team_id)
+        event = await Event.get(invitation.event_id)
+        if (
+            not team
+            or team.status != "pending"
+            or not event
+            or event.status != EventStatus.ACTIVE
+            or not event.event_date
+            or event.event_date < today_start
+        ):
+            continue
+
+        inviter = await User.get(invitation.inviter_student_id)
+        progress = await _team_invitation_progress(team)
+        results.append({
+            "id": str(invitation.id),
+            "created_at": invitation.created_at.isoformat(),
+            "team_size": team.team_size,
+            **progress,
+            "inviter": {
+                "name": invitation.inviter_name,
+                "email": invitation.inviter_email,
+                "registration_number": inviter.registration_number if inviter else None,
+                "class": inviter.section if inviter else None,
+                "department": inviter.department if inviter else None,
+                "year": inviter.batch if inviter else None,
+            },
+            "event": {
+                "id": str(event.id),
+                "name": event.name,
+                "event_date": event.event_date.isoformat(),
+                "session": getattr(event, "session", None) or _normalize_session(event.event_time),
+                "slot": event.slot,
+                "venue": event.venue,
+            },
+        })
+    return results
+
+
+@router.post("/student/event-team-invitations/{invitation_id}/respond")
+async def respond_to_event_team_invitation(
+    invitation_id: PydanticObjectId,
+    body: EventTeamInvitationDecision,
+    current_user: User = Depends(require_role(UserRole.STUDENT)),
+):
+    invitation = await EventTeamInvitation.get(invitation_id)
+    if not invitation or invitation.invitee_student_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team invitation not found.")
+    retrying_accepted_invitation = invitation.status == "accepted" and body.decision == "accept"
+    if invitation.status != "pending" and not retrying_accepted_invitation:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"This invitation is already {invitation.status}.")
+    team = await EventTeam.get(invitation.team_id)
+    event = await Event.get(invitation.event_id)
+    if not team or not event:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "The event or team invitation no longer exists.")
+    if team.status == "registered" and invitation.status == "accepted":
+        progress = await _team_invitation_progress(team)
+        return {
+            "message": "This team is already registered.",
+            "team_status": team.status,
+            "team_size": team.team_size,
+            **progress,
+        }
+    if team.status == "registering":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Team registration is being finalized.")
+    if team.status != "pending":
+        invitation.status = "cancelled"
+        invitation.responded_at = datetime.utcnow()
+        await invitation.save()
+        raise HTTPException(status.HTTP_409_CONFLICT, "This team invitation is no longer active.")
+
+    if body.decision == "decline":
+        invitation.status = "declined"
+        invitation.responded_at = datetime.utcnow()
+        await invitation.save()
+        await _release_team_invitee(team, invitation)
+        notice_sent = await _send_team_inviter_notice(
+            team,
+            event,
+            f"{current_user.name} declined the invitation. Invite a replacement to keep the team registration moving.",
+        )
+        progress = await _team_invitation_progress(team)
+        return {
+            "message": "Invitation declined. The inviter can select a replacement member.",
+            "team_status": team.status,
+            "team_size": team.team_size,
+            **progress,
+            "notice_sent": notice_sent,
+        }
+
+    if event.status != EventStatus.ACTIVE:
+        await _cancel_event_team(team)
+        await _send_team_inviter_notice(
+            team,
+            event,
+            f"The event closed before {current_user.name} accepted. No team members were registered.",
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, "This event is no longer accepting team registrations.")
+
+    if await _student_has_event_registration(event.id, current_user):
+        return await _mark_team_invitee_unavailable(
+            team,
+            event,
+            invitation,
+            "you already have a registration for this event.",
+        )
+    conflict = await _student_event_conflict(event, current_user)
+    if conflict:
+        return await _mark_team_invitee_unavailable(
+            team,
+            event,
+            invitation,
+            f"your schedule conflicts with {conflict}.",
+        )
+
+    claim = await EventTeamClaim.find_one({
+        "event_id": event.id,
+        "student_id": current_user.id,
+    })
+    if claim and claim.team_id != team.id:
+        return await _mark_team_invitee_unavailable(
+            team,
+            event,
+            invitation,
+            "another team or registration already claimed your place.",
+        )
+    if not claim:
+        try:
+            await EventTeamClaim(
+                event_id=event.id,
+                student_id=current_user.id,
+                team_id=team.id,
+                kind="team",
+            ).insert()
+        except DuplicateKeyError:
+            return await _mark_team_invitee_unavailable(
+                team,
+                event,
+                invitation,
+                "another team or registration already claimed your place.",
+            )
+
+    if invitation.status == "pending":
+        invitation.status = "accepted"
+        invitation.responded_at = datetime.utcnow()
+        await invitation.save()
+
+    competing_invitations = await EventTeamInvitation.find({
+        "event_id": event.id,
+        "invitee_student_id": current_user.id,
+        "status": "pending",
+        "_id": {"$ne": invitation.id},
+    }).to_list()
+    notified_teams = set()
+    for competing in competing_invitations:
+        competing.status = "cancelled"
+        competing.responded_at = datetime.utcnow()
+        await competing.save()
+        if str(competing.team_id) in notified_teams:
+            continue
+        notified_teams.add(str(competing.team_id))
+        competing_team = await EventTeam.get(competing.team_id)
+        if competing_team and competing_team.status == "pending":
+            await _release_team_invitee(competing_team, competing)
+            await _send_team_inviter_notice(
+                competing_team,
+                event,
+                f"{current_user.name} accepted another team invitation and is no longer available. "
+                "Your team remains open so you can invite a replacement.",
+            )
+
+    progress = await _team_invitation_progress(team)
+    if progress["accepted_members"] != team.team_size:
+        return {
+            "message": (
+                f"Invitation accepted. {progress['accepted_members']} of "
+                f"{team.team_size} team members have accepted."
+            ),
+            "team_status": team.status,
+            **progress,
+            "team_size": team.team_size,
+        }
+
+    transition = await EventTeam.get_motor_collection().update_one(
+        {"_id": team.id, "status": "pending"},
+        {"$set": {"status": "registering"}},
+    )
+    if transition.modified_count != 1:
+        refreshed_team = await EventTeam.get(team.id)
+        if refreshed_team and refreshed_team.status == "registered":
+            return {
+                "message": "This team is already registered.",
+                "team_status": refreshed_team.status,
+                "team_size": refreshed_team.team_size,
+                "accepted_members": refreshed_team.team_size,
+                "required_members": refreshed_team.team_size,
+                "open_slots": 0,
+            }
+        raise HTTPException(status.HTTP_409_CONFLICT, "Team registration is already being finalized or is no longer active.")
+    team.status = "registering"
+
+    if await _event_capacity_reserved(event, team.team_size, exclude_team_id=team.id):
+        team.status = "cancelled"
+        await team.save()
+        await EventTeamClaim.find({"team_id": team.id}).delete()
+        await _send_team_inviter_notice(
+            team,
+            event,
+            "The event no longer has enough capacity for the complete team. No team members were registered.",
+        )
+        return {
+            "message": "The full team could not be registered because event capacity is no longer available.",
+            "team_status": team.status,
+        }
+
+    member_ids = [team.creator_student_id, *team.invitee_ids]
+    members = []
+    for member_id in member_ids:
+        member = await User.get(member_id)
+        if not member or not member.is_active or member.role != UserRole.STUDENT:
+            team.status = "cancelled"
+            await team.save()
+            await EventTeamClaim.find({"team_id": team.id}).delete()
+            await _send_team_inviter_notice(
+                team,
+                event,
+                "A team member account is no longer active. No team members were registered.",
+            )
+            return {
+                "message": "The team could not be registered because a team member is no longer active.",
+                "team_status": team.status,
+            }
+        members.append(member)
+
+    event_date_str = _event_date_string(event)
+    session = getattr(event, "session", None) or _normalize_session(event.event_time)
+    participant_type = "non_technical_participant"
+    category = (event.category or "").strip()
+    if category == "Technical Talk":
+        participant_type = "technical_talk"
+    elif category == "Technical Event" or "tech" in category.lower() or category in {"Workshop", "Hackathon"}:
+        participant_type = "technical_participant"
+
+    created_registrations = []
+    created_participants = []
+    try:
+        for member in members:
+            registration = EventRegistration(
+                event_id=event.id,
+                student_id=member.id,
+                student_name=member.name,
+                student_email=_norm_email(member.email),
+                registration_number=member.registration_number,
+                department=member.department,
+                event_date_str=event_date_str,
+                session=session,
+                slot=event.slot,
+                registration_type="participant",
+                team_id=team.id,
+                status="accepted",
+            )
+            await registration.insert()
+            created_registrations.append(registration)
+            normalized_email = _norm_email(member.email)
+            existing_participant = await Participant.find_one({
+                "event_id": event.id,
+                "email": {"$regex": f"^{re.escape(normalized_email)}$", "$options": "i"},
+            })
+            if existing_participant:
+                continue
+
+            participant = Participant(
+                event_id=event.id,
+                club_id=event.club_id,
+                email=normalized_email,
+                registration_number=member.registration_number,
+                cert_type=participant_type,
+                fields={
+                    "Name": member.name or "",
+                    "Email": normalized_email,
+                    "Registration Number": member.registration_number or "",
+                    "Department": member.department or "",
+                    "Role": participant_type,
+                },
+                source=ParticipantSource.REGISTRATION,
+                verified=False,
+                status="registered",
+            )
+            try:
+                await participant.insert()
+                created_participants.append(participant)
+            except DuplicateKeyError:
+                existing_participant = await Participant.find_one({
+                    "event_id": event.id,
+                    "email": {"$regex": f"^{re.escape(normalized_email)}$", "$options": "i"},
+                })
+                if not existing_participant:
+                    raise
+    except Exception:
+        for registration in created_registrations:
+            await registration.delete()
+        for participant in created_participants:
+            await participant.delete()
+        team.status = "pending"
+        await team.save()
+        raise
+
+    team.status = "registered"
+    await team.save()
+    await event.set({
+        "participant_count": (event.participant_count or 0) + len(created_participants),
+    })
+    await _remove_creator_competing_invitations(team, event)
+    notice_sent = await _send_team_inviter_notice(
+        team,
+        event,
+        "Every teammate accepted. Your team is now registered for the event.",
+    )
+    return {
+        "message": "All teammates accepted. The team is registered for the event.",
+        "team_status": team.status,
+        "accepted_members": len(members),
+        "required_members": team.team_size,
+        "open_slots": 0,
+        "team_size": team.team_size,
+        "notice_sent": notice_sent,
+    }
 
 
 # ═══ PROFESSIONAL SOCIETY EVENTS & REGISTRATION ═══════════════════════════════
@@ -1368,4 +2557,3 @@ async def cancel_society_event_registration(
         await event.set({"participant_count": max(0, event.participant_count - 1)})
 
     return {"message": "Registration cancelled successfully"}
-

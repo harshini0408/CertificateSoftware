@@ -531,6 +531,7 @@ async def list_upcoming_events(
     query: dict = {
         "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
         "event_date": {"$gte": today_start},
+        "is_published": True,
     }
     if club_id:
         query["club_id"] = ObjectId(club_id)

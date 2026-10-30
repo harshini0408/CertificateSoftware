@@ -49,7 +49,12 @@ def require_role(*roles: UserRole):
         if current_user.role in {UserRole.TUTOR, UserRole.HOD}:
             effective_roles.add(UserRole.FACULTY)
         if not any(r in roles for r in effective_roles):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
+            allowed_roles = ", ".join(sorted(role.value for role in roles))
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"Insufficient permissions: your role is '{current_user.role.value}'; "
+                f"required role: {allowed_roles}.",
+            )
         return current_user
     return _checker
 
@@ -96,7 +101,11 @@ async def require_club_access(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this club")
         return current_user
 
-    raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        f"Insufficient permissions: your role is '{current_user.role.value}'; "
+        "required role: club_coordinator or super_admin.",
+    )
 
 
 # ── Event access gate ────────────────────────────────────────────────────

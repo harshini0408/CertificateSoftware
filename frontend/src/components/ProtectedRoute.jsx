@@ -50,7 +50,8 @@ export default function ProtectedRoute({ allowedRoles = [], children }) {
 
   // 1. Not logged in at all.
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
+    const from = encodeURIComponent(location.pathname + (location.search || ''))
+    return <Navigate to={`/login?from=${from}`} replace />
   }
 
   // 1.1 First login password change mandatory

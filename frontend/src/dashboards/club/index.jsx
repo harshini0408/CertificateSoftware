@@ -552,6 +552,23 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   />
                   {errors.volunteers_required && <p className="form-error">{errors.volunteers_required.message}</p>}
                 </div>
+                <div>
+                  <label className="form-label" htmlFor="dash-team-size">Team Size (Optional)</label>
+                  <input
+                    id="dash-team-size"
+                    type="number"
+                    min="2"
+                    className={`form-input ${errors.team_size ? 'form-input-error' : ''}`}
+                    placeholder="Leave blank for individual registration"
+                    onWheel={(e) => e.target.blur()}
+                    {...register('team_size', {
+                      setValueAs: (value) => value === '' ? null : parseInt(value, 10),
+                      min: { value: 2, message: 'Team size must be at least 2 students' },
+                    })}
+                  />
+                  {errors.team_size && <p className="form-error">{errors.team_size.message}</p>}
+                  <p className="mt-1 text-xs text-gray-500">Includes the student creating the team.</p>
+                </div>
               </div>
 
               <div>
@@ -1436,11 +1453,17 @@ function SettingsTab({ club, clubId, clubLoading, dashboardError, missingClubAss
     )
   }
 
-  const onAssetSubmit = async () => {
+  const onAssetSubmit = () => {
     if (!logoFile && !signatureFile) return
-    await updateAssets.mutateAsync({ logoFile, signatureFile })
-    setLogoFile(null)
-    setSignatureFile(null)
+    updateAssets.mutate(
+      { logoFile, signatureFile },
+      {
+        onSuccess: () => {
+          setLogoFile(null)
+          setSignatureFile(null)
+        },
+      },
+    )
   }
 
   if (clubLoading) return <LoadingSpinner fullPage label="Loading club info…" />
@@ -1487,7 +1510,12 @@ function SettingsTab({ club, clubId, clubLoading, dashboardError, missingClubAss
 
             <div className="grid gap-6 sm:grid-cols-2">
               <div className="space-y-3">
-                <p className="text-sm font-medium text-foreground">Club Logo</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Club Logo</p>
+                  <span className={`text-xs font-medium ${assetState?.logo_url ? 'text-green-700' : 'text-amber-700'}`}>
+                    {assetState?.logo_url ? 'Uploaded' : 'Required'}
+                  </span>
+                </div>
                 {logoPreview && (
                   <img
                     src={logoPreview}
@@ -1506,7 +1534,12 @@ function SettingsTab({ club, clubId, clubLoading, dashboardError, missingClubAss
               </div>
 
               <div className="space-y-3">
-                <p className="text-sm font-medium text-foreground">Faculty Signature</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">Faculty Signature</p>
+                  <span className={`text-xs font-medium ${assetState?.signature_url ? 'text-green-700' : 'text-amber-700'}`}>
+                    {assetState?.signature_url ? 'Uploaded' : 'Required'}
+                  </span>
+                </div>
                 {sigPreview && (
                   <img
                     src={sigPreview}
@@ -1533,6 +1566,16 @@ function SettingsTab({ club, clubId, clubLoading, dashboardError, missingClubAss
             >
               {updateAssets.isPending ? <LoadingSpinner size="sm" label="" /> : 'Update Logo/Signature'}
             </button>
+            {updateAssets.isError && (
+              <p className="text-sm text-red-700" role="alert">
+                Update failed: {updateAssets.error?.response?.data?.detail || updateAssets.error?.message || 'The logo or signature could not be saved. Check the file and try again.'}
+              </p>
+            )}
+            {!assetState?.is_configured && (
+              <p className="text-sm text-amber-800" role="status">
+                Both the club logo and faculty signature must be uploaded before setup is complete. You can upload them together or save one and add the other afterward.
+              </p>
+            )}
           </div>
         )}
       </div>

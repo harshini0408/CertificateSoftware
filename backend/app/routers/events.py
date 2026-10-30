@@ -14,6 +14,7 @@ from ..models.user import User
 from ..models.club import Club
 from ..models.event import Event, EventStatus, EventAssets
 from ..models.event_registration import EventRegistration
+from ..models.event_team import EventTeam
 from ..models.template import Template
 from ..models.certificate import Certificate, CertStatus
 from ..models.participant import Participant, ParticipantSource
@@ -87,7 +88,12 @@ def _normalize_session(time_str: Optional[str]) -> str:
     return "FN"
 
 
-def _event_response(e: Event, cert_count: int = 0, volunteers_registered: int = 0) -> EventResponse:
+def _event_response(
+    e: Event,
+    cert_count: int = 0,
+    volunteers_registered: int = 0,
+    teams_count: int = 0,
+) -> EventResponse:
     return EventResponse(
         id=str(e.id), club_id=str(e.club_id), name=e.name,
         description=e.description, event_date=e.event_date,
@@ -101,6 +107,8 @@ def _event_response(e: Event, cert_count: int = 0, volunteers_registered: int = 
         assets=e.assets.model_dump(),
         mapping_confirmed=e.mapping_confirmed,
         max_participants=getattr(e, "max_participants", None),
+        team_size=getattr(e, "team_size", None),
+        teams_count=teams_count,
         participant_count=e.participant_count,
         volunteers_required=getattr(e, "volunteers_required", 0) or 0,
         volunteers_registered=volunteers_registered,
@@ -135,6 +143,15 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
         vid = str(vr.event_id)
         vol_count_by_event[vid] = vol_count_by_event.get(vid, 0) + 1
 
+    registered_teams = await EventTeam.find({
+        "event_id": {"$in": event_ids},
+        "status": "registered",
+    }).to_list() if event_ids else []
+    teams_count_by_event: dict[str, int] = {}
+    for team in registered_teams:
+        event_key = str(team.event_id)
+        teams_count_by_event[event_key] = teams_count_by_event.get(event_key, 0) + 1
+
     responses = []
     issued_candidates = set(_issued_status_candidates())
     for e in events:
@@ -152,7 +169,12 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
             )
         )
         vol_reg = vol_count_by_event.get(str(e.id), 0)
-        responses.append(_event_response(e, cert_count=cert_count, volunteers_registered=vol_reg))
+        responses.append(_event_response(
+            e,
+            cert_count=cert_count,
+            volunteers_registered=vol_reg,
+            teams_count=teams_count_by_event.get(str(e.id), 0),
+        ))
     return responses
 
 
@@ -161,6 +183,11 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
     club = await Club.get(club_id)
     if not club:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+    if body.team_size and body.max_participants and body.team_size > body.max_participants:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Team size cannot exceed the event's maximum participant count.",
+        )
 
     tmap = {k: v for k, v in body.template_map.items()}
 
@@ -200,7 +227,9 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
         template_map=tmap, assets=inherited_assets,
         volunteers_required=body.volunteers_required,
         max_participants=body.max_participants,
+        team_size=body.team_size,
         is_published=body.is_published,
+        status=EventStatus.ACTIVE if body.is_published else EventStatus.DRAFT,
     )
     await event.insert()
     return _event_response(event)
@@ -292,7 +321,17 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         EventRegistration.registration_type == "volunteer",
         {"$or": [{"status": "accepted"}, {"status": "pending"}]},
     ).count()
-    return _event_response(event, cert_count=cert_count, volunteers_registered=vol_reg)
+    teams_count = (
+        await EventTeam.find({"event_id": event.id, "status": "registered"}).count()
+        if (getattr(event, "team_size", None) or 1) > 1
+        else 0
+    )
+    return _event_response(
+        event,
+        cert_count=cert_count,
+        volunteers_registered=vol_reg,
+        teams_count=teams_count,
+    )
 
 
 @router.put("/{event_id}", response_model=EventResponse)
@@ -301,9 +340,34 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
     event = await Event.get(event_id)
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
-    updates = body.model_dump(exclude_none=True)
+    updates = body.model_dump(exclude_unset=True)
+    resulting_team_size = updates.get("team_size", getattr(event, "team_size", None))
+    resulting_max_participants = updates.get("max_participants", getattr(event, "max_participants", None))
+    if resulting_team_size and resulting_max_participants and resulting_team_size > resulting_max_participants:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Team size cannot exceed the event's maximum participant count.",
+        )
+    if "team_size" in updates and updates["team_size"] != getattr(event, "team_size", None):
+        from ..models.event_team import EventTeam
+
+        pending_teams = await EventTeam.find({
+            "event_id": event.id,
+            "status": "pending",
+        }).count()
+        registered_teams = await EventRegistration.find({
+            "event_id": event.id,
+            "team_id": {"$ne": None},
+        }).count()
+        if pending_teams or registered_teams:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Team size cannot be changed after team invitations or team registrations exist.",
+            )
     if "template_map" in updates and updates["template_map"]:
         updates["template_map"] = {k: v for k, v in updates["template_map"].items()}
+    if "is_published" in updates and "status" not in updates:
+        updates["status"] = EventStatus.ACTIVE if updates["is_published"] else EventStatus.DRAFT
     if "status" in updates:
         updates["status"] = EventStatus(updates["status"])
     if updates:

@@ -88,6 +88,7 @@ app/
    - Assigned tutors can edit a mapped student's registration number up to **2 times**.
 4. **Semester Rollover / Reset**: Superadmin can trigger a semester reset with admin password confirmation, archiving previous semester credits into history and resetting active semester totals to zero.
 5. **QR Code Attendance**: Dynamic QR codes generated per event session for seamless participant attendance marking.
+6. **Club Event Team Registration**: Club coordinators may set an optional team size (including the inviting student). Students search for eligible teammates and send email invitations; the inviter and invited students can view each teammate's Accepted/Pending/Declined status. Declined or unavailable invitees can be replaced, and no team members are registered until all required invitees accept. In development mode with `EMAIL_PROVIDER=console`, invitation links are printed in the backend terminal rather than emailed.
 
 ## Production Deployment
 See `nginx.conf` and root `docker-compose.yml` for production reverse proxy and container configuration.

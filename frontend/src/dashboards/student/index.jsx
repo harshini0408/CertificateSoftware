@@ -23,6 +23,14 @@ import {
   useStudentUpcomingEvents,
   useRegisterForEvent,
   useCancelEventRegistration,
+  useEventTeamCandidates,
+  useCreateEventTeamInvitations,
+  useInviteReplacementEventTeamMembers,
+  useRemovePendingEventTeamInvitation,
+  useCancelPendingEventTeam,
+  useEventTeamInvitation,
+  usePendingEventTeamInvitations,
+  useRespondToEventTeamInvitation,
   useUpcomingSocietyEvents,
   useRegisterSocietyEvent,
   useCancelSocietyEventRegistration,
@@ -35,6 +43,54 @@ import {
   useLeaveClubMembership,
 } from './api'
 import { useChangePassword } from '../auth/api'
+
+function TeamParticipants({ participants, compact = false, onRemovePending, removingInvitationId }) {
+  if (!participants?.length) return null
+
+  const statusStyles = {
+    Accepted: 'bg-green-100 text-green-700',
+    Pending: 'bg-amber-100 text-amber-800',
+    Declined: 'bg-red-100 text-red-700',
+    'Not Available': 'bg-gray-100 text-gray-700',
+  }
+
+  return (
+    <div className={`space-y-2 ${compact ? 'mt-2' : ''}`}>
+      {participants.map((participant) => (
+        <div
+          key={participant.id}
+          className="flex items-start justify-between gap-3 rounded-md border border-gray-200 bg-white px-3 py-2"
+        >
+          <div className="min-w-0 text-xs">
+            <p className="font-semibold text-gray-800">
+              {participant.name}
+              {participant.is_inviter && <span className="ml-1 font-normal text-gray-500">(Inviter)</span>}
+            </p>
+            <p className="break-all text-gray-500">
+              {participant.registration_number || 'No register number'} · {participant.email || 'No email'}
+            </p>
+            <p className="text-gray-500">
+              Class: {participant.class || '—'} · Department: {participant.department || '—'} · Year: {participant.year || '—'}
+            </p>
+          </div>
+          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusStyles[participant.status] || 'bg-gray-100 text-gray-600'}`}>
+            {participant.status}
+          </span>
+          {participant.status === 'Pending' && onRemovePending && (
+            <button
+              type="button"
+              className="shrink-0 text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+              disabled={removingInvitationId === participant.invitation_id}
+              onClick={() => onRemovePending(participant)}
+            >
+              {removingInvitationId === participant.invitation_id ? 'Removing…' : 'Remove invitation'}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // ── QR Camera Scanner ─────────────────────────────────────────────────────────
 function AttendanceScannerView({ event, onScanned, onCancel, onError }) {
@@ -699,10 +755,11 @@ function StudentSettingsTab({ profile, profileLoading }) {
 }
 
 export default function StudentDashboard() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { eventId: routeEventId, token: routeToken } = useParams()
   const navigate = useNavigate()
   const activeTab = searchParams.get('tab') || 'certificates'
+  const teamInvitationId = searchParams.get('team_invite')
 
   const [downloadingId, setDownloadingId] = useState(null)
   const [uploadForm, setUploadForm] = useState({ cert_type: '', event_date: '', certificate_image: null })
@@ -717,6 +774,9 @@ export default function StudentDashboard() {
   const { data: availableClubs } = useAvailableClubs()
   const { data: upcomingEvents, isLoading: upcomingLoading } = useStudentUpcomingEvents()
   const { data: upcomingSocietyEvents, isLoading: upcomingSocietyLoading } = useUpcomingSocietyEvents()
+  const { data: teamInvitation, isLoading: teamInvitationLoading } = useEventTeamInvitation(teamInvitationId)
+  const { data: pendingTeamInvitations, isLoading: pendingTeamInvitationsLoading } = usePendingEventTeamInvitations()
+  const respondToTeamInvitation = useRespondToEventTeamInvitation()
   const applyForClub = useApplyForClub()
   const leaveClubMembership = useLeaveClubMembership()
   const createSubmission = useCreateManualCreditSubmission()
@@ -738,6 +798,44 @@ export default function StudentDashboard() {
   const [eventSearch, setEventSearch] = useState('')
   const [eventCategoryFilter, setEventCategoryFilter] = useState('')
   const [expandedPoster, setExpandedPoster] = useState(null)
+  const [teamRegistrationEvent, setTeamRegistrationEvent] = useState(null)
+  const [teamRegistrationTeamId, setTeamRegistrationTeamId] = useState(null)
+  const [teamStatusEventId, setTeamStatusEventId] = useState(null)
+  const [teamCandidateSearch, setTeamCandidateSearch] = useState('')
+  const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState(() => new Set())
+  const { data: teamCandidates, isLoading: teamCandidatesLoading } = useEventTeamCandidates(
+    teamRegistrationEvent?.id,
+    teamCandidateSearch,
+    teamRegistrationTeamId,
+  )
+  const createTeamInvitations = useCreateEventTeamInvitations()
+  const inviteReplacementTeamMembers = useInviteReplacementEventTeamMembers()
+  const removePendingTeamInvitation = useRemovePendingEventTeamInvitation()
+  const cancelPendingEventTeam = useCancelPendingEventTeam()
+  const teamStatusEvent = (upcomingEvents || []).find((event) => event.id === teamStatusEventId)
+
+  useEffect(() => {
+    setSelectedTeamMemberIds(new Set())
+    setTeamCandidateSearch('')
+  }, [teamRegistrationEvent?.id])
+
+  const closeTeamInvitation = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('team_invite')
+    setSearchParams(next, { replace: true })
+  }
+
+  const openTeamInvitation = (invitationId) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', 'upcoming')
+    next.set('team_invite', invitationId)
+    setSearchParams(next)
+  }
+
+  const closeTeamRegistration = () => {
+    setTeamRegistrationEvent(null)
+    setTeamRegistrationTeamId(null)
+  }
 
   useEffect(() => {
     if (!expandedPoster) return
@@ -1111,6 +1209,11 @@ export default function StudentDashboard() {
                   {sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''}
                 </span>
               </div>
+              {!isSociety && (ev.team_size || 1) > 1 && (
+                <div className="text-[11px] font-medium text-indigo-700">
+                  Team registration required: {ev.team_size} members, including you
+                </div>
+              )}
               {ev.venue && (
                 <div className="flex items-center gap-1.5 truncate">
                   <span>📍</span>
@@ -1150,8 +1253,11 @@ export default function StudentDashboard() {
                 )
               ) : (
                 <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 font-semibold text-xs border border-green-200">
-                  ✓ Registered for Event ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
+                  ✓ {ev.team_id ? `Team registered (${ev.registration_team_size} members)` : 'Registered for Event'} ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
                 </div>
+              )}
+              {!isSociety && ev.team_id && (
+                <TeamParticipants participants={ev.team_registration_participants} compact />
               )}
 
               {/* Mark Attendance button */}
@@ -1170,7 +1276,10 @@ export default function StudentDashboard() {
 
               <button
                 type="button"
-                onClick={() => isSociety ? handleCancelSocietyRegistration(ev.id) : handleCancelRegistration(ev.id)}
+                onClick={() => {
+                  if (ev.team_id && !window.confirm('This cancels the registration for every member of your team. Continue?')) return
+                  isSociety ? handleCancelSocietyRegistration(ev.id) : handleCancelRegistration(ev.id)
+                }}
                 disabled={(cancelEventRegistration.isPending || cancelSocietyEventRegistration.isPending) && cancellingEventId === ev.id}
                 className="w-full text-center text-xs text-red-600 hover:text-red-800 hover:underline py-1 font-medium disabled:opacity-50"
               >
@@ -1178,8 +1287,57 @@ export default function StudentDashboard() {
                   ? 'Cancelling…'
                   : ev.registration_type === 'volunteer'
                   ? 'Cancel Volunteer Request'
-                  : 'Cancel Registration'}
+                  : ev.team_id ? 'Cancel Entire Team Registration' : 'Cancel Registration'}
               </button>
+            </div>
+          ) : (!isSociety && ['pending', 'registering'].includes(ev.team_registration_status)) ? (
+            <div className="space-y-2">
+              {ev.team_registration_is_creator ? (
+                <button
+                  type="button"
+                  onClick={() => setTeamStatusEventId(ev.id)}
+                  className="btn-secondary w-full justify-center text-xs"
+                >
+                  View Team Status
+                </button>
+              ) : (
+                <>
+                  <div className="w-full flex items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-center text-xs font-semibold">
+                    {ev.team_registration_status === 'registering'
+                      ? 'Team accepted; registration is being finalized'
+                      : 'Team registration pending teammate responses'}
+                  </div>
+                  <TeamParticipants participants={ev.team_registration_participants} compact />
+                </>
+              )}
+              {ev.team_registration_is_creator
+                && ev.team_registration_status === 'pending'
+                && ev.team_registration_open_slots > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTeamRegistrationEvent(ev)
+                      setTeamRegistrationTeamId(ev.team_registration_id)
+                    }}
+                    className="btn-secondary w-full text-xs justify-center"
+                  >
+                    Invite {ev.team_registration_open_slots} replacement {ev.team_registration_open_slots === 1 ? 'member' : 'members'}
+                  </button>
+                )}
+              {ev.team_registration_is_creator && ev.team_registration_status === 'pending' && (
+                <button
+                  type="button"
+                  disabled={cancelPendingEventTeam.isPending}
+                  onClick={() => {
+                    if (window.confirm('Cancel this team request and release the reserved team places?')) {
+                      cancelPendingEventTeam.mutate(ev.team_registration_id)
+                    }
+                  }}
+                  className="w-full text-center text-xs text-red-600 hover:text-red-800 hover:underline py-1 font-medium disabled:opacity-50"
+                >
+                  Cancel Pending Team Request
+                </button>
+              )}
             </div>
           ) : (ev.registration_stopped || (ev.max_participants != null && ev.participant_count >= ev.max_participants)) ? (
             <div className="w-full flex flex-col items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 text-center space-y-1">
@@ -1194,11 +1352,24 @@ export default function StudentDashboard() {
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => isSociety ? handleRegisterSociety(ev.id, 'participant') : handleRegister(ev.id, 'participant')}
+                onClick={() => {
+                  if (isSociety) {
+                    handleRegisterSociety(ev.id, 'participant')
+                  } else if ((ev.team_size || 1) > 1) {
+                    setTeamRegistrationTeamId(null)
+                    setTeamRegistrationEvent(ev)
+                  } else {
+                    handleRegister(ev.id, 'participant')
+                  }
+                }}
                 disabled={(registerForEvent.isPending || registerSocietyEvent.isPending) && registeringEventId === ev.id}
                 className="btn-primary w-full text-xs justify-center"
               >
-                {registeringEventId === ev.id ? 'Registering…' : 'Register for Event'}
+                {registeringEventId === ev.id
+                  ? 'Registering…'
+                  : !isSociety && (ev.team_size || 1) > 1
+                  ? 'Register as a Team'
+                  : 'Register for Event'}
               </button>
 
               {(ev.volunteers_required || 0) > 0 && (
@@ -1310,6 +1481,62 @@ export default function StudentDashboard() {
                     Discover and register for upcoming events conducted by Professional Societies and College Clubs. Note: You can register for different time slots on the same date, but overlapping time slots are restricted.
                   </p>
                 </div>
+
+                <section className="space-y-3" aria-labelledby="team-invitations-heading">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 id="team-invitations-heading" className="text-lg font-bold text-foreground">
+                        Team Invitations
+                      </h2>
+                      <p className="text-sm text-gray-500">
+                        Invitations from students asking you to join their event team.
+                      </p>
+                    </div>
+                    {!pendingTeamInvitationsLoading && pendingTeamInvitations?.length > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
+                        {pendingTeamInvitations.length} pending
+                      </span>
+                    )}
+                  </div>
+
+                  {pendingTeamInvitationsLoading ? (
+                    <div className="card p-4">
+                      <LoadingSpinner fullPage={false} label="Checking team invitations…" />
+                    </div>
+                  ) : pendingTeamInvitations?.length ? (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      {pendingTeamInvitations.map((invitation) => (
+                        <article key={invitation.id} className="card flex flex-col justify-between gap-4 border border-amber-200 p-4">
+                          <div>
+                            <p className="font-semibold text-foreground">{invitation.event.name}</p>
+                            <p className="mt-1 text-sm text-gray-600">
+                              <strong>{invitation.inviter.name}</strong> invited you to join a {invitation.team_size}-member team.
+                            </p>
+                            <TeamParticipants participants={invitation.participants} compact />
+                            <p className="mt-1 text-xs text-gray-500">
+                              {invitation.event.event_date
+                                ? new Date(invitation.event.event_date).toLocaleDateString()
+                                : 'Date not specified'}
+                              {invitation.event.slot ? ` · ${invitation.event.slot}` : ''}
+                              {invitation.event.venue ? ` · ${invitation.event.venue}` : ''}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-primary self-start text-sm"
+                            onClick={() => openTeamInvitation(invitation.id)}
+                          >
+                            Review invitation
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
+                      You have no pending team invitations.
+                    </div>
+                  )}
+                </section>
 
                 {/* Filters */}
                 <div className="card p-4 flex flex-wrap items-center gap-3">
@@ -1872,6 +2099,296 @@ export default function StudentDashboard() {
           </div>
         </main>
       </div>
+
+      {teamRegistrationEvent && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+              <div>
+                <h2 className="text-lg font-bold text-navy">
+                  {teamRegistrationTeamId ? 'Invite Replacement Members' : 'Create Event Team'}
+                </h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  {teamRegistrationEvent.name} · {teamRegistrationEvent.team_size} members total, including you
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeTeamRegistration}
+                className="rounded p-1 text-xl text-gray-500 hover:bg-gray-100"
+                aria-label="Close team registration"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <p className="text-sm text-gray-600">
+                Search by registration number, name, or email. Invite exactly {
+                  teamRegistrationTeamId
+                    ? teamRegistrationEvent.team_registration_open_slots
+                    : teamRegistrationEvent.team_size - 1
+                } available students. The team registers only when every required member has accepted.
+              </p>
+              <input
+                type="search"
+                value={teamCandidateSearch}
+                onChange={(e) => setTeamCandidateSearch(e.target.value)}
+                className="form-input w-full"
+                placeholder="Search students..."
+                autoFocus
+              />
+              <div className="max-h-80 space-y-2 overflow-y-auto">
+                {teamCandidateSearch.trim().length < 2 ? (
+                  <p className="py-6 text-center text-sm text-gray-400">Enter at least 2 characters to search.</p>
+                ) : teamCandidatesLoading ? (
+                  <LoadingSpinner fullPage={false} label="Searching students…" />
+                ) : !teamCandidates?.length ? (
+                  <p className="py-6 text-center text-sm text-gray-400">No matching students found.</p>
+                ) : teamCandidates.map((candidate) => {
+                  const selected = selectedTeamMemberIds.has(candidate.id)
+                  const invitationSlots = teamRegistrationTeamId
+                    ? teamRegistrationEvent.team_registration_open_slots
+                    : teamRegistrationEvent.team_size - 1
+                  const selectionFull = selectedTeamMemberIds.size >= invitationSlots
+                  return (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      disabled={!candidate.available || (!selected && selectionFull)}
+                      onClick={() => {
+                        setSelectedTeamMemberIds((previous) => {
+                          const next = new Set(previous)
+                          if (next.has(candidate.id)) next.delete(candidate.id)
+                          else next.add(candidate.id)
+                          return next
+                        })
+                      }}
+                      className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                        !candidate.available
+                          ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 opacity-60'
+                          : selected
+                          ? 'border-indigo-400 bg-indigo-50'
+                          : 'border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/40'
+                      }`}
+                    >
+                      <input type="checkbox" checked={selected} readOnly className="mt-1" />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                          {candidate.name}
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] ${
+                            candidate.available ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+                          }`}>
+                            {candidate.available ? 'Available' : 'Not available'}
+                          </span>
+                        </span>
+                        <span className="mt-1 block break-all text-xs">{candidate.registration_number || 'No register number'} · {candidate.email}</span>
+                        <span className="mt-0.5 block text-xs">
+                          Class: {candidate.class || '—'} · Department: {candidate.department || '—'} · Year: {candidate.year || '—'}
+                        </span>
+                        {!candidate.available && candidate.unavailable_reason && (
+                          <span className="mt-1 block text-xs">{candidate.unavailable_reason}</span>
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+                <span className="text-xs text-gray-500">
+                  Selected {selectedTeamMemberIds.size} of {
+                    teamRegistrationTeamId
+                      ? teamRegistrationEvent.team_registration_open_slots
+                      : teamRegistrationEvent.team_size - 1
+                  } invitees
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={closeTeamRegistration}
+                    className="btn-secondary text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      selectedTeamMemberIds.size !== (
+                        teamRegistrationTeamId
+                          ? teamRegistrationEvent.team_registration_open_slots
+                          : teamRegistrationEvent.team_size - 1
+                      )
+                      || createTeamInvitations.isPending
+                      || inviteReplacementTeamMembers.isPending
+                    }
+                    onClick={() => {
+                      const invitee_ids = [...selectedTeamMemberIds]
+                      const mutation = teamRegistrationTeamId
+                        ? inviteReplacementTeamMembers
+                        : createTeamInvitations
+                      const payload = teamRegistrationTeamId
+                        ? { teamId: teamRegistrationTeamId, invitee_ids }
+                        : { eventId: teamRegistrationEvent.id, invitee_ids }
+                      mutation.mutate(payload, { onSuccess: closeTeamRegistration })
+                    }}
+                    className="btn-primary text-sm"
+                  >
+                    {createTeamInvitations.isPending || inviteReplacementTeamMembers.isPending
+                      ? 'Sending invitations…'
+                      : teamRegistrationTeamId ? 'Invite Replacement' : 'Send Invitations'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {teamInvitationId && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+          <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
+              <h2 className="text-lg font-bold text-navy">Event Team Invitation</h2>
+              <button
+                type="button"
+                onClick={closeTeamInvitation}
+                className="rounded p-1 text-xl text-gray-500 hover:bg-gray-100"
+                aria-label="Close invitation"
+              >
+                ×
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+              {teamInvitationLoading ? (
+                <LoadingSpinner fullPage={false} label="Loading invitation…" />
+              ) : !teamInvitation ? (
+                <p className="text-sm text-red-600">This invitation could not be loaded. It may have expired or been cancelled.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-700">
+                    <strong>{teamInvitation.inviter.name}</strong> invited you to join a team for <strong>{teamInvitation.event.name}</strong>.
+                  </p>
+                  <div className="rounded-lg bg-gray-50 p-4 text-sm">
+                    <p><strong>Inviter:</strong> {teamInvitation.inviter.name}</p>
+                    <p><strong>Email:</strong> {teamInvitation.inviter.email}</p>
+                    <p><strong>Registration number:</strong> {teamInvitation.inviter.registration_number || '—'}</p>
+                    <p><strong>Class:</strong> {teamInvitation.inviter.class || '—'}</p>
+                    <p><strong>Department:</strong> {teamInvitation.inviter.department || '—'}</p>
+                    <p><strong>Year:</strong> {teamInvitation.inviter.year || '—'}</p>
+                    <p><strong>Event:</strong> {teamInvitation.event.name}</p>
+                    <p><strong>Date:</strong> {teamInvitation.event.event_date ? new Date(teamInvitation.event.event_date).toLocaleDateString() : '—'}</p>
+                    <p><strong>Session:</strong> {teamInvitation.event.session || '—'} {teamInvitation.event.slot ? `· ${teamInvitation.event.slot}` : ''}</p>
+                    <p><strong>Venue:</strong> {teamInvitation.event.venue || '—'}</p>
+                    <p><strong>Team size:</strong> {teamInvitation.team_size}, including the inviter</p>
+                  </div>
+                  <TeamParticipants participants={teamInvitation.participants} />
+                  {teamInvitation.status === 'pending' && teamInvitation.team_status === 'pending' ? (
+                    <p className="text-xs text-gray-500">The team is registered only if every invited student accepts.</p>
+                  ) : (
+                    <p className="rounded-lg bg-amber-50 p-3 text-sm font-medium text-amber-800">
+                      This invitation is {
+                        ['cancelled', 'removed', 'unavailable'].includes(teamInvitation.status)
+                          || teamInvitation.team_status !== 'pending'
+                          ? 'no longer available'
+                          : teamInvitation.status
+                      }.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="flex shrink-0 justify-end gap-2 border-t border-gray-100 bg-white px-5 py-4">
+              <button type="button" onClick={closeTeamInvitation} className="btn-secondary text-sm">
+                Close
+              </button>
+              {teamInvitation?.status === 'pending' && teamInvitation.team_status === 'pending' && (
+                <>
+                  <button
+                    type="button"
+                    disabled={respondToTeamInvitation.isPending}
+                    onClick={() => respondToTeamInvitation.mutate(
+                      { invitationId: teamInvitationId, decision: 'decline' },
+                      { onSuccess: closeTeamInvitation },
+                    )}
+                    className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+                  >
+                    Decline
+                  </button>
+                  <button
+                    type="button"
+                    disabled={respondToTeamInvitation.isPending}
+                    onClick={() => respondToTeamInvitation.mutate(
+                      { invitationId: teamInvitationId, decision: 'accept' },
+                      { onSuccess: closeTeamInvitation },
+                    )}
+                    className="btn-primary text-sm"
+                  >
+                    Accept
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {teamStatusEvent && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setTeamStatusEventId(null)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+              <div>
+                <h2 className="text-lg font-bold text-navy">Team Status</h2>
+                <p className="mt-0.5 text-sm text-gray-500">{teamStatusEvent.name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTeamStatusEventId(null)}
+                className="rounded p-1 text-xl text-gray-500 hover:bg-gray-100"
+                aria-label="Close team status"
+              >
+                ×
+              </button>
+            </div>
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto p-5">
+              <TeamParticipants
+                participants={teamStatusEvent.team_registration_participants}
+                onRemovePending={(participant) => {
+                  if (!window.confirm(`Remove ${participant.name}'s pending invitation?`)) return
+                  removePendingTeamInvitation.mutate({
+                    teamId: teamStatusEvent.team_registration_id,
+                    invitationId: participant.invitation_id,
+                  })
+                }}
+                removingInvitationId={
+                  removePendingTeamInvitation.isPending
+                    ? removePendingTeamInvitation.variables?.invitationId
+                    : null
+                }
+              />
+              {teamStatusEvent.team_registration_open_slots > 0 && (
+                <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+                  {teamStatusEvent.team_registration_open_slots} replacement {teamStatusEvent.team_registration_open_slots === 1 ? 'slot is' : 'slots are'} available. Close this panel and choose <strong>Invite Replacement</strong> on the event card.
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end border-t border-gray-100 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setTeamStatusEventId(null)}
+                className="btn-secondary text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Expanded Poster Lightbox Modal */}
       {expandedPoster && (

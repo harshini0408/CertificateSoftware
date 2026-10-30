@@ -276,6 +276,8 @@ export function useStudentUpcomingEvents() {
       const { data } = await axiosInstance.get('/student/upcoming-events')
       return data
     },
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -321,6 +323,178 @@ export function useCancelEventRegistration() {
     onError: (err) => {
       const msg = err?.response?.data?.detail || 'Failed to cancel registration.'
       addToast({ type: 'error', message: msg })
+    },
+  })
+}
+
+export function useEventTeamCandidates(eventId, search, teamId = null) {
+  return useQuery({
+    queryKey: ['student', 'event-team-candidates', eventId, search, teamId],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(
+        `/student/events/${eventId}/team-candidates`,
+        { params: { q: search, ...(teamId ? { team_id: teamId } : {}) } },
+      )
+      return data
+    },
+    enabled: !!eventId && search.trim().length >= 2,
+  })
+}
+
+export function useCreateEventTeamInvitations() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ eventId, invitee_ids }) => {
+      const { data } = await axiosInstance.post(
+        `/student/events/${eventId}/team-invitations`,
+        { invitee_ids },
+      )
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({
+        type: data?.email_failures?.length ? 'error' : 'success',
+        message: data?.message || 'Team invitations sent.',
+      })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to send team invitations.',
+      })
+    },
+  })
+}
+
+export function useInviteReplacementEventTeamMembers() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ teamId, invitee_ids }) => {
+      const { data } = await axiosInstance.post(
+        `/student/event-teams/${teamId}/invitations`,
+        { invitee_ids },
+      )
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
+      addToast({
+        type: data?.email_failures?.length ? 'error' : 'success',
+        message: data?.message || 'Replacement invitations sent.',
+      })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to invite replacement team members.',
+      })
+    },
+  })
+}
+
+export function useRemovePendingEventTeamInvitation() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ teamId, invitationId }) => {
+      const { data } = await axiosInstance.delete(
+        `/student/event-teams/${teamId}/invitations/${invitationId}`,
+      )
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
+      addToast({ type: 'success', message: data?.message || 'Pending invitation removed.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to remove the pending invitation.',
+      })
+    },
+  })
+}
+
+export function useCancelPendingEventTeam() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (teamId) => {
+      const { data } = await axiosInstance.delete(`/student/event-teams/${teamId}`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
+      addToast({ type: 'success', message: data?.message || 'Team request cancelled.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to cancel the pending team request.',
+      })
+    },
+  })
+}
+
+export function useEventTeamInvitation(invitationId) {
+  return useQuery({
+    queryKey: ['student', 'event-team-invitation', invitationId],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/student/event-team-invitations/${invitationId}`)
+      return data
+    },
+    enabled: !!invitationId,
+  })
+}
+
+export function usePendingEventTeamInvitations() {
+  return useQuery({
+    queryKey: ['student', 'pending-event-team-invitations'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/student/event-team-invitations')
+      return data
+    },
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+export function useRespondToEventTeamInvitation() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ invitationId, decision }) => {
+      const { data } = await axiosInstance.post(
+        `/student/event-team-invitations/${invitationId}/respond`,
+        { decision },
+      )
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'event-team-invitation'] })
+      qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      addToast({
+        type: data?.team_status === 'cancelled' ? 'error' : 'success',
+        message: data?.message || 'Invitation response saved.',
+      })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to respond to invitation.',
+      })
     },
   })
 }

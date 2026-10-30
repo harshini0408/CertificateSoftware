@@ -93,12 +93,28 @@ export function useUpdateClubAssets(clubId) {
       })
       return data
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: clubKeys.dashboard(clubId) })
       qc.invalidateQueries({ queryKey: clubKeys.assets(clubId) })
       qc.invalidateQueries({ queryKey: ['auth', 'me'] })
-      setRequiresProfileSetup(false)
-      addToast({ type: 'success', message: 'Logo/signature updated.' })
+      const assets = data?.assets
+      const isConfigured = assets?.is_configured === true
+      setRequiresProfileSetup(!isConfigured)
+
+      if (isConfigured) {
+        addToast({ type: 'success', message: 'Club logo and faculty signature saved. Setup is complete.' })
+        return
+      }
+
+      const missingAssets = []
+      if (!assets?.logo_url) missingAssets.push('club logo')
+      if (!assets?.signature_url) missingAssets.push('faculty signature')
+      addToast({
+        type: 'warning',
+        message: missingAssets.length
+          ? `Upload saved. Setup is still incomplete: ${missingAssets.join(' and ')} ${missingAssets.length === 1 ? 'is' : 'are'} still required.`
+          : 'Upload saved, but setup is still incomplete. Please verify both the club logo and faculty signature.',
+      })
     },
     onError: (err) => {
       const msg = err?.response?.data?.detail || 'Failed to update assets.'
@@ -481,4 +497,3 @@ export function useDeleteMembershipRequest() {
     },
   })
 }
-

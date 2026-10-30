@@ -16,6 +16,7 @@ class EventRegistration(Document):
     session: str  # "FN" or "AN"
     slot: Optional[str] = None  # Specific slot e.g. "8:45 AM - 10:15 AM"
     registration_type: str = "participant"
+    team_id: Optional[PydanticObjectId] = None
     status: str = "accepted"  # "accepted", "pending", "rejected"
     registered_at: datetime = Field(default_factory=datetime.utcnow)
 

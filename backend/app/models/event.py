@@ -63,6 +63,7 @@ class Event(Document):
     assets: EventAssets = Field(default_factory=EventAssets)
     mapping_confirmed: bool = False
     max_participants: Optional[int] = None
+    team_size: Optional[int] = None
     participant_count: int = 0
     volunteers_required: int = 0
     qr_generations_count: int = 0
@@ -73,4 +74,3 @@ class Event(Document):
 
     class Settings:
         name = "events"
-

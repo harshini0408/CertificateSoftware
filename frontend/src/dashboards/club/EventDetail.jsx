@@ -96,6 +96,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [editCustomVenue, setEditCustomVenue] = useState('')
   const [editCategory, setEditCategory] = useState('')
   const [editMaxParticipants, setEditMaxParticipants] = useState('')
+  const [editTeamSize, setEditTeamSize] = useState('')
 
   const EDIT_SLOTS = {
     FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
@@ -139,6 +140,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     }
     setEditCategory(event?.category || '')
     setEditMaxParticipants(event?.max_participants != null ? String(event.max_participants) : '')
+    setEditTeamSize(event?.team_size != null ? String(event.team_size) : '')
     setIsEditing(true)
   }
 
@@ -157,6 +159,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
         event_time: timeStr,
         venue: editVenue.trim(),
         max_participants: editMaxParticipants ? parseInt(editMaxParticipants, 10) : null,
+        team_size: editTeamSize ? parseInt(editTeamSize, 10) : null,
       },
       {
         onSuccess: () => setIsEditing(false),
@@ -369,6 +372,19 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 />
                 <p className="text-xs text-gray-400 mt-1">Leave blank for no limit. Students will see &ldquo;Maximum participants reached&rdquo; when full.</p>
               </div>
+              <div>
+                <label className="form-label text-xs font-semibold">Team Size (Optional)</label>
+                <input
+                  type="number"
+                  min="2"
+                  value={editTeamSize}
+                  onChange={(e) => setEditTeamSize(e.target.value)}
+                  onWheel={(e) => e.target.blur()}
+                  className="form-input text-sm"
+                  placeholder="Individual registration"
+                />
+                <p className="text-xs text-gray-400 mt-1">Leave blank for individual registration. Team size includes the inviting student.</p>
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
               <button
@@ -400,6 +416,9 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 ['Category', event?.category || '—'],
                 ['Academic Year', event?.academic_year || '—'],
                 ['Registration Status', event?.registration_stopped ? 'Stopped' : 'Open'],
+                ...((event?.team_size || 1) > 1
+                  ? [['Teams', (event?.teams_count ?? 0).toLocaleString()]]
+                  : []),
                 ['Participants', (event?.participant_count ?? 0).toLocaleString()],
                 ['Certificates Issued', (event?.cert_count ?? 0).toLocaleString()],
               ].map(([label, value]) => (
