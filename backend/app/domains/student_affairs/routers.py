@@ -12,7 +12,7 @@ from ...core.dependencies import require_role
 from ...models.user import User, UserRole
 from ...models.club import Club
 from ...models.department import Department
-from ...models.event import Event, EventStatus
+from ...models.event import Event, EventStatus, event_activity_type
 from ...models.dept_event import DeptEvent
 from ...models.dept_certificate import DeptCertificate
 from ...models.participant import Participant
@@ -170,6 +170,11 @@ async def list_club_events(
             "event_time": e.event_time,
             "venue": e.venue,
             "category": e.category,
+            "activity_type": event_activity_type(e),
+            "min_team_size": getattr(e, "min_team_size", None),
+            "max_team_size": getattr(e, "max_team_size", None),
+            "max_participants": getattr(e, "max_participants", None),
+            "max_teams": getattr(e, "max_teams", None),
             "status": e.status.value,
             "participant_count": e.participant_count,
             "cert_count": cert_count,
@@ -255,6 +260,11 @@ async def get_club_event_detail(event_id: PydanticObjectId, _user: User = _affai
         "event_time": event.event_time,
         "venue": event.venue,
         "category": event.category,
+        "activity_type": event_activity_type(event),
+        "min_team_size": getattr(event, "min_team_size", None),
+        "max_team_size": getattr(event, "max_team_size", None),
+        "max_participants": getattr(event, "max_participants", None),
+        "max_teams": getattr(event, "max_teams", None),
         "status": event.status.value,
         "academic_year": event.academic_year,
         "participant_count": event.participant_count,
@@ -562,6 +572,11 @@ async def list_upcoming_events(
             "category": e.category,
             "poster_url": e.poster_url,
             "status": e.status.value,
+            "activity_type": event_activity_type(e),
+            "min_team_size": getattr(e, "min_team_size", None),
+            "max_team_size": getattr(e, "max_team_size", None),
+            "max_participants": getattr(e, "max_participants", None),
+            "max_teams": getattr(e, "max_teams", None),
             "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
             "registered_count": total_reg,
             "volunteers_registered": vol_reg,
@@ -610,6 +625,11 @@ async def get_upcoming_event_registrations(
         "event_date": event.event_date.isoformat() if event.event_date else None,
         "venue": event.venue,
         "status": event.status.value,
+        "activity_type": event_activity_type(event),
+        "min_team_size": getattr(event, "min_team_size", None),
+        "max_team_size": getattr(event, "max_team_size", None),
+        "max_participants": getattr(event, "max_participants", None),
+        "max_teams": getattr(event, "max_teams", None),
         "volunteers_required": getattr(event, "volunteers_required", 0) or 0,
         "total_participants": len(participants),
         "total_volunteers": len(volunteers),
@@ -703,6 +723,11 @@ async def list_club_completed_events(
             "event_date": e.event_date.isoformat() if e.event_date else None,
             "venue": e.venue or "—",
             "category": e.category or "—",
+            "activity_type": event_activity_type(e),
+            "min_team_size": getattr(e, "min_team_size", None),
+            "max_team_size": getattr(e, "max_team_size", None),
+            "max_participants": getattr(e, "max_participants", None),
+            "max_teams": getattr(e, "max_teams", None),
             "participant_count": e.participant_count,
             "cert_count": cert_count,
             "cert_generated": cert_count > 0,

@@ -362,22 +362,3 @@ async def send_department_password_otp_email(recipient_email: str, otp_code: str
     """Send department password-change OTP email."""
     return await send_password_change_otp_email(recipient_email, otp_code)
 
-
-async def send_event_team_email(
-    recipient_email: str,
-    subject: str,
-    body: str,
-    development_link: Optional[str] = None,
-) -> bool:
-    """Send a plain-text event-team notification."""
-    msg = MIMEMultipart()
-    msg["To"] = recipient_email
-    msg["From"] = f"{settings.email_sender_name} <{settings.email_sender}>"
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
-
-    provider = get_email_provider()
-    if development_link and settings.email_provider == "console" and settings.app_env == "development":
-        print(f"  Invitation link: {development_link}")
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, provider.send, msg)

@@ -81,6 +81,7 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const uploadPoster = useUploadPoster(clubId, eventId)
   const uploadReport = useUploadReport(clubId, eventId)
   const updateEvent = useUpdateEvent(clubId, eventId)
+  const addToast = useToastStore((s) => s.addToast)
   const [selectedReportFile, setSelectedReportFile] = useState(null)
   const [selectedPosterFile, setSelectedPosterFile] = useState(null)
 
@@ -95,8 +96,11 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
   const [editVenueOption, setEditVenueOption] = useState('')
   const [editCustomVenue, setEditCustomVenue] = useState('')
   const [editCategory, setEditCategory] = useState('')
+  const [editActivityType, setEditActivityType] = useState('individual')
   const [editMaxParticipants, setEditMaxParticipants] = useState('')
-  const [editTeamSize, setEditTeamSize] = useState('')
+  const [editMaxTeams, setEditMaxTeams] = useState('')
+  const [editMinTeamSize, setEditMinTeamSize] = useState('2')
+  const [editMaxTeamSize, setEditMaxTeamSize] = useState('4')
 
   const EDIT_SLOTS = {
     FN: ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
@@ -109,7 +113,8 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
     'E4 ECE Seminar Hall',
     'E5 CIVIL Seminar Hall',
     'E6 MECH Seminar Hall',
-    'E8 Seminar Hall',
+    'E8 Seminar Hall - 1',
+    'E8 Seminar Hall - 2',
     'iTech Square',
     'Convention Center',
     'Kalai Arangam',
@@ -139,14 +144,36 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
       setEditVenue('')
     }
     setEditCategory(event?.category || '')
+    const activityType = event?.activity_type
+      || ((event?.team_size || 1) > 1 ? 'group' : 'individual')
+    setEditActivityType(activityType)
     setEditMaxParticipants(event?.max_participants != null ? String(event.max_participants) : '')
-    setEditTeamSize(event?.team_size != null ? String(event.team_size) : '')
+    setEditMaxTeams(event?.max_teams != null ? String(event.max_teams) : '')
+    const legacyTeamSize = event?.team_size > 1 ? event.team_size : null
+    setEditMinTeamSize(String(legacyTeamSize ?? event?.min_team_size ?? 2))
+    setEditMaxTeamSize(String(legacyTeamSize ?? event?.max_team_size ?? 4))
     setIsEditing(true)
   }
 
   const handleSaveEdit = (e) => {
     e.preventDefault()
     if (!editName.trim()) return
+    const minTeamSize = Number(editMinTeamSize)
+    const maxTeamSize = Number(editMaxTeamSize)
+    if (
+      editActivityType === 'group'
+      && (!Number.isInteger(minTeamSize)
+        || !Number.isInteger(maxTeamSize)
+        || minTeamSize < 2
+        || maxTeamSize < minTeamSize
+        || maxTeamSize > 30)
+    ) {
+      addToast({
+        type: 'error',
+        message: 'Enter valid team sizes: minimum must be at least 2 and maximum must be between the minimum and 30.',
+      })
+      return
+    }
     const sessionLabel = editSession === 'FN' ? 'Morning (FN)' : 'Afternoon (AN)'
     const timeStr = editSlot ? `${sessionLabel} | ${editSlot}` : (editTime || sessionLabel)
     updateEvent.mutate(
@@ -158,8 +185,16 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
         category: editCategory,
         event_time: timeStr,
         venue: editVenue.trim(),
-        max_participants: editMaxParticipants ? parseInt(editMaxParticipants, 10) : null,
-        team_size: editTeamSize ? parseInt(editTeamSize, 10) : null,
+        activity_type: editActivityType,
+        max_participants: editActivityType === 'individual' && editMaxParticipants
+          ? parseInt(editMaxParticipants, 10)
+          : null,
+        max_teams: editActivityType === 'group' && editMaxTeams
+          ? parseInt(editMaxTeams, 10)
+          : null,
+        min_team_size: editActivityType === 'group' ? parseInt(editMinTeamSize, 10) : null,
+        max_team_size: editActivityType === 'group' ? parseInt(editMaxTeamSize, 10) : null,
+        team_size: null,
       },
       {
         onSuccess: () => setIsEditing(false),
@@ -360,31 +395,75 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 )}
               </div>
               <div>
-                <label className="form-label text-xs font-semibold">Max Participants (Optional)</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={editMaxParticipants}
-                  onChange={(e) => setEditMaxParticipants(e.target.value)}
-                  onWheel={(e) => e.target.blur()}
+                <label className="form-label text-xs font-semibold">Participation Format *</label>
+                <select
+                  value={editActivityType}
+                  onChange={(e) => setEditActivityType(e.target.value)}
                   className="form-input text-sm"
-                  placeholder="No limit"
-                />
-                <p className="text-xs text-gray-400 mt-1">Leave blank for no limit. Students will see &ldquo;Maximum participants reached&rdquo; when full.</p>
+                >
+                  <option value="individual">Individual Participation</option>
+                  <option value="group">Group / Team Activity</option>
+                </select>
               </div>
-              <div>
-                <label className="form-label text-xs font-semibold">Team Size (Optional)</label>
-                <input
-                  type="number"
-                  min="2"
-                  value={editTeamSize}
-                  onChange={(e) => setEditTeamSize(e.target.value)}
-                  onWheel={(e) => e.target.blur()}
-                  className="form-input text-sm"
-                  placeholder="Individual registration"
-                />
-                <p className="text-xs text-gray-400 mt-1">Leave blank for individual registration. Team size includes the inviting student.</p>
-              </div>
+              {editActivityType === 'individual' ? (
+                <div>
+                  <label className="form-label text-xs font-semibold">Max Participants (Optional)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editMaxParticipants}
+                    onChange={(e) => setEditMaxParticipants(e.target.value)}
+                    onWheel={(e) => e.target.blur()}
+                    className="form-input text-sm"
+                    step="1"
+                    placeholder="No limit"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">Leave blank for no limit.</p>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="form-label text-xs font-semibold">Max Teams (Optional)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={editMaxTeams}
+                      onChange={(e) => setEditMaxTeams(e.target.value)}
+                      onWheel={(e) => e.target.blur()}
+                      className="form-input text-sm"
+                      step="1"
+                      placeholder="No limit"
+                    />
+                    <p className="mt-1 text-xs text-gray-400">Pending and registered teams count toward this limit.</p>
+                  </div>
+                  <div>
+                    <label className="form-label text-xs font-semibold">Min Team Size *</label>
+                    <input
+                      type="number"
+                      min="2"
+                      max="20"
+                      value={editMinTeamSize}
+                      onChange={(e) => setEditMinTeamSize(e.target.value)}
+                      className="form-input text-sm"
+                      required
+                      step="1"
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label text-xs font-semibold">Max Team Size *</label>
+                    <input
+                      type="number"
+                      min="2"
+                      max="30"
+                      value={editMaxTeamSize}
+                      onChange={(e) => setEditMaxTeamSize(e.target.value)}
+                      className="form-input text-sm"
+                      required
+                      step="1"
+                    />
+                  </div>
+                </>
+              )}
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
               <button
@@ -416,8 +495,10 @@ function OverviewTab({ event, clubId, eventId, onNextStep }) {
                 ['Category', event?.category || '—'],
                 ['Academic Year', event?.academic_year || '—'],
                 ['Registration Status', event?.registration_stopped ? 'Stopped' : 'Open'],
-                ...((event?.team_size || 1) > 1
-                  ? [['Teams', (event?.teams_count ?? 0).toLocaleString()]]
+                ...(event?.activity_type === 'group' || (event?.team_size || 1) > 1
+                  ? [['Teams', event?.max_teams
+                    ? `${(event?.teams_count ?? 0).toLocaleString()} / ${event.max_teams.toLocaleString()}`
+                    : (event?.teams_count ?? 0).toLocaleString()]]
                   : []),
                 ['Participants', (event?.participant_count ?? 0).toLocaleString()],
                 ['Certificates Issued', (event?.cert_count ?? 0).toLocaleString()],

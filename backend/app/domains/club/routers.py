@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from ...core.dependencies import get_current_user, require_club_access, require_role
 from ...models.user import User, UserRole
 from ...models.club import Club
-from ...models.event import Event
+from ...models.event import Event, event_activity_type
 from ...models.certificate import Certificate, CertStatus
 from ...models.participant import Participant
 from ...schemas.club import ClubResponse
@@ -342,6 +342,11 @@ async def coordinator_events(
             "name": e.name,
             "status": e.status.value,
             "event_date": e.event_date,
+            "activity_type": event_activity_type(e),
+            "min_team_size": getattr(e, "min_team_size", None),
+            "max_team_size": getattr(e, "max_team_size", None),
+            "max_participants": getattr(e, "max_participants", None),
+            "max_teams": getattr(e, "max_teams", None),
         }
         for e in events
     ]
@@ -1000,4 +1005,3 @@ async def export_event_participants(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=participants_{event_id}.xlsx"}
     )
-

@@ -92,6 +92,23 @@ function TeamParticipants({ participants, compact = false, onRemovePending, remo
   )
 }
 
+function isTeamRegistrationEvent(event) {
+  return event?.activity_type === 'group' || (event?.team_size || 1) > 1
+}
+
+function isEventAtCapacity(event) {
+  if (event?.registration_stopped) return true
+  if (isTeamRegistrationEvent(event)) {
+    if (event.max_teams > 0) {
+      return (event.teams_reserved_count ?? event.teams_count ?? 0) >= event.max_teams
+    }
+    return event.max_participants > 0
+      && (event.participant_count || 0) >= event.max_participants
+  }
+  return event?.max_participants > 0
+    && (event.participant_count || 0) >= event.max_participants
+}
+
 // ── QR Camera Scanner ─────────────────────────────────────────────────────────
 function AttendanceScannerView({ event, onScanned, onCancel, onError }) {
   const videoRef = useRef(null)
@@ -803,6 +820,17 @@ export default function StudentDashboard() {
   const [teamStatusEventId, setTeamStatusEventId] = useState(null)
   const [teamCandidateSearch, setTeamCandidateSearch] = useState('')
   const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState(() => new Set())
+  const [selectedTeamSize, setSelectedTeamSize] = useState(2)
+  const teamRegistrationMinSize = teamRegistrationEvent
+    ? (teamRegistrationEvent.team_size > 1
+      ? teamRegistrationEvent.team_size
+      : Math.max(2, Number(teamRegistrationEvent.min_team_size) || 2))
+    : 2
+  const teamRegistrationMaxSize = teamRegistrationEvent
+    ? (teamRegistrationEvent.team_size > 1
+      ? teamRegistrationEvent.team_size
+      : Math.max(teamRegistrationMinSize, Number(teamRegistrationEvent.max_team_size) || 4))
+    : 2
   const { data: teamCandidates, isLoading: teamCandidatesLoading } = useEventTeamCandidates(
     teamRegistrationEvent?.id,
     teamCandidateSearch,
@@ -817,7 +845,8 @@ export default function StudentDashboard() {
   useEffect(() => {
     setSelectedTeamMemberIds(new Set())
     setTeamCandidateSearch('')
-  }, [teamRegistrationEvent?.id])
+    setSelectedTeamSize(teamRegistrationMinSize)
+  }, [teamRegistrationEvent?.id, teamRegistrationMinSize])
 
   const closeTeamInvitation = () => {
     const next = new URLSearchParams(searchParams)
@@ -1209,9 +1238,13 @@ export default function StudentDashboard() {
                   {sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''}
                 </span>
               </div>
-              {!isSociety && (ev.team_size || 1) > 1 && (
+              {!isSociety && isTeamRegistrationEvent(ev) && (
                 <div className="text-[11px] font-medium text-indigo-700">
-                  Team registration required: {ev.team_size} members, including you
+                  Team registration required: {
+                    ev.team_size > 1
+                      ? `${ev.team_size} members`
+                      : `${ev.min_team_size || 2}–${ev.max_team_size || 4} members`
+                  }, including you
                 </div>
               )}
               {ev.venue && (
@@ -1339,13 +1372,13 @@ export default function StudentDashboard() {
                 </button>
               )}
             </div>
-          ) : (ev.registration_stopped || (ev.max_participants != null && ev.participant_count >= ev.max_participants)) ? (
+          ) : isEventAtCapacity(ev) ? (
             <div className="w-full flex flex-col items-center justify-center p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 text-center space-y-1">
               <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-amber-700">
                 <span>⚠️</span> Max Capacity Reached
               </span>
               <p className="text-xs font-medium text-amber-800 leading-snug">
-                Max participants reached for this event.
+                This event has reached its registration limit.
               </p>
             </div>
           ) : (
@@ -1355,7 +1388,7 @@ export default function StudentDashboard() {
                 onClick={() => {
                   if (isSociety) {
                     handleRegisterSociety(ev.id, 'participant')
-                  } else if ((ev.team_size || 1) > 1) {
+                  } else if (isTeamRegistrationEvent(ev)) {
                     setTeamRegistrationTeamId(null)
                     setTeamRegistrationEvent(ev)
                   } else {
@@ -1367,7 +1400,7 @@ export default function StudentDashboard() {
               >
                 {registeringEventId === ev.id
                   ? 'Registering…'
-                  : !isSociety && (ev.team_size || 1) > 1
+                  : !isSociety && isTeamRegistrationEvent(ev)
                   ? 'Register as a Team'
                   : 'Register for Event'}
               </button>
@@ -2109,7 +2142,11 @@ export default function StudentDashboard() {
                   {teamRegistrationTeamId ? 'Invite Replacement Members' : 'Create Event Team'}
                 </h2>
                 <p className="mt-1 text-xs text-gray-500">
-                  {teamRegistrationEvent.name} · {teamRegistrationEvent.team_size} members total, including you
+                  {teamRegistrationEvent.name} · {
+                    teamRegistrationTeamId
+                      ? `${teamRegistrationEvent.team_registration_required_members || teamRegistrationEvent.team_size} members total`
+                      : `${selectedTeamSize} members total`
+                  }, including you
                 </p>
               </div>
               <button
@@ -2127,9 +2164,30 @@ export default function StudentDashboard() {
                 Search by registration number, name, or email. Invite exactly {
                   teamRegistrationTeamId
                     ? teamRegistrationEvent.team_registration_open_slots
-                    : teamRegistrationEvent.team_size - 1
+                    : selectedTeamSize - 1
                 } available students. The team registers only when every required member has accepted.
               </p>
+              {!teamRegistrationTeamId && teamRegistrationMinSize !== teamRegistrationMaxSize && (
+                <div className="max-w-xs">
+                  <label className="form-label" htmlFor="student-team-size">Team size, including you</label>
+                  <select
+                    id="student-team-size"
+                    className="form-input"
+                    value={selectedTeamSize}
+                    onChange={(e) => {
+                      setSelectedTeamSize(Number(e.target.value))
+                      setSelectedTeamMemberIds(new Set())
+                    }}
+                  >
+                    {Array.from(
+                      { length: teamRegistrationMaxSize - teamRegistrationMinSize + 1 },
+                      (_, index) => teamRegistrationMinSize + index,
+                    ).map((size) => (
+                      <option key={size} value={size}>{size} members</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <input
                 type="search"
                 value={teamCandidateSearch}
@@ -2149,7 +2207,7 @@ export default function StudentDashboard() {
                   const selected = selectedTeamMemberIds.has(candidate.id)
                   const invitationSlots = teamRegistrationTeamId
                     ? teamRegistrationEvent.team_registration_open_slots
-                    : teamRegistrationEvent.team_size - 1
+                    : selectedTeamSize - 1
                   const selectionFull = selectedTeamMemberIds.size >= invitationSlots
                   return (
                     <button
@@ -2199,7 +2257,7 @@ export default function StudentDashboard() {
                   Selected {selectedTeamMemberIds.size} of {
                     teamRegistrationTeamId
                       ? teamRegistrationEvent.team_registration_open_slots
-                      : teamRegistrationEvent.team_size - 1
+                      : selectedTeamSize - 1
                   } invitees
                 </span>
                 <div className="flex gap-2">
@@ -2216,7 +2274,7 @@ export default function StudentDashboard() {
                       selectedTeamMemberIds.size !== (
                         teamRegistrationTeamId
                           ? teamRegistrationEvent.team_registration_open_slots
-                          : teamRegistrationEvent.team_size - 1
+                          : selectedTeamSize - 1
                       )
                       || createTeamInvitations.isPending
                       || inviteReplacementTeamMembers.isPending

@@ -31,7 +31,6 @@ from .attendance_session import AttendanceSession
 from .professional_society import ProfessionalSociety, SocietyAssets
 from .society_event import SocietyEvent, SocietyEventStatus
 from .student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
-from .team_registration import TeamRegistration
 from ..certificate_config.model import CertificateTemplateConfig
 
 ALL_MODELS = [
@@ -71,7 +70,6 @@ ALL_MODELS = [
     ProfessionalSociety,
     SocietyEvent,
     StudentSocietyMembership,
-    TeamRegistration,
 ]
 
 __all__ = [
@@ -80,7 +78,6 @@ __all__ = [
     "User", "UserRole",
     "TokenBlacklist",
     "Event", "EventStatus", "EventAssets",
-    "TeamRegistration",
     "Template", "TemplateType", "FieldSlot", "StaticElement", "TemplateBackground",
     "Participant", "ParticipantSource",
     "Certificate", "CertStatus", "CertSnapshot",

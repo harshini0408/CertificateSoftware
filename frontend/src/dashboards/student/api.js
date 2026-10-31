@@ -355,8 +355,8 @@ export function useCreateEventTeamInvitations() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
       addToast({
-        type: data?.email_failures?.length ? 'error' : 'success',
-        message: data?.message || 'Team invitations sent.',
+        type: 'success',
+        message: data?.message || 'Team created. Invitees can respond in their Upcoming Events tab.',
       })
     },
     onError: (err) => {
@@ -384,8 +384,8 @@ export function useInviteReplacementEventTeamMembers() {
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
       qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
       addToast({
-        type: data?.email_failures?.length ? 'error' : 'success',
-        message: data?.message || 'Replacement invitations sent.',
+        type: 'success',
+        message: data?.message || 'Replacement invitations added.',
       })
     },
     onError: (err) => {

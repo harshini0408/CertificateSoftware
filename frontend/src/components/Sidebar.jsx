@@ -186,7 +186,6 @@ function useNavItems() {
         { to: '/student',                       icon: icons.certificate, label: 'My Certificates',         end: true },
         { to: '/student?tab=cert_verification', icon: icons.creditCard,  label: 'Certificate Verification', end: false },
         { to: '/student?tab=upcoming',          icon: icons.calendar,    label: 'Upcoming Events',         end: false },
-        { to: '/student?tab=teams',             icon: icons.users,       label: 'Team Hub & Invites',      end: false },
         { to: '/student?tab=settings',          icon: icons.settings,    label: 'Settings',                end: false },
       ]
 

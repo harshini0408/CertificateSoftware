@@ -12,7 +12,7 @@ from ..config import get_settings
 from ..core.dependencies import require_club_access, require_event_access
 from ..models.user import User
 from ..models.club import Club
-from ..models.event import Event, EventStatus, EventAssets
+from ..models.event import Event, EventStatus, EventAssets, event_activity_type
 from ..models.event_registration import EventRegistration
 from ..models.event_team import EventTeam
 from ..models.template import Template
@@ -106,7 +106,11 @@ def _event_response(
         status=e.status.value, template_map={k: str(v) if v else None for k, v in e.template_map.items()},
         assets=e.assets.model_dump(),
         mapping_confirmed=e.mapping_confirmed,
+        activity_type=event_activity_type(e),
+        min_team_size=getattr(e, "min_team_size", None),
+        max_team_size=getattr(e, "max_team_size", None),
         max_participants=getattr(e, "max_participants", None),
+        max_teams=getattr(e, "max_teams", None),
         team_size=getattr(e, "team_size", None),
         teams_count=teams_count,
         participant_count=e.participant_count,
@@ -183,6 +187,11 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
     club = await Club.get(club_id)
     if not club:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Club not found")
+    if body.activity_type == "group" and body.min_team_size and body.max_team_size and body.min_team_size > body.max_team_size:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Minimum team size cannot exceed maximum team size.",
+        )
     if body.team_size and body.max_participants and body.team_size > body.max_participants:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -226,7 +235,11 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
         academic_years=acad_years,
         template_map=tmap, assets=inherited_assets,
         volunteers_required=body.volunteers_required,
-        max_participants=body.max_participants,
+        max_participants=body.max_participants if body.activity_type == "individual" else None,
+        max_teams=body.max_teams if body.activity_type == "group" else None,
+        activity_type=body.activity_type,
+        min_team_size=body.min_team_size if body.activity_type == "group" else None,
+        max_team_size=body.max_team_size if body.activity_type == "group" else None,
         team_size=body.team_size,
         is_published=body.is_published,
         status=EventStatus.ACTIVE if body.is_published else EventStatus.DRAFT,
@@ -323,7 +336,7 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
     ).count()
     teams_count = (
         await EventTeam.find({"event_id": event.id, "status": "registered"}).count()
-        if (getattr(event, "team_size", None) or 1) > 1
+        if event_activity_type(event) == "group"
         else 0
     )
     return _event_response(
@@ -341,6 +354,13 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
     if not event or event.club_id != club_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
     updates = body.model_dump(exclude_unset=True)
+    resulting_min_team_size = updates.get("min_team_size", getattr(event, "min_team_size", None))
+    resulting_max_team_size = updates.get("max_team_size", getattr(event, "max_team_size", None))
+    if resulting_min_team_size and resulting_max_team_size and resulting_min_team_size > resulting_max_team_size:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Minimum team size cannot exceed maximum team size.",
+        )
     resulting_team_size = updates.get("team_size", getattr(event, "team_size", None))
     resulting_max_participants = updates.get("max_participants", getattr(event, "max_participants", None))
     if resulting_team_size and resulting_max_participants and resulting_team_size > resulting_max_participants:
@@ -348,21 +368,33 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Team size cannot exceed the event's maximum participant count.",
         )
-    if "team_size" in updates and updates["team_size"] != getattr(event, "team_size", None):
+    current_activity_type = event_activity_type(event)
+    resulting_activity_type = updates.get("activity_type", current_activity_type)
+    team_size_changed = (
+        "team_size" in updates
+        and updates["team_size"] != getattr(event, "team_size", None)
+    )
+    leaving_team_registration = (
+        current_activity_type == "group" and resulting_activity_type != "group"
+    )
+    assigning_fixed_team_size = (
+        team_size_changed and updates.get("team_size") is not None
+    )
+    if leaving_team_registration or assigning_fixed_team_size:
         from ..models.event_team import EventTeam
 
-        pending_teams = await EventTeam.find({
+        active_teams = await EventTeam.find({
             "event_id": event.id,
-            "status": "pending",
+            "status": {"$in": ["pending", "registering", "registered"]},
         }).count()
         registered_teams = await EventRegistration.find({
             "event_id": event.id,
             "team_id": {"$ne": None},
         }).count()
-        if pending_teams or registered_teams:
+        if active_teams or registered_teams:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "Team size cannot be changed after team invitations or team registrations exist.",
+                "Team registration cannot be disabled or fixed team size assigned after team invitations or registrations exist.",
             )
     if "template_map" in updates and updates["template_map"]:
         updates["template_map"] = {k: v for k, v in updates["template_map"].items()}

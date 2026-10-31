@@ -68,6 +68,7 @@ class Event(Document):
     assets: EventAssets = Field(default_factory=EventAssets)
     mapping_confirmed: bool = False
     max_participants: Optional[int] = None
+    max_teams: Optional[int] = None
     team_size: Optional[int] = None
     participant_count: int = 0
     volunteers_required: int = 0
@@ -79,3 +80,22 @@ class Event(Document):
 
     class Settings:
         name = "events"
+
+
+def event_activity_type(event: Event) -> Literal["individual", "group"]:
+    activity_type = " ".join(
+        str(getattr(event, "activity_type", "") or "")
+        .strip()
+        .lower()
+        .replace("/", " ")
+        .replace("_", " ")
+        .replace("-", " ")
+        .split()
+    )
+    if activity_type in {"group", "team", "team activity", "group team", "group team activity"}:
+        return "group"
+    if getattr(event, "max_teams", None) is not None:
+        return "group"
+    if (getattr(event, "team_size", None) or 1) > 1:
+        return "group"
+    return "individual"

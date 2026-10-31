@@ -15,12 +15,13 @@ class EventCreate(BaseModel):
     category: Optional[str] = None
     academic_year: Optional[str] = None
     academic_years: List[str] = Field(default_factory=list)
-    max_participants: Optional[int] = None
+    max_participants: Optional[int] = Field(None, ge=0)
+    max_teams: Optional[int] = Field(None, ge=0)
     team_size: Optional[int] = Field(None, ge=2)
     volunteers_required: int = 0
-    activity_type: str = "individual"
-    min_team_size: Optional[int] = 2
-    max_team_size: Optional[int] = 4
+    activity_type: Literal["individual", "group"] = "individual"
+    min_team_size: Optional[int] = Field(2, ge=2)
+    max_team_size: Optional[int] = Field(4, ge=2)
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
     is_published: bool = False
 
@@ -36,12 +37,13 @@ class EventUpdate(BaseModel):
     category: Optional[str] = None
     academic_year: Optional[str] = None
     academic_years: Optional[List[str]] = None
-    max_participants: Optional[int] = None
+    max_participants: Optional[int] = Field(None, ge=0)
+    max_teams: Optional[int] = Field(None, ge=0)
     team_size: Optional[int] = Field(None, ge=2)
     volunteers_required: Optional[int] = None
-    activity_type: Optional[str] = None
-    min_team_size: Optional[int] = None
-    max_team_size: Optional[int] = None
+    activity_type: Optional[Literal["individual", "group"]] = None
+    min_team_size: Optional[int] = Field(None, ge=2)
+    max_team_size: Optional[int] = Field(None, ge=2)
     qr_generations_count: Optional[int] = None
     registration_stopped: Optional[bool] = None
     status: Optional[str] = None
@@ -71,6 +73,7 @@ class EventResponse(BaseModel):
     assets: dict = Field(default_factory=dict)
     mapping_confirmed: bool = False
     max_participants: Optional[int] = None
+    max_teams: Optional[int] = None
     team_size: Optional[int] = None
     teams_count: int = 0
     participant_count: int = 0

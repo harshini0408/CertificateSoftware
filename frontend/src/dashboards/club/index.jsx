@@ -59,7 +59,8 @@ export const VENUE_OPTIONS = [
   'E4 ECE Seminar Hall',
   'E5 CIVIL Seminar Hall',
   'E6 MECH Seminar Hall',
-  'E8 Seminar Hall',
+  'E8 Seminar Hall - 1',
+  'E8 Seminar Hall - 2',
   'iTech Square',
   'Convention Center',
   'Kalai Arangam',
@@ -188,6 +189,8 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       timing: '',
       venue: '',
       activity_type: 'individual',
+      max_participants: null,
+      max_teams: null,
       min_team_size: 2,
       max_team_size: 4,
     },
@@ -243,6 +246,11 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
     const payload = {
       ...data,
+      max_participants: data.activity_type === 'individual' ? data.max_participants : null,
+      max_teams: data.activity_type === 'group' ? data.max_teams : null,
+      team_size: null,
+      min_team_size: data.activity_type === 'group' ? data.min_team_size : null,
+      max_team_size: data.activity_type === 'group' ? data.max_team_size : null,
       session: sessionCode,
       slot: data.slot,
       event_time: data.timing ? `${eventTimeStr} (${data.timing})` : eventTimeStr,
@@ -531,22 +539,6 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   </select>
                 </div>
                 <div>
-                  <label className="form-label" htmlFor="dash-max-participants">Max Participants (Optional)</label>
-                  <input
-                    id="dash-max-participants"
-                    type="number"
-                    min="0"
-                    className={`form-input ${errors.max_participants ? "form-input-error" : ""}`}
-                    placeholder="No limit"
-                    onWheel={(e) => e.target.blur()}
-                    {...register("max_participants", {
-                      setValueAs: v => (v === "" || isNaN(v)) ? null : parseInt(v, 10),
-                      min: { value: 0, message: "Cannot be negative" }
-                    })}
-                  />
-                  {errors.max_participants && <p className="form-error">{errors.max_participants.message}</p>}
-                </div>
-                <div>
                   <label className="form-label" htmlFor="dash-volunteers-required">Volunteers Required</label>
                   <input
                     id="dash-volunteers-required"
@@ -561,23 +553,6 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                     })}
                   />
                   {errors.volunteers_required && <p className="form-error">{errors.volunteers_required.message}</p>}
-                </div>
-                <div>
-                  <label className="form-label" htmlFor="dash-team-size">Team Size (Optional)</label>
-                  <input
-                    id="dash-team-size"
-                    type="number"
-                    min="2"
-                    className={`form-input ${errors.team_size ? 'form-input-error' : ''}`}
-                    placeholder="Leave blank for individual registration"
-                    onWheel={(e) => e.target.blur()}
-                    {...register('team_size', {
-                      setValueAs: (value) => value === '' ? null : parseInt(value, 10),
-                      min: { value: 2, message: 'Team size must be at least 2 students' },
-                    })}
-                  />
-                  {errors.team_size && <p className="form-error">{errors.team_size.message}</p>}
-                  <p className="mt-1 text-xs text-gray-500">Includes the student creating the team.</p>
                 </div>
               </div>
 
@@ -598,8 +573,41 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                   </select>
                 </div>
 
-                {watch('activity_type') === 'group' && (
-                  <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-gray-200 animate-in fade-in duration-150">
+                {watch('activity_type') === 'individual' ? (
+                  <div className="max-w-sm pt-2.5 border-t border-gray-200 animate-in fade-in duration-150">
+                    <label className="form-label" htmlFor="dash-max-participants">Max Participants (Optional)</label>
+                    <input
+                      id="dash-max-participants"
+                      type="number"
+                      min="0"
+                      className={`form-input ${errors.max_participants ? 'form-input-error' : ''}`}
+                      placeholder="No limit"
+                      onWheel={(e) => e.target.blur()}
+                      {...register('max_participants', {
+                        setValueAs: (value) => value === '' || Number.isNaN(Number(value)) ? null : parseInt(value, 10),
+                        min: { value: 0, message: 'Cannot be negative' },
+                      })}
+                    />
+                    {errors.max_participants && <p className="form-error">{errors.max_participants.message}</p>}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2.5 border-t border-gray-200 animate-in fade-in duration-150">
+                    <div>
+                      <label className="form-label" htmlFor="dash-max-teams">Max Teams (Optional)</label>
+                      <input
+                        id="dash-max-teams"
+                        type="number"
+                        min="0"
+                        className={`form-input text-xs ${errors.max_teams ? 'form-input-error' : ''}`}
+                        placeholder="No limit"
+                        onWheel={(e) => e.target.blur()}
+                        {...register('max_teams', {
+                          setValueAs: (value) => value === '' || Number.isNaN(Number(value)) ? null : parseInt(value, 10),
+                          min: { value: 0, message: 'Cannot be negative' },
+                        })}
+                      />
+                      {errors.max_teams && <p className="form-error">{errors.max_teams.message}</p>}
+                    </div>
                     <div>
                       <label className="form-label" htmlFor="dash-min-team-size">Min Team Size *</label>
                       <input
@@ -607,11 +615,13 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                         type="number"
                         min="2"
                         max="20"
-                        className="form-input text-xs"
+                        className={`form-input text-xs ${errors.min_team_size ? 'form-input-error' : ''}`}
                         placeholder="2"
                         {...register('min_team_size', {
                           valueAsNumber: true,
                           min: { value: 2, message: 'Minimum team size is 2' },
+                          max: { value: 20, message: 'Maximum allowed minimum team size is 20' },
+                          validate: (value) => value <= (watch('max_team_size') || 30) || 'Minimum team size cannot exceed maximum team size',
                         })}
                       />
                       {errors.min_team_size && <p className="form-error">{errors.min_team_size.message}</p>}
@@ -623,11 +633,13 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                         type="number"
                         min="2"
                         max="30"
-                        className="form-input text-xs"
+                        className={`form-input text-xs ${errors.max_team_size ? 'form-input-error' : ''}`}
                         placeholder="4"
                         {...register('max_team_size', {
                           valueAsNumber: true,
                           min: { value: 2, message: 'Minimum is 2' },
+                          max: { value: 30, message: 'Maximum team size is 30' },
+                          validate: (value) => value >= (watch('min_team_size') || 2) || 'Maximum team size cannot be less than minimum team size',
                         })}
                       />
                       {errors.max_team_size && <p className="form-error">{errors.max_team_size.message}</p>}

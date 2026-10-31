@@ -24,7 +24,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 5174,
+      port: 2848,
+      strictPort: true,
       proxy: {
         ...Object.fromEntries(
           [
