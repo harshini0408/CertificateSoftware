@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import httpx
 from app.main import app
 from app.config import get_settings
@@ -12,12 +13,54 @@ from beanie import PydanticObjectId
 
 settings = get_settings()
 
-async def run_verification():
+async def cleanup_test_records():
+    society_slug = "TESTIEEE"
+    expected_society_name = "IEEE Computer Society Test"
+    society = await ProfessionalSociety.find_one(ProfessionalSociety.slug == society_slug)
+    if society and society.name != expected_society_name:
+        raise RuntimeError(
+            f"Refusing to clean society {society_slug!r}: its name does not match the test fixture"
+        )
+
+    if society:
+        for event in await SocietyEvent.find(SocietyEvent.society_id == society.id).to_list():
+            await event.delete()
+        for membership in await StudentSocietyMembership.find(
+            StudentSocietyMembership.society_id == society.id
+        ).to_list():
+            await membership.delete()
+        for coordinator in await User.find(
+            User.society_id == society.id,
+            User.role == UserRole.PROFESSIONAL_SOCIETY_COORDINATOR,
+        ).to_list():
+            await coordinator.delete()
+        await society.delete()
+
+    verification_event_date = datetime(2026, 11, 15, 9, 30)
+    for event in await SocietyEvent.find(
+        SocietyEvent.name == "Hands-on Workshop on Robotics"
+    ).to_list():
+        event_society = await ProfessionalSociety.get(event.society_id)
+        if (
+            event_society is None
+            and event.event_date
+            and event.event_date.replace(tzinfo=None) == verification_event_date
+            and event.event_time == "09:30 AM"
+        ):
+            await event.delete()
+
+    temp_principal = await User.find_one({
+        "username": "temp_princ_verify",
+        "email": "princ.verify@psgitech.ac.in",
+    })
+    if temp_principal:
+        await temp_principal.delete()
+
+
+async def _run_verification():
     print("=" * 60)
     print("STARTING IN-PROCESS ASGITransport VERIFICATION")
     print("=" * 60)
-
-    await connect_db()
 
     # 1. Ensure Superadmin
     admin_user = await User.find_one(User.role == UserRole.SUPER_ADMIN)
@@ -34,11 +77,6 @@ async def run_verification():
         print("\n--- Testing Superadmin Professional Societies Endpoints ---")
         society_slug = "TESTIEEE"
         
-        # Clean up existing test society if present
-        existing_soc = await ProfessionalSociety.find_one(ProfessionalSociety.slug == society_slug)
-        if existing_soc:
-            await client.delete(f"/admin/professional-societies/{str(existing_soc.id)}", cookies=admin_cookies)
-
         # Create Society
         resp = await client.post(
             "/admin/professional-societies",
@@ -356,10 +394,22 @@ async def run_verification():
         assert deleted_coord is None, "Coordinator user should be deleted by cascade"
         print("[PASS] Cascade deletion of society and coordinator verified cleanly")
 
-    await disconnect_db()
     print("\n" + "=" * 60)
     print("ALL API ENDPOINTS & FLOWS VERIFIED SUCCESSFULLY WITH ZERO ERRORS!")
     print("=" * 60)
+
+
+async def run_verification():
+    await connect_db()
+    try:
+        await cleanup_test_records()
+        await _run_verification()
+    finally:
+        try:
+            await cleanup_test_records()
+        finally:
+            await disconnect_db()
+
 
 if __name__ == "__main__":
     asyncio.run(run_verification())
