@@ -36,16 +36,24 @@ const useAuthStore = create(
        *            event_id?: string, department?: string, requires_password_change?: boolean }} payload
        */
       setAuth: (payload) =>
-        set({
-          user: payload.name ?? payload.user,
-          role: payload.role,
-          club_id: payload.club_id ?? null,
-          society_id: payload.society_id ?? null,
-          event_id: payload.event_id ?? null,
-          department: payload.department ?? null,
-          requires_profile_setup: payload.requires_profile_setup ?? false,
-          requires_password_change: payload.requires_password_change ?? false,
-          isAuthenticated: true,
+        set((state) => {
+          const resolvedSocietyId =
+            payload.society_id ??
+            (payload.role === 'professional_society_coordinator' ? (payload.club_id ?? null) : null) ??
+            state.society_id ??
+            null
+
+          return {
+            user: payload.name ?? payload.user,
+            role: payload.role,
+            club_id: payload.club_id ?? null,
+            society_id: resolvedSocietyId,
+            event_id: payload.event_id ?? null,
+            department: payload.department ?? null,
+            requires_profile_setup: payload.requires_profile_setup ?? false,
+            requires_password_change: payload.requires_password_change ?? false,
+            isAuthenticated: true,
+          }
         }),
 
       /** Called on logout or when the refresh token is exhausted. */

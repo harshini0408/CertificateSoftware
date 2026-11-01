@@ -40,8 +40,8 @@ import { BACKEND_URL } from '../../utils/axiosInstance'
 const TABS = ['events', 'active_members', 'members', 'office_bearers', 'settings']
 
 export const SESSION_SLOTS = {
-  'Morning (FN)': ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM'],
-  'Afternoon (AN)': ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM'],
+  'Morning (FN)': ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM', 'Other'],
+  'Afternoon (AN)': ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM', 'Other'],
 }
 
 export const EVENT_CATEGORIES = [
@@ -181,6 +181,8 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
   const [posterError, setPosterError] = useState('')
   const [selectedVenueOption, setSelectedVenueOption] = useState('')
   const [customVenue, setCustomVenue] = useState('')
+  const [selectedSlotOption, setSelectedSlotOption] = useState('8:45 AM - 10:15 AM')
+  const [customSlot, setCustomSlot] = useState('')
 
   const { register, handleSubmit, reset, watch, setValue, formState: { isSubmitting, errors } } = useForm({
     defaultValues: {
@@ -201,11 +203,15 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
   const availableSlots = SESSION_SLOTS[selectedSessionType] || SESSION_SLOTS['Morning (FN)']
 
   useEffect(() => {
-    const currentSlot = watch('slot')
-    if (!availableSlots.includes(currentSlot)) {
-      setValue('slot', availableSlots[0] || '')
+    if (selectedSlotOption !== 'Other') {
+      const validSlots = availableSlots.filter((s) => s !== 'Other')
+      if (!validSlots.includes(selectedSlotOption)) {
+        const next = validSlots[0] || '8:45 AM - 10:15 AM'
+        setSelectedSlotOption(next)
+        setValue('slot', next)
+      }
     }
-  }, [selectedSessionType, setValue, watch, availableSlots])
+  }, [selectedSessionType, availableSlots, selectedSlotOption, setValue])
 
   const handleAcadYearToggle = (year) => {
     setSelectedAcademicYears((prev) => {
@@ -243,7 +249,8 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
     }
 
     const sessionCode = data.session_type?.includes('AN') ? 'AN' : 'FN'
-    const eventTimeStr = data.slot ? `${data.session_type} | ${data.slot}` : data.session_type
+    const finalSlot = selectedSlotOption === 'Other' ? customSlot.trim() : (data.slot || selectedSlotOption)
+    const eventTimeStr = finalSlot ? `${data.session_type} | ${finalSlot}` : data.session_type
 
     const payload = {
       ...data,
@@ -259,8 +266,8 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       min_team_size: data.activity_type === 'group' ? (data.min_team_size != null && !Number.isNaN(Number(data.min_team_size)) && data.min_team_size !== '' ? Math.max(2, parseInt(data.min_team_size, 10)) : 2) : null,
       max_team_size: data.activity_type === 'group' ? (data.max_team_size != null && !Number.isNaN(Number(data.max_team_size)) && data.max_team_size !== '' ? Math.max(2, parseInt(data.max_team_size, 10)) : 4) : null,
       session: sessionCode,
-      slot: data.slot,
-      event_time: data.timing ? `${eventTimeStr} (${data.timing})` : eventTimeStr,
+      slot: finalSlot,
+      event_time: eventTimeStr,
       academic_years: selectedAcademicYears,
       academic_year: selectedAcademicYears.join(', '),
     }
@@ -282,6 +289,8 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
         }
         setIsModalOpen(false)
         reset()
+        setSelectedSlotOption('8:45 AM - 10:15 AM')
+        setCustomSlot('')
         setSelectedVenueOption('')
         setCustomVenue('')
         setSelectedAcademicYears([])
@@ -334,9 +343,9 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
           >
             {v}
           </button>
-          {row.activity_type === 'group' && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
-              👥 Group ({row.min_team_size || 2}-{row.max_team_size || 4})
+          {row.is_team_event && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
+              👥 Team ({row.min_team_size || 2}-{row.max_team_size || 4})
             </span>
           )}
         </div>
@@ -344,7 +353,32 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
     },
     { key: 'event_date', header: 'Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'status', header: 'Status', render: (v) => <StatusBadge status={v} /> },
-    { key: 'participant_count', header: 'Participants', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
+    {
+      key: 'participant_count',
+      header: 'Participants / Teams',
+      align: 'right',
+      render: (v, row) => (
+        <span className="font-medium">
+          {row.is_team_event ? (
+            <>
+              {(row.team_count ?? 0).toLocaleString()}
+              {row.max_teams ? (
+                <span className="text-gray-400 font-normal"> / {row.max_teams} teams</span>
+              ) : (
+                <span className="text-gray-400 font-normal"> teams</span>
+              )}
+            </>
+          ) : (
+            <>
+              {(v ?? 0).toLocaleString()}
+              {row.max_participants ? (
+                <span className="text-gray-400 font-normal"> / {row.max_participants}</span>
+              ) : null}
+            </>
+          )}
+        </span>
+      ),
+    },
     { key: 'cert_count', header: 'Certs Issued', align: 'right', render: (v) => (v ?? 0).toLocaleString() },
     { key: '_actions', header: 'Actions', align: 'center', searchKey: false, render: (_, row) => (
       <div className="flex justify-center gap-2">
@@ -476,18 +510,43 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="form-label" htmlFor="dash-event-slot">Event Slot *</label>
+                  <label className="form-label" htmlFor="dash-event-slot">Event Slot / Timing *</label>
                   <select
                     id="dash-event-slot"
-                    className={`form-input ${errors.slot ? 'form-input-error' : ''}`}
-                    {...register('slot', { required: 'Event slot is required' })}
+                    className="form-input"
+                    value={selectedSlotOption}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setSelectedSlotOption(val)
+                      if (val !== 'Other') {
+                        setValue('slot', val, { shouldValidate: true })
+                        setCustomSlot('')
+                      } else {
+                        setValue('slot', customSlot.trim(), { shouldValidate: true })
+                      }
+                    }}
                   >
                     {availableSlots.map((s) => (
                       <option key={s} value={s}>
-                        {s}
+                        {s === 'Other' ? 'Others (Custom Timing)' : s}
                       </option>
                     ))}
                   </select>
+                  {selectedSlotOption === 'Other' && (
+                    <input
+                      type="text"
+                      className="form-input text-xs mt-2"
+                      placeholder="Enter custom timing (e.g. 9:00 AM - 1:00 PM)"
+                      value={customSlot}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setCustomSlot(val)
+                        setValue('slot', val.trim(), { shouldValidate: true })
+                      }}
+                      required
+                      autoFocus
+                    />
+                  )}
                   {errors.slot && <p className="form-error">{errors.slot.message}</p>}
                 </div>
                 <div>
@@ -552,7 +611,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                     type="number"
                     min="0"
                     className={`form-input ${errors.volunteers_required ? 'form-input-error' : ''}`}
-                    placeholder="0"
+                    placeholder="0 (no volunteers needed)"
                     onWheel={(e) => e.target.blur()}
                     {...register('volunteers_required', {
                       setValueAs: (value) =>

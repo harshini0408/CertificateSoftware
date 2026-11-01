@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import Navbar from '../../components/Navbar'
 import Sidebar from '../../components/Sidebar'
 import FacultyCertificateGenerator from './FacultyCertificateGenerator'
-import { EventHistoryContent } from '../guest/GuestHistory'
+import { FacultyEventHistoryContent } from './FacultyHistory'
 
 export default function FacultyDashboard() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -61,9 +61,7 @@ export default function FacultyDashboard() {
             {activeTab === 'generate' ? (
               <FacultyCertificateGenerator forceNew={forceNew} onViewHistory={() => handleTabChange('history')} />
             ) : (
-              <EventHistoryContent
-                title="Faculty Event History"
-                description="View past certificate generation events, edit event names, download ZIP packages, or send emails."
+              <FacultyEventHistoryContent
                 onNewSession={() => navigate('/faculty?tab=generate&new=1')}
               />
             )}

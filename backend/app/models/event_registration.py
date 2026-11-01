@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 from beanie import Document, Indexed, PydanticObjectId
 from pydantic import Field
@@ -7,6 +7,7 @@ from pydantic import Field
 
 class EventRegistration(Document):
     event_id: Indexed(PydanticObjectId)  # type: ignore[valid-type]
+    event: Optional[str] = None  # Name of the event
     student_id: Indexed(PydanticObjectId)  # type: ignore[valid-type]
     student_name: str
     student_email: Indexed(str)  # type: ignore[valid-type]
@@ -16,8 +17,10 @@ class EventRegistration(Document):
     session: str  # "FN" or "AN"
     slot: Optional[str] = None  # Specific slot e.g. "8:45 AM - 10:15 AM"
     registration_type: str = "participant"
-    team_id: Optional[PydanticObjectId] = None
     status: str = "accepted"  # "accepted", "pending", "rejected"
+    team_id: Optional[Union[PydanticObjectId, str]] = None
+    team_name: Optional[str] = None
+    team_role: Optional[str] = None  # "leader" or "member"
     registered_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:

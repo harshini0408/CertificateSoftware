@@ -361,4 +361,3 @@ async def send_password_change_otp_email(recipient_email: str, otp_code: str) ->
 async def send_department_password_otp_email(recipient_email: str, otp_code: str) -> bool:
     """Send department password-change OTP email."""
     return await send_password_change_otp_email(recipient_email, otp_code)
-

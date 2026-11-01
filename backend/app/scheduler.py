@@ -10,7 +10,7 @@ Jobs:
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -19,6 +19,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from .models.email_log import EmailLog, EmailStatus
 from .models.certificate import Certificate, CertStatus
 from .models.guest_session import GuestSession
+from .models.faculty_session import FacultySession
 from .services.email_service import (
     send_certificate_email,
     get_daily_sent_count,
@@ -187,9 +188,10 @@ async def _cleanup_expired_guest_sessions() -> None:
     from pathlib import Path as _Path
 
     now = datetime.utcnow()
-    expired = await GuestSession.find(
-        GuestSession.expires_at <= now,
-    ).to_list()
+    expired = (
+        await GuestSession.find(GuestSession.expires_at <= now).to_list()
+        + await FacultySession.find(FacultySession.expires_at <= now).to_list()
+    )
 
     logger.info("[SCHEDULER] cleanup_expired_guest_sessions: found %d expired session(s)", len(expired))
 

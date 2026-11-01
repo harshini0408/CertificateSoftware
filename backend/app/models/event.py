@@ -37,8 +37,6 @@ class Event(Document):
 
     # Activity and team configuration
     activity_type: str = "individual"  # "individual" or "group"
-    min_team_size: Optional[int] = 2
-    max_team_size: Optional[int] = 4
 
     # Upcoming event publishing
     poster_path: Optional[str] = None
@@ -68,10 +66,14 @@ class Event(Document):
     assets: EventAssets = Field(default_factory=EventAssets)
     mapping_confirmed: bool = False
     max_participants: Optional[int] = None
-    max_teams: Optional[int] = None
     team_size: Optional[int] = None
     participant_count: int = 0
     volunteers_required: int = 0
+    is_team_event: bool = False
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
+    max_teams: Optional[int] = None
+    team_count: int = 0
     qr_generations_count: int = 0
     registration_stopped: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -95,6 +97,8 @@ def event_activity_type(event: Event) -> Literal["individual", "group"]:
     if activity_type in {"group", "team", "team activity", "group team", "group team activity"}:
         return "group"
     if getattr(event, "max_teams", None) is not None:
+        return "group"
+    if getattr(event, "is_team_event", False):
         return "group"
     if (getattr(event, "team_size", None) or 1) > 1:
         return "group"

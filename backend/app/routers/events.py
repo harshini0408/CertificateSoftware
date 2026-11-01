@@ -1,5 +1,4 @@
 import hashlib
-from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -93,6 +92,7 @@ def _event_response(
     cert_count: int = 0,
     volunteers_registered: int = 0,
     teams_count: int = 0,
+    team_count: int = 0,
 ) -> EventResponse:
     return EventResponse(
         id=str(e.id), club_id=str(e.club_id), name=e.name,
@@ -116,6 +116,8 @@ def _event_response(
         participant_count=e.participant_count,
         volunteers_required=getattr(e, "volunteers_required", 0) or 0,
         volunteers_registered=volunteers_registered,
+        is_team_event=event_activity_type(e) == "group",
+        team_count=team_count or teams_count or getattr(e, "team_count", 0) or 0,
         cert_count=cert_count,
         qr_generations_count=getattr(e, "qr_generations_count", 0) or 0,
         registration_stopped=getattr(e, "registration_stopped", False) or False,
@@ -155,15 +157,27 @@ async def list_events(club_id: PydanticObjectId, _user: User = Depends(require_c
     for team in registered_teams:
         event_key = str(team.event_id)
         teams_count_by_event[event_key] = teams_count_by_event.get(event_key, 0) + 1
+    participant_regs = await EventRegistration.find(
+        {"event_id": {"$in": event_ids}, "registration_type": {"$ne": "volunteer"}}
+    ).to_list() if event_ids else []
+    reg_count_by_event: dict[str, int] = {}
+    team_count_by_event: dict[str, int] = {}
+    for pr in participant_regs:
+        pid = str(pr.event_id)
+        reg_count_by_event[pid] = reg_count_by_event.get(pid, 0) + 1
+        if getattr(pr, "team_id", None) and getattr(pr, "team_role", None) == "leader":
+            team_count_by_event[pid] = team_count_by_event.get(pid, 0) + 1
 
     responses = []
     issued_candidates = set(_issued_status_candidates())
     for e in events:
         event_certs = certs_by_event.get(str(e.id), [])
-        actual_count = await Participant.find(Participant.event_id == e.id).count()
+        portal_reg_count = reg_count_by_event.get(str(e.id), 0)
+        uploaded_part_count = await Participant.find(Participant.event_id == e.id).count()
+        actual_count = max(portal_reg_count, uploaded_part_count)
         if actual_count != e.participant_count:
             await e.set({"participant_count": actual_count})
-            e = await Event.get(e.id)
+            e.participant_count = actual_count
         cert_count = sum(
             1
             for cert in event_certs
@@ -238,6 +252,7 @@ async def create_event(club_id: PydanticObjectId, body: EventCreate, _user: User
         max_participants=body.max_participants if body.activity_type == "individual" else None,
         max_teams=body.max_teams if body.activity_type == "group" else None,
         activity_type=body.activity_type,
+        is_team_event=body.activity_type == "group",
         min_team_size=body.min_team_size if body.activity_type == "group" else None,
         max_team_size=body.max_team_size if body.activity_type == "group" else None,
         team_size=body.team_size,
@@ -309,8 +324,12 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         ):
             await club.set({"assets": normalized_assets.model_dump()})
 
-    # Sync participant count on read
-    actual_count = await Participant.find(Participant.event_id == event_id).count()
+    # Sync participant count on read with actual EventRegistration & Participant records
+    portal_reg_count = await EventRegistration.find(
+        {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+    ).count()
+    uploaded_part_count = await Participant.find(Participant.event_id == event_id).count()
+    actual_count = max(portal_reg_count, uploaded_part_count)
     # Sync mapping_confirmed based on any confirmed field-position record
     mapping_confirmed = (
         await FieldPosition.find(
@@ -321,8 +340,10 @@ async def get_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
 
     if actual_count != event.participant_count:
         updates["participant_count"] = actual_count
+        event.participant_count = actual_count
     if mapping_confirmed != event.mapping_confirmed:
         updates["mapping_confirmed"] = mapping_confirmed
+        event.mapping_confirmed = mapping_confirmed
 
     if updates:
         await event.set(updates)
@@ -396,12 +417,16 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
                 status.HTTP_409_CONFLICT,
                 "Team registration cannot be disabled or fixed team size assigned after team invitations or registrations exist.",
             )
+    if "activity_type" in updates and updates["activity_type"] is not None:
+        updates["is_team_event"] = updates["activity_type"] == "group"
     if "template_map" in updates and updates["template_map"]:
         updates["template_map"] = {k: v for k, v in updates["template_map"].items()}
     if "is_published" in updates and "status" not in updates:
         updates["status"] = EventStatus.ACTIVE if updates["is_published"] else EventStatus.DRAFT
     if "status" in updates:
         updates["status"] = EventStatus(updates["status"])
+    if "is_published" in updates and "status" not in updates:
+        updates["status"] = EventStatus.ACTIVE if updates["is_published"] else EventStatus.DRAFT
     if updates:
         await event.set(updates)
         event = await Event.get(event_id)
@@ -411,7 +436,16 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         EventRegistration.registration_type == "volunteer",
         {"$or": [{"status": "accepted"}, {"status": "pending"}]},
     ).count()
-    return _event_response(event, cert_count=cert_count, volunteers_registered=vol_reg)
+    team_count = await EventRegistration.find(
+        EventRegistration.event_id == event.id,
+        EventRegistration.team_role == "leader",
+    ).count()
+    teams_count = (
+        await EventTeam.find({"event_id": event.id, "status": "registered"}).count()
+        if event_activity_type(event) == "group"
+        else 0
+    )
+    return _event_response(event, cert_count=cert_count, volunteers_registered=vol_reg, teams_count=teams_count, team_count=team_count)
 
 
 @router.delete("/{event_id}")

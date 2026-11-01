@@ -25,42 +25,19 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 2848,
-      strictPort: true,
       proxy: {
-        ...Object.fromEntries(
-          [
-            '/api',
-            '/auth',
-            '/admin',
-            '/clubs',
-            '/coordinator',
-            '/events',
-            '/participants',
-            '/templates',
-            '/certificates',
-            '/verify',
-            '/student',
-            '/students',
-            '/tutor',
-            '/dept',
-            '/principal',
-            '/hod',
-            '/image-templates',
-            '/guest',
-            '/role-presets',
-            '/affairs',
-            '/certificate-config',
-            '/storage',
-            '/static',
-            '/health',
-          ].map((path) => [
-            path,
-            {
-              target: apiTarget,
-              changeOrigin: true,
-            },
-          ])
-        ),
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+        },
+        '/storage': {
+          target: apiTarget,
+          changeOrigin: true,
+        },
+        '/static': {
+          target: apiTarget,
+          changeOrigin: true,
+        },
       },
     },
   }

@@ -109,8 +109,12 @@ function useNavItems() {
   const { role, club_id, society_id } = useAuthStore()
   const params = useParams()
   const location = useLocation()
-  const effectiveClubId = club_id ?? params.club_id
-  const effectiveSocietyId = society_id ?? params.society_id
+  const isValidHexId = (val) => Boolean(val && val !== 'null' && val !== 'undefined' && /^[a-f\d]{24}$/i.test(String(val)))
+  const effectiveClubId = isValidHexId(club_id) ? club_id : (isValidHexId(params.club_id) ? params.club_id : '')
+  const rawSocietyId = isValidHexId(society_id)
+    ? society_id
+    : (isValidHexId(club_id) ? club_id : (isValidHexId(params.society_id) ? params.society_id : ''))
+  const effectiveSocietyId = isValidHexId(rawSocietyId) ? rawSocietyId : ''
 
   switch (role) {
     case 'super_admin':
@@ -147,20 +151,16 @@ function useNavItems() {
 
     case 'club_coordinator':
       return [
-        { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard,   label: 'Dashboard', end: true },
-        { to: `/club/${effectiveClubId}?tab=members`,          icon: icons.users,       label: 'Membership Requests' },
-        { to: `/club/${effectiveClubId}?tab=active_members`,   icon: icons.users,       label: 'Active Members' },
-        { to: `/club/${effectiveClubId}?tab=office_bearers`,   icon: icons.performance, label: 'Office Bearers' },
-        { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,    label: 'Settings' },
+        { to: `/club/${effectiveClubId}`,                      icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: `/club/${effectiveClubId}?tab=active_members`,   icon: icons.users,     label: 'Active Members' },
+        { to: `/club/${effectiveClubId}?tab=settings`,         icon: icons.settings,  label: 'Settings' },
       ]
 
     case 'professional_society_coordinator':
       return [
-        { to: `/society/${effectiveSocietyId}`,                    icon: icons.dashboard,   label: 'Dashboard', end: true },
-        { to: `/society/${effectiveSocietyId}?tab=members`,        icon: icons.users,       label: 'Membership Requests' },
-        { to: `/society/${effectiveSocietyId}?tab=active_members`, icon: icons.users,       label: 'Active Members' },
-        { to: `/society/${effectiveSocietyId}?tab=office_bearers`, icon: icons.performance, label: 'Office Bearers' },
-        { to: `/society/${effectiveSocietyId}?tab=settings`,       icon: icons.settings,    label: 'Settings' },
+        { to: `/society/${effectiveSocietyId}`,                    icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: `/society/${effectiveSocietyId}?tab=active_members`, icon: icons.users,     label: 'Active Members' },
+        { to: `/society/${effectiveSocietyId}?tab=settings`,       icon: icons.settings,  label: 'Settings' },
       ]
 
     case 'guest':

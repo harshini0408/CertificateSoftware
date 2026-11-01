@@ -24,6 +24,7 @@ import StudentAffairsDashboard from './dashboards/student_affairs'
 import FacultyDashboard from './dashboards/faculty/FacultyDashboard'
 import ProfessionalSocietyDashboard from './dashboards/professional_society'
 import SocietyEventDetail from './dashboards/professional_society/EventDetail'
+import SocietyTemplateSelector from './dashboards/professional_society/TemplateSelector'
 import Footer from './components/Footer'
 import Authors from './Authors'
 
@@ -130,6 +131,14 @@ export default function App() {
               allowedRoles={[ROLES.PROFESSIONAL_SOCIETY_COORD, ROLES.SUPER_ADMIN]}
             >
               <SocietyEventDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/society/:society_id/events/:event_id/templates/select"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.PROFESSIONAL_SOCIETY_COORD, ROLES.SUPER_ADMIN]}>
+              <SocietyTemplateSelector />
             </ProtectedRoute>
           }
         />

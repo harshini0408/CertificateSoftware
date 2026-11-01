@@ -597,12 +597,66 @@ export function useUpdateStudentRegNo() {
 // Legacy alias kept for any internal usage during refactor — can be removed after testing
 export { useSubmitAttendance as useMarkAttendance }
 
+export function useAvailableSocieties() {
+  return useQuery({
+    queryKey: ['societies', 'available'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/students/me/societies/available')
+      return data
+    },
+  })
+}
+
 export function useMySocietyMemberships() {
   return useQuery({
     queryKey: ['societies', 'me', 'memberships'],
     queryFn: async () => {
       const { data } = await axiosInstance.get('/students/me/societies')
       return data
+    },
+  })
+}
+
+export function useApplyForSociety() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (society_id) => {
+      const { data } = await axiosInstance.post('/students/me/societies/apply', { society_id })
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['societies', 'me', 'memberships'] })
+      addToast({ type: 'success', message: 'Application submitted! Awaiting coordinator approval.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to apply for professional society.',
+      })
+    },
+  })
+}
+
+export function useLeaveSocietyMembership() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async (membership_id) => {
+      const { data } = await axiosInstance.delete(`/students/me/societies/${membership_id}`)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['societies', 'me', 'memberships'] })
+      addToast({ type: 'success', message: data?.message || 'Withdrawn successfully.' })
+    },
+    onError: (err) => {
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to withdraw from society.',
+      })
     },
   })
 }
@@ -663,6 +717,38 @@ export function useCancelSocietyEventRegistration() {
 }
 
 // ── Group Activities / Team Registration Hooks ──────────────────────────────
+
+export async function checkTeamMember(eventId, rollNo, isSociety = false) {
+  const url = isSociety
+    ? `/student/society-events/${eventId}/check-member`
+    : `/student/events/${eventId}/check-member`
+  const { data } = await axiosInstance.get(url, { params: { roll_no: rollNo } })
+  return data
+}
+
+export function useRegisterTeamForEvent() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ eventId, team_name, member_roll_nos, isSociety = false }) => {
+      const url = isSociety
+        ? `/student/society-events/${eventId}/register-team`
+        : `/student/events/${eventId}/register-team`
+      const { data } = await axiosInstance.post(url, { team_name, member_roll_nos })
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
+      addToast({ type: 'success', message: data?.message || 'Team registered successfully!' })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || 'Failed to register team.'
+      addToast({ type: 'error', message: msg })
+    },
+  })
+}
 
 export function useSearchTeammates({ eventId, query, enabled = true }) {
   return useQuery({

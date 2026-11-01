@@ -82,32 +82,20 @@ async def login(body: LoginRequest, response: Response):
 
     if user.role in FIRST_LOGIN_PASSWORD_ROLES and not user.first_login_completed:
         # Mandatory password change for Faculty, Tutor, HOD, Principal first-time login
-        if not user.email:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "No registered email found for this account",
-            )
-
-        email = user.email.strip().lower()
-        otp = f"{random.randint(1000, 9999)}"
-        expires_at = datetime.utcnow() + timedelta(minutes=15)
-        await OTPRequest.find({
-            "email": email,
-            "purpose": "first_login_password_change",
-        }).delete()
-        otp_request = OTPRequest(
-            email=email,
-            otp_code=otp,
-            purpose="first_login_password_change",
-            expires_at=expires_at,
-        )
-        await otp_request.insert()
-        if not await send_password_change_otp_email(email, otp):
-            await otp_request.delete()
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                "Email delivery is not configured or failed. Set EMAIL_PROVIDER to a mail provider and verify SMTP credentials.",
-            )
+        if user.email:
+            otp = f"{random.randint(1000, 9999)}"
+            expires_at = datetime.utcnow() + timedelta(minutes=15)
+            await OTPRequest.find({
+                "email": user.email.strip().lower(),
+                "purpose": "first_login_password_change",
+            }).delete()
+            await OTPRequest(
+                email=user.email.strip().lower(),
+                otp_code=otp,
+                purpose="first_login_password_change",
+                expires_at=expires_at,
+            ).insert()
+            await send_password_change_otp_email(user.email.strip().lower(), otp)
 
         return LoginResponse(
             role=user.role.value,
@@ -142,7 +130,7 @@ async def login(body: LoginRequest, response: Response):
         name=user.name,
         redirect_to=build_redirect(user),
         club_id=str(user.club_id) if user.club_id else None,
-        society_id=str(user.society_id) if getattr(user, "society_id", None) else None,
+        society_id=str(getattr(user, "society_id", None) or getattr(user, "club_id", None) or "") or None,
         event_id=str(user.event_id) if user.event_id else None,
         department=user.department,
         requires_profile_setup=requires_profile_setup,
@@ -398,6 +386,7 @@ async def me(current_user: User = Depends(get_current_user)):
         name=current_user.name,
         redirect_to=build_redirect(current_user),
         club_id=str(current_user.club_id) if current_user.club_id else None,
+        society_id=str(getattr(current_user, "society_id", None) or getattr(current_user, "club_id", None) or "") or None,
         event_id=str(current_user.event_id) if current_user.event_id else None,
         department=current_user.department,
         requires_profile_setup=requires_profile_setup,

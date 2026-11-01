@@ -41,7 +41,7 @@ On first startup the server will:
 
 Login at `POST /auth/login` with:
 ```json
-{ "username": "superadmin", "password": "Dtipl@25" }
+{ "username": "superadmin", "password": "Admin@123456" }
 ```
 
 ### API Documentation
@@ -82,13 +82,12 @@ app/
 
 ## Key Features & Workflows
 1. **Club Event Reports**: Mandatory event report submission before certificates can be generated or issued.
-2. **Activity Points & Credit Rules**: Configure credit points and optional per-semester certificate caps. Saving a changed cap recalculates existing credits in certificate order. App-issued and tutor-verified certificates share the cap; certificates beyond it remain accepted but earn no additional points.
+2. **Activity Points & Credit Rules**: Configurable credit points auto-awarded upon certificate generation/emailing, plus manual verification workflow via tutors.
 3. **Student Registration Number Policy**:
    - Students starting with temporary IDs (e.g. `T24Z108`) can update to their official 12-digit university registration number **once** in Settings.
    - Assigned tutors can edit a mapped student's registration number up to **2 times**.
 4. **Semester Rollover / Reset**: Superadmin can trigger a semester reset with admin password confirmation, archiving previous semester credits into history and resetting active semester totals to zero.
 5. **QR Code Attendance**: Dynamic QR codes generated per event session for seamless participant attendance marking.
-6. **Club Event Team Registration**: Club coordinators may set an optional team size (including the inviting student). Students search for eligible teammates and send email invitations; the inviter and invited students can view each teammate's Accepted/Pending/Declined status. Declined or unavailable invitees can be replaced, and no team members are registered until all required invitees accept. In development mode with `EMAIL_PROVIDER=console`, invitation links are printed in the backend terminal rather than emailed.
 
 ## Production Deployment
 See `nginx.conf` and root `docker-compose.yml` for production reverse proxy and container configuration.

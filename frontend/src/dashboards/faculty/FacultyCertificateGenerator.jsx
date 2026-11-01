@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import { useToastStore } from '../../store/uiStore'
 import axiosInstance from '../../utils/axiosInstance'
-import GuestWizard from '../../components/GuestWizard'
+import FacultyWizard from './FacultyWizard'
 import LoadingSpinner from '../../components/LoadingSpinner'
 
 export default function FacultyCertificateGenerator({ forceNew = false, onCompleteSession, onViewHistory }) {
@@ -25,7 +25,7 @@ export default function FacultyCertificateGenerator({ forceNew = false, onComple
     const restoreSession = async () => {
       setIsRestoring(true)
       try {
-        const { data } = await axiosInstance.get('/guest/status')
+        const { data } = await axiosInstance.get('/faculty/status')
         if (mounted && data?.event_name) {
           setSubmittedName(data.event_name)
         } else if (mounted) {
@@ -54,7 +54,7 @@ export default function FacultyCertificateGenerator({ forceNew = false, onComple
 
     setIsSubmitting(true)
     try {
-      await axiosInstance.post('/guest/start-session', { event_name: trimmed })
+      await axiosInstance.post('/faculty/start-session', { event_name: trimmed })
       setSubmittedName(trimmed)
       addToast({ type: 'success', message: `Started event: ${trimmed}` })
     } catch (err) {
@@ -114,7 +114,7 @@ export default function FacultyCertificateGenerator({ forceNew = false, onComple
         </div>
 
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-          <GuestWizard eventName={submittedName} />
+          <FacultyWizard eventName={submittedName} />
         </div>
       </div>
     )

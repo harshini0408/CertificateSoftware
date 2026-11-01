@@ -373,6 +373,13 @@ function VerificationTab() {
   return (
     <div>
       <h2 className="section-title mb-3">Credit Point Verification</h2>
+      <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p className="font-semibold">Verification guidelines</p>
+        <ul className="mt-1 list-disc space-y-1 pl-5">
+          <li>Verify only external-event certificates for events held in the current semester.</li>
+          <li>Do not approve certificates for college events.</li>
+        </ul>
+      </div>
       <DataTable
         columns={[
           { key: 'student_name', header: 'Student', searchKey: true, render: (v, row) => `${v || '—'} (${row.registration_number || '—'})` },

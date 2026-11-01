@@ -366,9 +366,9 @@ export function useUpdateCreditRules() {
   return useMutation({
     mutationFn: (rules) =>
       axiosInstance.put('/admin/credit-rules', { rules }),
-    onSuccess: ({ data }) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: adminKeys.creditRules() })
-      addToast({ type: 'success', message: data?.message || 'Credit rules updated.' })
+      addToast({ type: 'success', message: 'Credit rules updated.' })
     },
     onError: (err) => {
       addToast({

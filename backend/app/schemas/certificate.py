@@ -18,6 +18,7 @@ class CertificateResponse(BaseModel):
     status: str
     failure_reason: Optional[str] = None
     pdf_url: Optional[str] = None
+    png_url: Optional[str] = None
     generated_at: Optional[datetime] = None
     issued_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
@@ -28,6 +29,9 @@ class CertificateResponse(BaseModel):
 
 class GenerateResponse(BaseModel):
     queued_count: int = 0
+    queued: Optional[int] = None
+    skipped_existing: Optional[int] = None
+    skipped_no_template: Optional[int] = None
     total: int = 0
     message: str = ""
 

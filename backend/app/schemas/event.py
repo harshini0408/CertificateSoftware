@@ -19,6 +19,7 @@ class EventCreate(BaseModel):
     max_teams: Optional[int] = Field(None, ge=0)
     team_size: Optional[int] = Field(None, ge=2)
     volunteers_required: Optional[int] = 0
+    is_team_event: bool = False
     activity_type: Literal["individual", "group"] = "individual"
     min_team_size: Optional[int] = Field(2, ge=2)
     max_team_size: Optional[int] = Field(4, ge=2)
@@ -61,6 +62,7 @@ class EventUpdate(BaseModel):
     max_teams: Optional[int] = Field(None, ge=0)
     team_size: Optional[int] = Field(None, ge=2)
     volunteers_required: Optional[int] = None
+    is_team_event: Optional[bool] = None
     activity_type: Optional[Literal["individual", "group"]] = None
     min_team_size: Optional[int] = Field(None, ge=2)
     max_team_size: Optional[int] = Field(None, ge=2)
@@ -119,6 +121,11 @@ class EventResponse(BaseModel):
     participant_count: int = 0
     volunteers_required: int = 0
     volunteers_registered: int = 0
+    is_team_event: bool = False
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
+    max_teams: Optional[int] = None
+    team_count: int = 0
     cert_count: int = 0
     qr_generations_count: int = 0
     registration_stopped: bool = False

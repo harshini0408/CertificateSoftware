@@ -1,24 +1,32 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axiosInstance from '../../utils/axiosInstance'
 import { useToastStore } from '../../store/uiStore'
-import { useAuthStore } from '../../store/authStore'
 
-// ── Query Keys ────────────────────────────────────────────────────────────────
+// ── Query Keys ─────────────────────────────────────────────────────────────
 export const societyKeys = {
   all: () => ['societies'],
   list: (filters) => ['societies', 'list', filters],
   adminList: (filters) => ['admin', 'professional-societies', filters],
   detail: (societyId) => ['societies', societyId],
   dashboard: (societyId) => ['societies', societyId, 'dashboard'],
+  assets: (societyId) => ['societies', societyId, 'assets'],
   events: (societyId) => ['societies', societyId, 'events'],
   eventDetail: (societyId, eventId) => ['societies', societyId, 'events', eventId],
-  activeMembers: (societyId) => ['societies', societyId, 'active-members'],
+  members: (societyId) => ['societies', societyId, 'members'],
+  activeMembers: () => ['society-coordinator', 'active-members'],
   membershipRequests: () => ['society-coordinator', 'memberships', 'requests'],
   officeBearers: () => ['society-coordinator', 'office-bearers'],
   stats: () => ['society-coordinator', 'stats'],
 }
 
-// ── Admin Hooks ───────────────────────────────────────────────────────────────
+const requireSocietyId = (societyId) => {
+  if (!/^[a-f\d]{24}$/i.test(String(societyId || ''))) {
+    throw new Error('Your professional society assignment is unavailable. Please sign in again.')
+  }
+  return societyId
+}
+
+// ── Admin Hooks ────────────────────────────────────────────────────────────
 export function useAdminSocieties(filters = {}) {
   return useQuery({
     queryKey: societyKeys.adminList(filters),
@@ -92,7 +100,30 @@ export function useDeleteAdminSociety() {
   })
 }
 
-// ── Coordinator Hooks ─────────────────────────────────────────────────────────
+// ── Public / Coordinator Common Hooks ──────────────────────────────────────
+export function useSocieties(filters = {}) {
+  return useQuery({
+    queryKey: societyKeys.list(filters),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/societies', { params: filters })
+      return data
+    },
+  })
+}
+
+const isValidHexId = (val) => Boolean(val && val !== 'null' && val !== 'undefined' && /^[a-f\d]{24}$/i.test(String(val)))
+
+export function useSociety(societyId) {
+  return useQuery({
+    queryKey: societyKeys.detail(societyId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/societies/${societyId}`)
+      return data
+    },
+    enabled: isValidHexId(societyId),
+  })
+}
+
 export function useSocietyDashboard(societyId) {
   return useQuery({
     queryKey: societyKeys.dashboard(societyId),
@@ -100,10 +131,60 @@ export function useSocietyDashboard(societyId) {
       const { data } = await axiosInstance.get(`/societies/${societyId}/dashboard`)
       return data
     },
+    enabled: isValidHexId(societyId),
+  })
+}
+
+export function useSocietyAssets(societyId) {
+  return useQuery({
+    queryKey: societyKeys.assets(societyId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/societies/${societyId}/assets`)
+      return data
+    },
+    enabled: isValidHexId(societyId),
+  })
+}
+
+export function useUpdateSocietyAssets(societyId) {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: async ({ logoFile, signatureFile, signature2File }) => {
+      const formData = new FormData()
+      if (logoFile) formData.append('logo', logoFile)
+      if (signatureFile) formData.append('signature', signatureFile)
+      if (signature2File) formData.append('signature2', signature2File)
+      const { data } = await axiosInstance.post(`/societies/${requireSocietyId(societyId)}/assets`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: societyKeys.dashboard(societyId) })
+      qc.invalidateQueries({ queryKey: societyKeys.assets(societyId) })
+      qc.invalidateQueries({ queryKey: ['auth', 'me'] })
+      addToast({ type: 'success', message: 'Society assets updated successfully.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to update assets.' })
+    },
+  })
+}
+
+export function useSocietyMembers(societyId) {
+  return useQuery({
+    queryKey: societyKeys.members(societyId),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/societies/${societyId}/members`)
+      return data
+    },
     enabled: !!societyId,
   })
 }
 
+// ── Coordinator Specific Hooks ─────────────────────────────────────────────
 export function useSocietyCoordinatorStats() {
   return useQuery({
     queryKey: societyKeys.stats(),
@@ -141,7 +222,7 @@ export function useCreateSocietyEvent(societyId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: (payload) => axiosInstance.post(`/societies/${societyId}/events`, payload),
+    mutationFn: (payload) => axiosInstance.post(`/societies/${requireSocietyId(societyId)}/events`, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: societyKeys.events(societyId) })
       qc.invalidateQueries({ queryKey: societyKeys.dashboard(societyId) })
@@ -159,7 +240,7 @@ export function useUpdateSocietyEvent(societyId) {
 
   return useMutation({
     mutationFn: ({ eventId, ...payload }) =>
-      axiosInstance.patch(`/societies/${societyId}/events/${eventId}`, payload),
+      axiosInstance.patch(`/societies/${requireSocietyId(societyId)}/events/${eventId}`, payload),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: societyKeys.events(societyId) })
       qc.invalidateQueries({ queryKey: societyKeys.eventDetail(societyId, vars.eventId) })
@@ -177,7 +258,7 @@ export function useDeleteSocietyEvent(societyId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: (eventId) => axiosInstance.delete(`/societies/${societyId}/events/${eventId}`),
+    mutationFn: (eventId) => axiosInstance.delete(`/societies/${requireSocietyId(societyId)}/events/${eventId}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: societyKeys.events(societyId) })
       qc.invalidateQueries({ queryKey: societyKeys.dashboard(societyId) })
@@ -198,7 +279,7 @@ export function useUploadSocietyEventPoster(societyId) {
       const formData = new FormData()
       formData.append('poster', posterFile)
       const { data } = await axiosInstance.post(
-        `/societies/${societyId}/events/${eventId}/poster`,
+        `/societies/${requireSocietyId(societyId)}/events/${eventId}/poster`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } }
       )
@@ -215,30 +296,7 @@ export function useUploadSocietyEventPoster(societyId) {
   })
 }
 
-export function useUpdateSocietyAssets(societyId) {
-  const qc = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-
-  return useMutation({
-    mutationFn: async ({ logoFile, signatureFile }) => {
-      const formData = new FormData()
-      if (logoFile) formData.append('logo', logoFile)
-      if (signatureFile) formData.append('signature', signatureFile)
-      const { data } = await axiosInstance.post(`/societies/${societyId}/assets`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      return data
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: societyKeys.dashboard(societyId) })
-      addToast({ type: 'success', message: 'Society assets updated successfully.' })
-    },
-    onError: (err) => {
-      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to update assets.' })
-    },
-  })
-}
-
+// ── Membership Requests ────────────────────────────────────────────────────
 export function useSocietyMembershipRequests() {
   return useQuery({
     queryKey: societyKeys.membershipRequests(),
@@ -249,14 +307,17 @@ export function useSocietyMembershipRequests() {
   })
 }
 
+export const useMembershipRequests = useSocietyMembershipRequests
+
 export function useReviewSocietyMembership() {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: ({ membershipId, action, reviewNote }) =>
+    mutationFn: ({ membershipId, action, reviewNote, status }) =>
       axiosInstance.patch(`/society-coordinator/memberships/${membershipId}`, {
-        action,
+        action: action || (status === 'approved' ? 'approve' : 'reject'),
+        status,
         review_note: reviewNote,
       }),
     onSuccess: () => {
@@ -270,6 +331,8 @@ export function useReviewSocietyMembership() {
     },
   })
 }
+
+export const useUpdateMembershipStatus = useReviewSocietyMembership
 
 export function useBulkApproveSocietyMemberships() {
   const qc = useQueryClient()
@@ -293,6 +356,8 @@ export function useBulkApproveSocietyMemberships() {
   })
 }
 
+export const useBulkApproveMemberships = useBulkApproveSocietyMemberships
+
 export function useDeleteSocietyMembership() {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
@@ -304,7 +369,7 @@ export function useDeleteSocietyMembership() {
       qc.invalidateQueries({ queryKey: societyKeys.membershipRequests() })
       qc.invalidateQueries({ queryKey: societyKeys.stats() })
       qc.invalidateQueries({ queryKey: ['society-coordinator', 'active-members'] })
-      addToast({ type: 'success', message: 'Membership removed successfully.' })
+      addToast({ type: 'success', message: 'Membership request removed successfully.' })
     },
     onError: (err) => {
       addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to remove membership.' })
@@ -312,6 +377,43 @@ export function useDeleteSocietyMembership() {
   })
 }
 
+export const useDeleteMembershipRequest = useDeleteSocietyMembership
+
+// ── Active Members ─────────────────────────────────────────────────────────
+export function useSocietyActiveMembers() {
+  return useQuery({
+    queryKey: societyKeys.activeMembers(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/society-coordinator/active-members')
+      return data
+    },
+  })
+}
+
+export const useClubActiveMembers = useSocietyActiveMembers
+
+export function useRemoveSocietyMember() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (identifier) =>
+      axiosInstance.delete(`/society-coordinator/members/${encodeURIComponent(identifier)}`),
+    onSuccess: ({ data }) => {
+      qc.invalidateQueries({ queryKey: societyKeys.activeMembers() })
+      qc.invalidateQueries({ queryKey: societyKeys.stats() })
+      qc.invalidateQueries({ queryKey: societyKeys.all() })
+      addToast({ type: 'success', message: data?.message || 'Member removed successfully.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to remove member.' })
+    },
+  })
+}
+
+export const useRemoveClubMember = useRemoveSocietyMember
+
+// ── Office Bearers ─────────────────────────────────────────────────────────
 export function useSocietyOfficeBearers() {
   return useQuery({
     queryKey: societyKeys.officeBearers(),
@@ -322,16 +424,18 @@ export function useSocietyOfficeBearers() {
   })
 }
 
+export const useClubOfficeBearers = useSocietyOfficeBearers
+
 export function useAssignSocietyOfficeBearer() {
   const qc = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: ({ position, studentId, studentEmail }) =>
+    mutationFn: ({ position, studentId, studentEmail, student_id, student_email }) =>
       axiosInstance.post('/society-coordinator/office-bearers', {
         position,
-        student_id: studentId,
-        student_email: studentEmail,
+        student_id: studentId || student_id,
+        student_email: studentEmail || student_email,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: societyKeys.officeBearers() })
@@ -343,6 +447,8 @@ export function useAssignSocietyOfficeBearer() {
     },
   })
 }
+
+export const useAllocateOfficeBearer = useAssignSocietyOfficeBearer
 
 export function useRemoveSocietyOfficeBearer() {
   const qc = useQueryClient()
@@ -362,12 +468,43 @@ export function useRemoveSocietyOfficeBearer() {
   })
 }
 
-export function useSocietyActiveMembers() {
-  return useQuery({
-    queryKey: ['society-coordinator', 'active-members'],
-    queryFn: async () => {
-      const { data } = await axiosInstance.get('/society-coordinator/active-members')
-      return data
+export const useRemoveOfficeBearer = useRemoveSocietyOfficeBearer
+
+export function useAddOfficeBearerPosition() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ position }) =>
+      axiosInstance.post('/society-coordinator/office-bearers/positions', { position }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: societyKeys.officeBearers() })
+      addToast({ type: 'success', message: 'Position added successfully.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to add position.' })
     },
   })
 }
+
+export function useDeleteOfficeBearerPosition() {
+  const qc = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (position) =>
+      axiosInstance.delete(`/society-coordinator/office-bearers/positions/${encodeURIComponent(position)}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: societyKeys.officeBearers() })
+      addToast({ type: 'success', message: 'Position deleted successfully.' })
+    },
+    onError: (err) => {
+      addToast({ type: 'error', message: err?.response?.data?.detail || 'Failed to delete position.' })
+    },
+  })
+}
+
+// Aliases for dashboard compatibility
+export const useClubDashboard = useSocietyDashboard
+export const useClubAssets = useSocietyAssets
+export const useUpdateClubAssets = useUpdateSocietyAssets

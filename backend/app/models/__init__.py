@@ -20,6 +20,9 @@ from .dept_certificate_preview import DeptCertificatePreview
 from .dept_event import DeptEvent, DeptEventStatus
 from .dept_template import DeptTemplate
 from .guest_session import GuestSession
+from .faculty_session import FacultySession
+from .faculty_certificate import FacultyCertificate
+from .faculty_field_position import FacultyFieldPosition
 from .role_template_preset import RoleTemplatePreset
 from .user_otp import OTPRequest
 from .manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
@@ -31,6 +34,12 @@ from .attendance_session import AttendanceSession
 from .professional_society import ProfessionalSociety, SocietyAssets
 from .society_event import SocietyEvent, SocietyEventStatus
 from .student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
+from .society_asset import SocietyAsset
+from .society_certificate import SocietyCertificate
+from .society_attendance import SocietyAttendance
+from .society_attendance_session import SocietyAttendanceSession
+from .society_participant import SocietyParticipant
+from .society_field_position import SocietyFieldPosition
 from ..certificate_config.model import CertificateTemplateConfig
 
 ALL_MODELS = [
@@ -56,6 +65,9 @@ ALL_MODELS = [
     DeptEvent,
     DeptTemplate,
     GuestSession,
+    FacultySession,
+    FacultyCertificate,
+    FacultyFieldPosition,
     RoleTemplatePreset,
     OTPRequest,
     ManualCreditSubmission,
@@ -70,6 +82,12 @@ ALL_MODELS = [
     ProfessionalSociety,
     SocietyEvent,
     StudentSocietyMembership,
+    SocietyAsset,
+    SocietyCertificate,
+    SocietyAttendance,
+    SocietyAttendanceSession,
+    SocietyParticipant,
+    SocietyFieldPosition,
 ]
 
 __all__ = [
@@ -92,6 +110,9 @@ __all__ = [
     "DeptCertificate", "DeptCertificatePreview", "DeptTemplate",
     "DeptEvent", "DeptEventStatus",
     "GuestSession",
+    "FacultySession",
+    "FacultyCertificate",
+    "FacultyFieldPosition",
     "RoleTemplatePreset",
     "OTPRequest",
     "ManualCreditSubmission", "ManualSubmissionStatus",

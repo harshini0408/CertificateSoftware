@@ -24,6 +24,9 @@ class Participant(Document):
     source: ParticipantSource = ParticipantSource.MANUAL
     verified: bool = True
     status: Optional[str] = "accepted"  # "accepted", "pending", "rejected"
+    team_id: Optional[str] = None
+    team_name: Optional[str] = None
+    team_role: Optional[str] = None  # "leader" or "member"
     registered_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:

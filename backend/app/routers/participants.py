@@ -20,7 +20,11 @@ def _resp(p: Participant) -> ParticipantResponse:
         id=str(p.id), event_id=str(p.event_id), club_id=str(p.club_id),
         email=p.email, registration_number=p.registration_number,
         cert_type=p.cert_type, fields=p.fields, field_mapping=p.field_mapping,
-        source=p.source.value, verified=p.verified, registered_at=p.registered_at,
+        source=p.source.value, verified=p.verified,
+        team_id=getattr(p, "team_id", None),
+        team_name=getattr(p, "team_name", None),
+        team_role=getattr(p, "team_role", None),
+        registered_at=p.registered_at,
     )
 
 
@@ -59,7 +63,50 @@ async def create_participant(
         source=ParticipantSource.MANUAL, verified=True,
     )
     await p.insert()
+
+    event = await Event.get(event_id)
+    if event:
+        await event.set({"participant_count": (event.participant_count or 0) + 1})
+
     return _resp(p)
+
+
+@router.get("/columns")
+async def get_participant_columns(
+    club_id: PydanticObjectId, event_id: PydanticObjectId,
+    _user: User = Depends(require_event_access),
+):
+    """Return uploaded participant field headers and a representative row."""
+    participants = await Participant.find({
+        "event_id": event_id,
+        "club_id": club_id,
+    }).to_list()
+
+    columns: list[str] = []
+    sample: dict[str, str] = {}
+    for participant in participants:
+        fields = participant.fields or {}
+        if not sample and fields:
+            sample = fields
+        for column in fields:
+            if column not in columns:
+                columns.append(column)
+
+    return {"columns": columns, "sample": sample}
+
+
+@router.get("/mapping")
+async def get_field_mapping(
+    club_id: PydanticObjectId, event_id: PydanticObjectId,
+    _user: User = Depends(require_event_access),
+):
+    """Return the saved field mapping for an event's participants."""
+    participant = await Participant.find_one({
+        "event_id": event_id,
+        "club_id": club_id,
+        "field_mapping": {"$ne": {}},
+    })
+    return {"mapping": participant.field_mapping if participant else {}}
 
 
 @router.delete("/{participant_id}")

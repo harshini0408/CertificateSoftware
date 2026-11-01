@@ -49,12 +49,7 @@ def require_role(*roles: UserRole):
         if current_user.role in {UserRole.TUTOR, UserRole.HOD}:
             effective_roles.add(UserRole.FACULTY)
         if not any(r in roles for r in effective_roles):
-            allowed_roles = ", ".join(sorted(role.value for role in roles))
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                f"Insufficient permissions: your role is '{current_user.role.value}'; "
-                f"required role: {allowed_roles}.",
-            )
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
         return current_user
     return _checker
 
@@ -76,6 +71,23 @@ async def require_cert_generator(
     """Allow access to active certificate-generator users."""
     if current_user.role not in CERT_GENERATOR_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Certificate generation access denied")
+    return current_user
+
+
+FACULTY_ROLES = {
+    UserRole.FACULTY,
+    UserRole.TUTOR,
+    UserRole.HOD,
+    UserRole.SUPER_ADMIN,
+}
+
+
+async def require_faculty(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Allow access to faculty, tutor, hod, or super_admin users."""
+    if current_user.role not in FACULTY_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Faculty access denied")
     return current_user
 
 
@@ -101,11 +113,7 @@ async def require_club_access(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this club")
         return current_user
 
-    raise HTTPException(
-        status.HTTP_403_FORBIDDEN,
-        f"Insufficient permissions: your role is '{current_user.role.value}'; "
-        "required role: club_coordinator or super_admin.",
-    )
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
 
 
 # ── Event access gate ────────────────────────────────────────────────────

@@ -11,6 +11,31 @@ router = APIRouter(tags=["Verify"])
 async def verify_certificate(cert_number: str, request: Request):
     cert = await Certificate.find_one(Certificate.cert_number == cert_number)
     if not cert:
+        from ..models.faculty_certificate import FacultyCertificate
+        fc = await FacultyCertificate.find_one(FacultyCertificate.cert_number == cert_number)
+        if fc:
+            await ScanLog(
+                certificate_id=fc.id,
+                cert_number=cert_number,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            ).insert()
+            scan_count = await ScanLog.find(ScanLog.cert_number == cert_number).count()
+            return VerifyResponse(
+                valid=fc.status in ("generated", "emailed"),
+                cert_number=fc.cert_number,
+                name=fc.recipient_name,
+                participant_name=fc.recipient_name,
+                participant_email=fc.recipient_email,
+                event_name=fc.event_name,
+                club_name="Faculty Event",
+                cert_type=fc.cert_type or "Faculty Certificate",
+                issued_at=fc.emailed_at or fc.created_at,
+                status=fc.status,
+                pdf_url=None,
+                registration_number=fc.registration_number,
+                scan_count=scan_count,
+            )
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
 
     # Record scan

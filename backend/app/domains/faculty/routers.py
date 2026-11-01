@@ -1,0 +1,1547 @@
+"""
+Faculty Flow Router — 5-step certificate wizard backend.
+
+All routes are prefixed: /faculty
+All routes are protected by require_faculty.
+
+POST /faculty/start-session    — Create a new GuestSession (event name entry)
+POST /faculty/template         — Step 1: Upload custom PNG background template
+POST /faculty/excel            — Step 2a: Upload XLSX, parse headers + data
+POST /faculty/config           — Step 2b: Save selected_columns + email_column
+POST /faculty/field-positions  — Step 3: Save field positions for this session
+POST /faculty/generate         — Step 4: Pillow batch generation
+GET  /faculty/zip              — Step 5: Download all generated PNGs as ZIP (current session)
+POST /faculty/send-emails      — Step 5: Email each certificate to the email column
+GET  /faculty/status           — Poll current guest session state
+
+GET  /faculty/history                      — List all non-expired sessions for this guest
+GET  /faculty/sessions/{session_id}/zip    — Re-download ZIP for a past session
+"""
+
+import asyncio
+import io
+import logging
+import re
+import uuid
+import zipfile
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from beanie import PydanticObjectId
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel, field_validator
+
+from ...config import get_settings
+from ...core.dependencies import require_faculty
+from ...models.faculty_certificate import FacultyCertificate
+from ...models.faculty_field_position import FacultyFieldPosition
+from ...models.field_position import FieldPosition
+from ...models.credit_rule import CreditRule
+from ...models.faculty_session import FacultySession
+from ...models.guest_session import GuestSession
+from ...models.student_credit import CreditHistoryEntry, StudentCredit
+from ...models.user import User, UserRole
+from ...services.storage_service import storage_path_to_url
+from ...services.semester_service import get_current_semester
+from ...services.email_service import send_certificate_email
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+router = APIRouter(
+    prefix="/faculty",
+    tags=["Faculty Flow"],
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _guest_certs_dir(session_id: str) -> Path:
+    """Directory where generated faculty certificates are stored for a session."""
+    d = settings.certs_dir / "faculty" / session_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _guest_templates_dir() -> Path:
+    """Directory where faculty-uploaded PNG templates are stored."""
+    d = settings.storage_root / "faculty_templates"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _is_faculty_user(user: User) -> bool:
+    return getattr(user, "role", None) in (UserRole.FACULTY, UserRole.TUTOR)
+
+
+def _get_session_model(user: User):
+    return FacultySession
+
+
+async def _get_session_by_id(session_id: PydanticObjectId):
+    s = await FacultySession.get(session_id)
+    if not s:
+        s = await GuestSession.get(session_id)
+    return s
+
+
+async def _resolve_active_session(user: User) -> FacultySession:
+    """Return the most recent non-expired FacultySession for this user."""
+    session = await FacultySession.find_one(
+        FacultySession.user_id == user.id,
+        FacultySession.expires_at > datetime.utcnow(),
+        sort=[("created_at", -1)],
+    )
+    if not session:
+        session = await GuestSession.find_one(
+            GuestSession.user_id == user.id,
+            GuestSession.expires_at > datetime.utcnow(),
+            sort=[("created_at", -1)],
+        )
+    if not session:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No active faculty session. Please start a new session from the dashboard.",
+        )
+    return session
+
+
+class SendGuestEmailsRequest(BaseModel):
+    row_indexes: Optional[List[int]] = None
+
+
+class GuestGenerateRequest(BaseModel):
+    allocate_points: bool = False
+    points_per_cert: int = 0
+
+
+_EMAIL_HEADER_PRIORITY = (
+    "email",
+    "e-mail",
+    "mail",
+    "email address",
+    "student email",
+    "participant email",
+    "recipient email",
+    "contact email",
+)
+
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _normalize_header(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _detect_email_column(rows: list[dict[str, Any]] | None, headers: list[str] | None = None) -> Optional[str]:
+    header_list = headers or []
+    normalized_headers = {header: _normalize_header(header) for header in header_list}
+
+    for header, normalized in normalized_headers.items():
+        if normalized in _EMAIL_HEADER_PRIORITY:
+            return header
+
+    for header, normalized in normalized_headers.items():
+        if "email" in normalized or "e-mail" in normalized:
+            return header
+
+    if rows and header_list:
+        best_header = None
+        best_hits = 0
+        for header in header_list:
+            hits = 0
+            for row in rows:
+                value = str(row.get(header, "") or "").strip()
+                if value and _EMAIL_RE.match(value):
+                    hits += 1
+            if hits > best_hits:
+                best_header = header
+                best_hits = hits
+
+        if best_header and best_hits > 0:
+            return best_header
+
+    return None
+
+
+def _normalize_guest_email(value: Any) -> str:
+    s = str(value or "").strip()
+    if not s or s.lower() in ("none", "null", "-", "n/a", "na"):
+        return ""
+    return s.lower()
+
+
+def _pick_row_value(row: dict[str, Any], keys: tuple[str, ...]) -> str:
+    if not row:
+        return ""
+    for k in keys:
+        if k in row and row[k] is not None and str(row[k]).strip():
+            return str(row[k]).strip()
+    row_lower = {str(k).strip().lower(): str(v).strip() for k, v in row.items() if v is not None}
+    for k in keys:
+        val = row_lower.get(k.lower())
+        if val:
+            return val
+    return ""
+
+
+async def _award_guest_credits(
+    cert_number: str,
+    student_email: str,
+    student_name: str,
+    points: int,
+    event_name: str,
+    club_name: str = "Guest Event",
+    cert_type: str = "Guest Certificate",
+) -> None:
+    email = student_email.strip().lower()
+    if not email or points <= 0:
+        return
+
+    credit_doc = await StudentCredit.find_one(StudentCredit.student_email == email)
+    semester = await get_current_semester() or "Unknown"
+    entry = CreditHistoryEntry(
+        cert_number=cert_number,
+        event_name=event_name,
+        club_name=club_name,
+        cert_type=cert_type,
+        points_awarded=points,
+        semester=semester,
+        awarded_at=datetime.utcnow(),
+    )
+
+    if credit_doc:
+        if any(h.cert_number == cert_number for h in credit_doc.credit_history):
+            return
+        credit_doc.total_credits += points
+        credit_doc.credit_history.append(entry)
+        credit_doc.last_updated = datetime.utcnow()
+        await credit_doc.save()
+    else:
+        await StudentCredit(
+            student_email=email,
+            student_name=student_name,
+            total_credits=points,
+            credit_history=[entry],
+            last_updated=datetime.utcnow(),
+        ).insert()
+
+
+def _safe_session_cert_path(session: Any, cert_path_str: str) -> Path:
+    cert_path = Path(cert_path_str)
+    base_dir = _guest_certs_dir(str(session.id)).resolve()
+    resolved = cert_path.resolve()
+    if base_dir not in resolved.parents and resolved != base_dir:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid certificate file path")
+    return resolved
+
+
+def _guest_session_cert_preview_url(session_id: str, file_name: str) -> str:
+    return f"/faculty/sessions/{session_id}/certificates/{file_name}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# START SESSION
+# POST /faculty/start-session
+# ─────────────────────────────────────────────────────────────────────────────
+
+class StartSessionRequest(BaseModel):
+    event_name: str
+
+    @field_validator("event_name")
+    @classmethod
+    def validate_event_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Event name must be at least 3 characters")
+        if len(v) > 100:
+            raise ValueError("Event name must be at most 100 characters")
+        return v
+
+
+@router.post("/start-session")
+async def start_guest_session(
+    body: StartSessionRequest,
+    current_user: User = Depends(require_faculty),
+):
+    """Create a new session for this user (FacultySession for faculty/tutor, GuestSession for guests).
+
+    Each call creates a fresh session; previous sessions remain accessible
+    in history until they expire (15 days).
+    """
+    now = datetime.utcnow()
+    Model = _get_session_model(current_user)
+
+    # Clean up previous draft sessions where no certificates were generated
+    old_drafts = await Model.find(
+        Model.user_id == current_user.id
+    ).to_list()
+    for draft in old_drafts:
+        if not draft.guest_generated_certs:
+            if draft.guest_template_path:
+                try:
+                    Path(draft.guest_template_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            await draft.delete()
+
+    session = Model(
+        user_id=current_user.id,
+        event_name=body.event_name,
+        created_at=now,
+        expires_at=now + timedelta(days=15),
+    )
+    await session.insert()
+    return {
+        "session_id": str(session.id),
+        "event_name": session.event_name,
+        "expires_at": session.expires_at.isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 1 — Upload custom PNG template
+# POST /faculty/template
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/template")
+async def upload_guest_template(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_faculty),
+):
+    """Upload an image file as the faculty's custom certificate background.
+    
+    Applies EXIF transpose so orientation (landscape/portrait) is preserved accurately.
+    """
+    session = await _resolve_active_session(current_user)
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Only image files (PNG/JPG/WEBP) are accepted as templates",
+        )
+
+    content = await file.read()
+    if len(content) > 15 * 1024 * 1024:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "Template image must be smaller than 15 MB",
+        )
+
+    from PIL import Image, ImageOps
+    try:
+        img = Image.open(io.BytesIO(content))
+        # Physically transpose pixels matching visual EXIF orientation tag
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA")
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Invalid image file: {exc}",
+        )
+
+    filename = f"faculty_{session.id}_{uuid.uuid4().hex[:8]}.png"
+    dest = _guest_templates_dir() / filename
+    img.save(str(dest), format="PNG")
+
+    await session.set({"guest_template_path": str(dest)})
+
+    preview_url = f"/storage/faculty_templates/{filename}"
+    return {
+        "message": "Template uploaded",
+        "guest_template_path": str(dest),
+        "preview_url": preview_url,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 2a — Upload XLSX, parse and return headers
+# POST /faculty/excel
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/excel")
+async def upload_guest_excel(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_faculty),
+):
+    """Parse an uploaded XLSX file and return its column headers + row count."""
+    session = await _resolve_active_session(current_user)
+
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "Excel file must be smaller than 20 MB",
+        )
+
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(filename=io.BytesIO(content), read_only=True)
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        headers_row = next(rows_iter, None)
+        if not headers_row:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel file is empty")
+
+        headers = [str(h).strip() for h in headers_row if h is not None]
+        if not headers:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "No column headers found in the first row"
+            )
+
+        parsed_rows: List[Dict] = []
+        for row in rows_iter:
+            if all(cell is None for cell in row):
+                continue
+            record: Dict = {}
+            for col_idx, cell_value in enumerate(row):
+                if col_idx < len(headers) and headers[col_idx]:
+                    record[headers[col_idx]] = (
+                        str(cell_value).strip() if cell_value is not None else ""
+                    )
+            parsed_rows.append(record)
+
+        wb.close()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Excel parse error: %s", exc)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Failed to parse Excel: {exc}")
+
+    email_column = _detect_email_column(parsed_rows, headers)
+
+    await session.set({
+        "guest_excel_data": parsed_rows,
+        "guest_selected_columns": None,
+        "guest_email_column": email_column,
+        "guest_generated_certs": None,
+        "guest_emails_sent": False,
+        "guest_email_statuses": None,
+        "guest_allocate_points": False,
+        "guest_points_per_cert": 0,
+    })
+
+    return {
+        "headers": headers,
+        "row_count": len(parsed_rows),
+        "email_column": email_column,
+        "message": f"Parsed {len(parsed_rows)} data rows",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 2b — Save column selection + email column
+# POST /faculty/config
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GuestConfigRequest(BaseModel):
+    selected_columns: List[str]
+    email_column: Optional[str] = None
+
+
+@router.post("/config")
+async def save_guest_config(
+    body: GuestConfigRequest,
+    current_user: User = Depends(require_faculty),
+):
+    """Persist which columns should be printed and which is the email column."""
+    session = await _resolve_active_session(current_user)
+
+    selected_columns = [c.strip() for c in (body.selected_columns or []) if isinstance(c, str) and c.strip()]
+    if not selected_columns:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "At least one column must be selected",
+        )
+
+    email_column = (body.email_column or "").strip() or None
+    if not email_column and session.guest_excel_data:
+        email_column = _detect_email_column(session.guest_excel_data, selected_columns) or session.guest_email_column
+
+    await session.set({
+        "guest_selected_columns": selected_columns,
+        "guest_email_column": email_column,
+        "guest_generated_certs": None,
+        "guest_emails_sent": False,
+        "guest_email_statuses": None,
+        "guest_allocate_points": False,
+        "guest_points_per_cert": 0,
+    })
+
+    return {
+        "message": "Column configuration saved",
+        "selected_columns": selected_columns,
+        "email_column": email_column,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 3 — Save field positions for this session
+# POST /faculty/field-positions
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ColumnPositionEntry(BaseModel):
+    x_percent: float
+    y_percent: float
+    font_size: float = 24.0
+
+
+class GuestFieldPositionsRequest(BaseModel):
+    column_positions: Dict[str, ColumnPositionEntry]
+    display_width: float = 580.0
+    confirmed: bool = True
+
+
+@router.post("/field-positions")
+async def save_guest_field_positions(
+    body: GuestFieldPositionsRequest,
+    current_user: User = Depends(require_faculty),
+):
+    """Save or update field positions for the current faculty session.
+
+    Uses session.id in FacultyFieldPosition (collection 'faculty_field_positions').
+    """
+    session = await _resolve_active_session(current_user)
+
+    # Serialise Pydantic models to plain dicts
+    column_positions_dict: Dict[str, Dict[str, float]] = {
+        col: {
+            "x_percent": pos.x_percent,
+            "y_percent": pos.y_percent,
+            "font_size": pos.font_size,
+        }
+        for col, pos in body.column_positions.items()
+    }
+
+    # Upsert into FacultyFieldPosition
+    existing = await FacultyFieldPosition.find_one(
+        FacultyFieldPosition.session_id == session.id
+    )
+    if existing:
+        await existing.set({
+            "column_positions": column_positions_dict,
+            "display_width": body.display_width,
+            "confirmed": body.confirmed,
+            "updated_at": datetime.utcnow(),
+        })
+    else:
+        await FacultyFieldPosition(
+            session_id=session.id,
+            column_positions=column_positions_dict,
+            display_width=body.display_width,
+            confirmed=body.confirmed,
+            updated_at=datetime.utcnow(),
+        ).insert()
+
+    return {"message": "Field positions saved", "session_id": str(session.id)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 3.5 — Generate sample certificate from first row
+# POST /faculty/sample-preview
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/sample-preview")
+async def generate_guest_sample_preview(
+    current_user: User = Depends(require_faculty),
+):
+    """Generate and return a preview certificate using the first Excel row.
+
+    Orientation is preserved strictly in the uploaded orientation.
+    """
+    session = await _resolve_active_session(current_user)
+
+    if not session.guest_template_path or not Path(session.guest_template_path).exists():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No valid certificate template found. Please complete Step 1 first.",
+        )
+    if not session.guest_excel_data:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No Excel data found. Please complete Step 2 first.",
+        )
+    if not session.guest_selected_columns:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Column configuration not saved. Please complete Step 2 first.",
+        )
+
+    fp = await FacultyFieldPosition.find_one(
+        FacultyFieldPosition.session_id == session.id
+    )
+    if not fp:
+        fp = await FieldPosition.find_one(
+            FieldPosition.event_id == session.id,
+            FieldPosition.cert_type == "guest",
+        )
+    if not fp:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Field positions not configured. Please complete Step 3 first.",
+        )
+
+    first_row = session.guest_excel_data[0] if session.guest_excel_data else None
+    if not first_row:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel does not contain data rows")
+
+    sample_dir = settings.storage_root / "tmp"
+    sample_dir.mkdir(parents=True, exist_ok=True)
+    sample_name = f"faculty_sample_{session.id}.png"
+    sample_path = sample_dir / sample_name
+
+    await asyncio.to_thread(
+        _render_guest_certificate,
+        Path(session.guest_template_path),
+        first_row,
+        fp.column_positions,
+        str(sample_path),
+    )
+
+    first_row_selected = {
+        col: str(first_row.get(col, "") if first_row.get(col) is not None else "")
+        for col in (session.guest_selected_columns or [])
+    }
+
+    return {
+        "sample_url": f"/storage/tmp/{sample_name}",
+        "first_row": first_row_selected,
+        "message": "Sample certificate generated from first row",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 4 — Generate certificates (Pillow batch)
+# POST /faculty/generate
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/generate")
+async def generate_guest_certificates(
+    payload: GuestGenerateRequest = Body(default=GuestGenerateRequest()),
+    current_user: User = Depends(require_faculty),
+):
+    """Generate one PNG certificate per Excel row and save into FacultyCertificate."""
+    session = await _resolve_active_session(current_user)
+
+    if not session.guest_template_path or not Path(session.guest_template_path).exists():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No valid certificate template found. Please complete Step 1 first.",
+        )
+    if not session.guest_excel_data:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No Excel data found. Please complete Step 2 first.",
+        )
+    if not session.guest_selected_columns:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Column configuration not saved. Please complete Step 2 first.",
+        )
+
+    fp = await FacultyFieldPosition.find_one(
+        FacultyFieldPosition.session_id == session.id
+    )
+    if not fp:
+        fp = await FieldPosition.find_one(
+            FieldPosition.event_id == session.id,
+            FieldPosition.cert_type == "guest",
+        )
+    if not fp:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Field positions not configured. Please complete Step 3 first.",
+        )
+
+    template_path = Path(session.guest_template_path)
+    output_dir = _guest_certs_dir(str(session.id))
+    rows = session.guest_excel_data
+
+    generated: List[str] = []
+    errors: List[str] = []
+    credits_awarded = 0
+
+    allocate_points = bool(payload.allocate_points)
+    points_per_cert = int(payload.points_per_cert or 0)
+    if points_per_cert < 0:
+        points_per_cert = 0
+
+    email_col = session.guest_email_column or _detect_email_column(rows, session.guest_selected_columns)
+    if email_col and email_col != session.guest_email_column:
+        await session.set({"guest_email_column": email_col})
+
+    if allocate_points and not email_col:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Email column is required to allocate credit points.",
+        )
+    if allocate_points and points_per_cert <= 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Points per certificate must be greater than 0 when credit allocation is enabled.",
+        )
+
+    cert_prefix = f"FAC-{str(session.id)[-6:]}"
+
+    for idx, row in enumerate(rows):
+        safe_name = f"cert_{idx+1:04d}_{uuid.uuid4().hex[:6]}.png"
+        out_path = output_dir / safe_name
+        try:
+            await asyncio.to_thread(
+                _render_guest_certificate,
+                template_path,
+                row,
+                fp.column_positions,
+                str(out_path),
+            )
+            generated.append(str(out_path))
+
+            cert_number = f"{cert_prefix}-{idx + 1:04d}"
+            participant_email = _normalize_guest_email(row.get(email_col) if email_col else "")
+            student_name = _pick_row_value(row, ("Name", "name", "Full Name", "full_name", "Student Name")) or "Unknown"
+            reg_no = _pick_row_value(row, ("Registration Number", "Register Number", "Reg No", "Roll No", "Roll Number", "Registration No", "reg_no", "roll_no")) or None
+            class_name = _pick_row_value(row, ("Class", "Department", "Semester", "Year", "Section")) or "-"
+            contribution = _pick_row_value(row, ("Contribution", "Role", "Participation", "Certificate Type")) or "Participant"
+
+            png_url = storage_path_to_url(str(out_path))
+            existing = await FacultyCertificate.find_one(FacultyCertificate.cert_number == cert_number)
+            if existing:
+                await existing.set({
+                    "session_id": session.id,
+                    "faculty_id": current_user.id,
+                    "event_name": session.event_name,
+                    "recipient_name": student_name,
+                    "recipient_email": participant_email or None,
+                    "registration_number": reg_no,
+                    "class_name": class_name,
+                    "contribution": contribution,
+                    "row_data": row,
+                    "png_url": png_url,
+                    "file_path": str(out_path),
+                    "status": "generated",
+                })
+            else:
+                await FacultyCertificate(
+                    cert_number=cert_number,
+                    session_id=session.id,
+                    faculty_id=current_user.id,
+                    event_name=session.event_name,
+                    recipient_name=student_name,
+                    recipient_email=participant_email or None,
+                    registration_number=reg_no,
+                    class_name=class_name,
+                    contribution=contribution,
+                    row_data=row,
+                    png_url=png_url,
+                    file_path=str(out_path),
+                    status="generated",
+                    created_at=datetime.utcnow(),
+                ).insert()
+
+        except Exception as exc:
+            logger.error("Error generating cert for row %d: %s", idx + 1, exc)
+            errors.append(f"Row {idx + 1}: {exc}")
+
+    await session.set({
+        "guest_generated_certs": generated,
+        "guest_emails_sent": False,
+        "guest_email_statuses": None,
+        "guest_allocate_points": allocate_points,
+        "guest_points_per_cert": points_per_cert,
+    })
+
+    # Return complete certificate list for faculty dashboard with view eye option
+    cert_docs = await FacultyCertificate.find(FacultyCertificate.session_id == session.id).to_list()
+    cert_items = [
+        {
+            "index": idx,
+            "cert_number": c.cert_number,
+            "recipient_name": c.recipient_name,
+            "recipient_email": c.recipient_email,
+            "registration_number": c.registration_number,
+            "class_name": c.class_name,
+            "contribution": c.contribution,
+            "status": c.status,
+            "preview_url": c.png_url,
+            "file_name": Path(c.file_path).name if c.file_path else f"{c.cert_number}.png",
+            "emailed_at": c.emailed_at.isoformat() if c.emailed_at else None,
+            "error": c.email_error,
+        }
+        for idx, c in enumerate(cert_docs)
+    ]
+
+    return {
+        "generated": len(generated),
+        "errors": errors,
+        "credits_awarded": credits_awarded,
+        "message": f"Generated {len(generated)} certificate(s).",
+        "certificates": cert_items,
+    }
+
+
+def _render_guest_certificate(
+    template_path: Path,
+    fields: dict,
+    column_positions: dict,
+    output_path: str,
+) -> None:
+    """Synchronous Pillow rendering — called inside asyncio.to_thread.
+    
+    Applies EXIF transpose so uploaded orientation is strictly preserved.
+    """
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+    _FONTS_DIR = Path(__file__).resolve().parents[2] / "static" / "fonts"
+    _FONT_CANDIDATES = [
+        _FONTS_DIR / "Montserrat-Bold.ttf",
+    ]
+    DEFAULT_FONT_PERCENT = 2.7
+
+    def _load_font(size: int):
+        for font_path in _FONT_CANDIDATES:
+            try:
+                if font_path.exists():
+                    return ImageFont.truetype(str(font_path), size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    img = Image.open(str(template_path))
+    img = ImageOps.exif_transpose(img)
+    img = img.convert("RGBA")
+    draw = ImageDraw.Draw(img)
+    img_w, img_h = img.size
+
+    for col_header, pos in (column_positions or {}).items():
+        value = str((fields or {}).get(col_header, ""))
+        if not value:
+            continue
+        raw_font_size = pos.get("font_size")
+        if raw_font_size is None:
+            fsp = float(pos.get("font_size_percent") or DEFAULT_FONT_PERCENT)
+            fsp = max(1.0, min(fsp, 8.0))
+            font_size = max(10, int(img_w * fsp / 100))
+        else:
+            font_size = max(8, int(float(raw_font_size)))
+        font = _load_font(font_size)
+        x = (pos["x_percent"] / 100) * img_w
+        y = (pos["y_percent"] / 100) * img_h
+        draw.text(
+            (int(x), int(y)),
+            value,
+            font=font,
+            fill=(30, 30, 30, 255),
+            anchor="mm",
+            stroke_width=2,
+            stroke_fill=(30, 30, 30, 255),
+        )
+
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if img.mode == "RGBA":
+        bg = Image.new("RGB", img.size, "white")
+        bg.paste(img, mask=img.split()[3])
+        final = bg
+    else:
+        final = img.convert("RGB")
+    final.save(str(out), format="PNG", optimize=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 5a — Download all certificates as ZIP (current session)
+# GET /faculty/zip
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/zip")
+async def download_guest_zip(
+    current_user: User = Depends(require_faculty),
+):
+    """Return all generated guest certificates as a single ZIP (current session)."""
+    session = await _resolve_active_session(current_user)
+    return _build_zip_response(session)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 5b — Send emails
+# POST /faculty/send-emails
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/send-emails")
+async def send_guest_emails(
+    payload: Optional[SendGuestEmailsRequest] = Body(default=None),
+    current_user: User = Depends(require_faculty),
+):
+    """Send each generated certificate to the email address in the email column."""
+    session = await _resolve_active_session(current_user)
+    return await _send_guest_emails_for_session(session, payload, current_user=current_user)
+
+
+async def _send_guest_emails_for_session(
+    session: Any,
+    payload: Optional[SendGuestEmailsRequest] = None,
+    current_user: Optional[User] = None,
+) -> Dict[str, Any]:
+    """Send guest certificate emails for one session and persist row status."""
+
+    if not session.guest_generated_certs:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No certificates available. Please complete Step 4 first.",
+        )
+
+    rows = session.guest_excel_data or []
+    certs = session.guest_generated_certs or []
+    email_col = session.guest_email_column or _detect_email_column(rows, session.guest_selected_columns)
+
+    if email_col and email_col != session.guest_email_column:
+        await session.set({"guest_email_column": email_col})
+
+    if not email_col:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Email column not detected. Ensure the uploaded Excel contains an email column.",
+        )
+
+    if rows:
+        header_keys = set(rows[0].keys())
+        if email_col not in header_keys:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Configured email column '{email_col}' was not found in uploaded Excel headers.",
+            )
+
+    def _build_statuses() -> List[Dict[str, Any]]:
+        statuses: List[Dict[str, Any]] = []
+        for idx, row in enumerate(rows):
+            recipient_email = (row.get(email_col, "") if email_col else "").strip()
+            recipient_name = ""
+            for name_key in ("Name", "name", "Full Name", "full_name", "Student Name"):
+                if name_key in row and row[name_key]:
+                    recipient_name = row[name_key]
+                    break
+            if not recipient_name and recipient_email:
+                recipient_name = recipient_email.split("@")[0]
+            statuses.append(
+                {
+                    "row_index": idx,
+                    "recipient_email": recipient_email,
+                    "recipient_name": recipient_name,
+                    "status": "pending",
+                    "sent_at": None,
+                    "error": None,
+                }
+            )
+        return statuses
+
+    email_statuses = session.guest_email_statuses
+    if not isinstance(email_statuses, list) or len(email_statuses) != len(rows):
+        email_statuses = _build_statuses()
+    else:
+        for idx, row in enumerate(rows):
+            entry = email_statuses[idx] if isinstance(email_statuses[idx], dict) else {}
+            recipient_email = (row.get(email_col, "") if email_col else "").strip()
+            recipient_name = ""
+            for name_key in ("Name", "name", "Full Name", "full_name", "Student Name"):
+                if name_key in row and row[name_key]:
+                    recipient_name = row[name_key]
+                    break
+            if not recipient_name and recipient_email:
+                recipient_name = recipient_email.split("@")[0]
+            entry.setdefault("row_index", idx)
+            entry["recipient_email"] = recipient_email
+            entry["recipient_name"] = recipient_name
+            entry["status"] = (entry.get("status") or "pending").replace("sent", "emailed")
+            entry.setdefault("sent_at", None)
+            entry.setdefault("error", None)
+            email_statuses[idx] = entry
+
+    target_indexes = None
+    if payload and payload.row_indexes:
+        target_indexes = {idx for idx in payload.row_indexes if isinstance(idx, int)}
+
+    sent = 0
+    failed = 0
+    errors: List[str] = []
+
+    is_faculty_session = (
+        isinstance(session, FacultySession)
+        or (current_user is not None and _is_faculty_user(current_user))
+    )
+    if not is_faculty_session and getattr(session, "user_id", None):
+        creator = await User.get(session.user_id)
+        if creator and _is_faculty_user(creator):
+            is_faculty_session = True
+
+    cert_prefix = f"FAC-{str(session.id)[-6:]}" if is_faculty_session else f"GUEST-{str(session.id)[-6:]}"
+    club_label = "Faculty Event" if is_faculty_session else "Guest Event"
+    cert_type_label = "Faculty Certificate" if is_faculty_session else "Guest Certificate"
+
+    for idx, row in enumerate(rows):
+        if target_indexes is not None and idx not in target_indexes:
+            continue
+
+        entry = email_statuses[idx]
+        if entry.get("status") == "emailed":
+            continue
+
+        recipient_email = (entry.get("recipient_email") or "").strip()
+        if not recipient_email:
+            entry["status"] = "failed"
+            entry["error"] = f"Row {idx + 1}: No email address found in column '{email_col}'"
+            failed += 1
+            errors.append(entry["error"])
+            continue
+
+        cert_path = certs[idx] if idx < len(certs) else None
+        if not cert_path or not Path(cert_path).exists():
+            entry["status"] = "failed"
+            entry["error"] = f"Row {idx + 1}: Certificate file not found — {cert_path}"
+            failed += 1
+            errors.append(entry["error"])
+            continue
+
+        recipient_name = entry.get("recipient_name") or recipient_email.split("@")[0]
+        cert_number = f"{cert_prefix}-{idx + 1:04d}"
+        try:
+            success = await send_certificate_email(
+                recipient_email=recipient_email,
+                recipient_name=recipient_name,
+                cert_number=cert_number,
+                event_name=session.event_name,
+                club_name=club_label,
+                png_path=cert_path,
+            )
+            if success:
+                entry["status"] = "emailed"
+                entry["sent_at"] = datetime.utcnow()
+                entry["error"] = None
+
+                # Award credits after successful email
+                if session.guest_allocate_points and session.guest_points_per_cert > 0:
+                    try:
+                        await _award_guest_credits(
+                            cert_number=cert_number,
+                            student_email=recipient_email,
+                            student_name=recipient_name,
+                            points=session.guest_points_per_cert,
+                            event_name=session.event_name,
+                            club_name=club_label,
+                            cert_type=cert_type_label,
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to award credits for %s after email: %s", recipient_email, exc)
+
+                existing = await FacultyCertificate.find_one(FacultyCertificate.cert_number == cert_number)
+                if existing:
+                    await existing.set({
+                        "status": "emailed",
+                        "emailed_at": entry["sent_at"],
+                        "email_error": None,
+                    })
+
+                try:
+                    from ...models.email_log import EmailLog, EmailStatus
+                    await EmailLog(
+                        certificate_id=session.id,
+                        recipient_email=recipient_email,
+                        status=EmailStatus.SENT,
+                        sent_at=entry["sent_at"],
+                    ).insert()
+                except Exception:
+                    pass
+
+                sent += 1
+            else:
+                entry["status"] = "failed"
+                entry["error"] = f"Row {idx + 1}: Email delivery failed (rate limit or SMTP error)"
+                existing = await FacultyCertificate.find_one(FacultyCertificate.cert_number == cert_number)
+                if existing:
+                    await existing.set({"status": "failed", "email_error": entry["error"]})
+                try:
+                    from ...models.email_log import EmailLog, EmailStatus
+                    await EmailLog(
+                        certificate_id=session.id,
+                        recipient_email=recipient_email,
+                        status=EmailStatus.FAILED,
+                        error_msg=entry["error"],
+                    ).insert()
+                except Exception:
+                    pass
+                failed += 1
+                errors.append(entry["error"])
+        except Exception as exc:
+            entry["status"] = "failed"
+            entry["error"] = f"Row {idx + 1}: {exc}"
+            existing = await FacultyCertificate.find_one(FacultyCertificate.cert_number == cert_number)
+            if existing:
+                await existing.set({"status": "failed", "email_error": entry["error"]})
+            try:
+                from ...models.email_log import EmailLog, EmailStatus
+                await EmailLog(
+                    certificate_id=session.id,
+                    recipient_email=recipient_email,
+                    status=EmailStatus.FAILED,
+                    error_msg=entry["error"],
+                ).insert()
+            except Exception:
+                pass
+            failed += 1
+            errors.append(entry["error"])
+
+    sent_count = sum(1 for entry in email_statuses if entry.get("status") == "emailed")
+    failed_count = sum(1 for entry in email_statuses if entry.get("status") == "failed")
+    pending_count = sum(1 for entry in email_statuses if entry.get("status") not in ("emailed", "failed"))
+
+    await session.set(
+        {
+            "guest_email_statuses": email_statuses,
+            "guest_emails_sent": sent_count > 0,
+        }
+    )
+
+    return {
+        "sent": sent,
+        "failed": failed,
+        "errors": errors,
+        "message": f"Sent {sent} email(s). {failed} failed.",
+        "email_statuses": email_statuses,
+        "email_sent_count": sent_count,
+        "email_failed_count": failed_count,
+        "email_pending_count": pending_count,
+        "email_total_count": len(email_statuses),
+    }
+
+
+@router.post("/sessions/{session_id}/send-emails")
+async def send_guest_session_emails(
+    session_id: PydanticObjectId,
+    payload: Optional[SendGuestEmailsRequest] = Body(default=None),
+    current_user: User = Depends(require_faculty),
+):
+    """Send unsent certificate emails for a historical faculty session."""
+    session = await _get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status.HTTP_410_GONE, "Session has expired and files have been deleted")
+
+    return await _send_guest_emails_for_session(session, payload, current_user=current_user)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STATUS — Poll current faculty session state
+# GET /faculty/status
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/status")
+async def get_guest_status(
+    current_user: User = Depends(require_faculty),
+):
+    """Return the current state of the active faculty session."""
+    session = await _resolve_active_session(current_user)
+
+    fp = await FacultyFieldPosition.find_one(
+        FacultyFieldPosition.session_id == session.id
+    )
+    if not fp:
+        fp = await FieldPosition.find_one(
+            FieldPosition.event_id == session.id,
+            FieldPosition.cert_type == "guest",
+        )
+
+    template_url = None
+    if session.guest_template_path:
+        tmpl = Path(session.guest_template_path)
+        if tmpl.exists():
+            template_url = f"/storage/faculty_templates/{tmpl.name}"
+
+    email_statuses = session.guest_email_statuses or []
+    for entry in email_statuses:
+        if isinstance(entry, dict) and entry.get("status") == "sent":
+            entry["status"] = "emailed"
+    email_column = session.guest_email_column or _detect_email_column(session.guest_excel_data, session.guest_selected_columns)
+    if not email_statuses and session.guest_excel_data and email_column:
+        rows = session.guest_excel_data
+        email_col = email_column
+        for idx, row in enumerate(rows):
+            recipient_email = (row.get(email_col, "") if email_col else "").strip()
+            recipient_name = ""
+            for name_key in ("Name", "name", "Full Name", "full_name", "Student Name"):
+                if name_key in row and row[name_key]:
+                    recipient_name = row[name_key]
+                    break
+            if not recipient_name and recipient_email:
+                recipient_name = recipient_email.split("@")[0]
+            email_statuses.append(
+                {
+                    "row_index": idx,
+                    "recipient_email": recipient_email,
+                    "recipient_name": recipient_name,
+                    "status": "pending",
+                    "sent_at": None,
+                    "error": None,
+                }
+            )
+
+    cert_docs = await FacultyCertificate.find(FacultyCertificate.session_id == session.id).to_list()
+    cert_items = [
+        {
+            "index": idx,
+            "cert_number": c.cert_number,
+            "recipient_name": c.recipient_name,
+            "recipient_email": c.recipient_email,
+            "registration_number": c.registration_number,
+            "class_name": c.class_name,
+            "contribution": c.contribution,
+            "status": c.status,
+            "preview_url": c.png_url,
+            "file_name": Path(c.file_path).name if c.file_path else f"{c.cert_number}.png",
+            "emailed_at": c.emailed_at.isoformat() if c.emailed_at else None,
+            "error": c.email_error,
+        }
+        for idx, c in enumerate(cert_docs)
+    ]
+
+    return {
+        "session_id": str(session.id),
+        "event_name": session.event_name,
+        "expires_at": session.expires_at.isoformat(),
+        "step1_complete": bool(session.guest_template_path and Path(session.guest_template_path).exists()),
+        "template_url": template_url,
+        "step2_complete": bool(
+            session.guest_excel_data
+            and session.guest_selected_columns
+        ),
+        "excel_row_count": len(session.guest_excel_data) if session.guest_excel_data else 0,
+        "selected_columns": session.guest_selected_columns or [],
+        "email_column": email_column,
+        "all_excel_headers": (
+            list(session.guest_excel_data[0].keys()) if session.guest_excel_data else []
+        ),
+        "step3_complete": bool(fp),
+        "field_positions": {
+            "column_positions": fp.column_positions if fp else {},
+            "display_width": fp.display_width if fp else 580.0,
+        } if fp else None,
+        "step4_complete": bool(session.guest_generated_certs),
+        "generated_count": len(session.guest_generated_certs) if session.guest_generated_certs else 0,
+        "step5_emails_sent": session.guest_emails_sent,
+        "guest_allocate_points": bool(session.guest_allocate_points),
+        "guest_points_per_cert": int(session.guest_points_per_cert or 0),
+        "email_statuses": email_statuses,
+        "email_sent_count": sum(1 for e in email_statuses if e.get("status") == "emailed"),
+        "email_failed_count": sum(1 for e in email_statuses if e.get("status") == "failed"),
+        "email_pending_count": sum(1 for e in email_statuses if e.get("status") not in ("emailed", "failed")),
+        "email_total_count": len(email_statuses),
+        "certificates": cert_items,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HISTORY — List all non-expired sessions
+# GET /faculty/history
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/history")
+async def get_guest_history(
+    current_user: User = Depends(require_faculty),
+):
+    """Return all non-expired sessions for this user, newest first."""
+    now = datetime.utcnow()
+    Model = FacultySession
+    sessions = await Model.find(
+        Model.user_id == current_user.id,
+        Model.expires_at > now,
+        sort=[("created_at", -1)],
+    ).to_list()
+
+    legacy = await GuestSession.find(
+        GuestSession.user_id == current_user.id,
+        GuestSession.expires_at > now,
+        sort=[("created_at", -1)],
+    ).to_list()
+    if legacy:
+        sessions = sorted(sessions + legacy, key=lambda s: s.created_at, reverse=True)
+
+    result = []
+    for s in sessions:
+        cert_count = len(s.guest_generated_certs) if s.guest_generated_certs else 0
+        if cert_count == 0:
+            continue
+        has_downloadable = (
+            cert_count > 0
+            and any(Path(p).exists() for p in (s.guest_generated_certs or []))
+        )
+        days_remaining = max(0, (s.expires_at - now).days)
+        result.append({
+            "session_id": str(s.id),
+            "event_name": s.event_name,
+            "created_at": s.created_at.isoformat(),
+            "expires_at": s.expires_at.isoformat(),
+            "days_remaining": days_remaining,
+            "cert_count": cert_count,
+            "emails_sent": s.guest_emails_sent,
+            "has_downloadable_certs": has_downloadable,
+        })
+
+    return result
+
+
+@router.get("/sessions/{session_id}")
+async def get_guest_session_detail(
+    session_id: PydanticObjectId,
+    current_user: User = Depends(require_faculty),
+):
+    """Return details for one historical faculty session."""
+    session = await _get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status.HTTP_410_GONE, "Session has expired and files have been deleted")
+
+    cert_docs = await FacultyCertificate.find(FacultyCertificate.session_id == session.id).to_list()
+    if cert_docs:
+        certificates = [
+            {
+                "index": idx,
+                "cert_number": c.cert_number,
+                "recipient_name": c.recipient_name,
+                "recipient_email": c.recipient_email,
+                "registration_number": c.registration_number,
+                "class_name": c.class_name,
+                "contribution": c.contribution,
+                "status": c.status,
+                "preview_url": c.png_url,
+                "file_name": Path(c.file_path).name if c.file_path else f"{c.cert_number}.png",
+                "sent_at": c.emailed_at.isoformat() if c.emailed_at else None,
+                "error": c.email_error,
+            }
+            for idx, c in enumerate(cert_docs)
+        ]
+    else:
+        cert_paths = session.guest_generated_certs or []
+        email_statuses = session.guest_email_statuses or []
+        rows = session.guest_excel_data or []
+        cert_prefix = f"FAC-{str(session.id)[-6:]}"
+
+        certificates = []
+        for idx, cert_path_str in enumerate(cert_paths):
+            cert_path = Path(cert_path_str)
+            if not cert_path.exists():
+                continue
+
+            email_entry = email_statuses[idx] if idx < len(email_statuses) and isinstance(email_statuses[idx], dict) else {}
+            row = rows[idx] if idx < len(rows) and isinstance(rows[idx], dict) else {}
+            recipient_email = (email_entry.get("recipient_email") or "").strip() or next(
+                (str(row.get(col, "") or "").strip() for col in (session.guest_email_column, ) if col and str(row.get(col, "") or "").strip()),
+                "",
+            )
+            recipient_name = (email_entry.get("recipient_name") or "").strip() or next(
+                (str(row.get(key, "") or "").strip() for key in ("Name", "name", "Full Name", "full_name", "Student Name") if str(row.get(key, "") or "").strip()),
+                recipient_email.split("@")[0] if recipient_email else "",
+            )
+            certificates.append({
+                "index": idx,
+                "cert_number": f"{cert_prefix}-{idx + 1:04d}",
+                "recipient_email": recipient_email,
+                "recipient_name": recipient_name,
+                "status": (email_entry.get("status") or ("emailed" if session.guest_emails_sent else "generated")).replace("sent", "emailed"),
+                "sent_at": email_entry.get("sent_at"),
+                "error": email_entry.get("error"),
+                "file_name": cert_path.name,
+                "preview_url": _guest_session_cert_preview_url(str(session.id), cert_path.name),
+            })
+
+    return {
+        "session_id": str(session.id),
+        "event_name": session.event_name,
+        "created_at": session.created_at.isoformat(),
+        "expires_at": session.expires_at.isoformat(),
+        "days_remaining": max(0, (session.expires_at - datetime.utcnow()).days),
+        "cert_count": len(certificates),
+        "emails_sent": session.guest_emails_sent,
+        "guest_allocate_points": bool(session.guest_allocate_points),
+        "guest_points_per_cert": int(session.guest_points_per_cert or 0),
+        "email_column": session.guest_email_column,
+        "certificates": certificates,
+    }
+
+
+@router.get("/sessions/{session_id}/certificates/{file_name}")
+async def download_guest_session_certificate(
+    session_id: PydanticObjectId,
+    file_name: str,
+    current_user: User = Depends(require_faculty),
+):
+    """Return a single generated certificate image for preview or download."""
+    session = await _get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status.HTTP_410_GONE, "Session has expired and files have been deleted")
+
+    target = _guest_certs_dir(str(session.id)) / file_name
+    if not target.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate file not found")
+
+    return FileResponse(
+        path=str(target),
+        media_type="image/png",
+        filename=target.name,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HISTORY ZIP — Re-download ZIP for a specific past session
+# GET /faculty/sessions/{session_id}/zip
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/sessions/{session_id}/zip")
+async def download_session_zip(
+    session_id: PydanticObjectId,
+    current_user: User = Depends(require_faculty),
+):
+    """Re-download ZIP for a historical session. Ownership-checked."""
+    session = await _get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status.HTTP_410_GONE, "Session has expired and files have been deleted")
+    return _build_zip_response(session)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal: build StreamingResponse ZIP
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_zip_response(session: Any) -> StreamingResponse:
+    """Build a ZIP StreamingResponse from a session's generated certs."""
+    if not session.guest_generated_certs:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No certificates have been generated yet. Please complete Step 4 first.",
+        )
+
+    existing = [p for p in session.guest_generated_certs if Path(p).exists()]
+    if not existing:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Certificate files not found on disk. They may have been deleted.",
+        )
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path_str in existing:
+            p = Path(path_str)
+            zf.write(p, arcname=p.name)
+    zip_buf.seek(0)
+
+    safe_name = session.event_name.replace(" ", "_")[:50]
+    return StreamingResponse(
+        zip_buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}_certificates.zip"'
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRESET CREDIT RULES — Available for certificate generation
+# GET /faculty/credit-rules
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/credit-rules")
+async def get_guest_credit_rules(
+    current_user: User = Depends(require_faculty),
+):
+    """Return all preset credit rules available for credit point allocation."""
+    rules = await CreditRule.find_all().to_list()
+    rules.sort(key=lambda r: r.cert_type.lower())
+    return [
+        {"id": str(r.id), "cert_type": r.cert_type, "points": int(r.points or 0)}
+        for r in rules
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EDIT / DELETE SESSION — Update event name or delete session
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EditSessionRequest(BaseModel):
+    event_name: str
+
+    @field_validator("event_name")
+    @classmethod
+    def validate_event_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Event name must be at least 3 characters")
+        if len(v) > 100:
+            raise ValueError("Event name must be at most 100 characters")
+        return v
+
+
+@router.patch("/sessions/{session_id}")
+async def update_guest_session(
+    session_id: PydanticObjectId,
+    body: EditSessionRequest,
+    current_user: User = Depends(require_faculty),
+):
+    """Update event name for a historical guest session."""
+    session = await _get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if session.expires_at < datetime.utcnow():
+        raise HTTPException(status.HTTP_410_GONE, "Session has expired")
+
+    await session.set({"event_name": body.event_name})
+    return {
+        "message": "Event updated successfully",
+        "session_id": str(session.id),
+        "event_name": session.event_name,
+    }
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_guest_session(
+    session_id: PydanticObjectId,
+    current_user: User = Depends(require_faculty),
+):
+    """Delete a session and its associated files."""
+    session = await _get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+    if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+
+    if session.guest_template_path:
+        try:
+            Path(session.guest_template_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    if session.guest_generated_certs:
+        for p in session.guest_generated_certs:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    await session.delete()
+    return {"message": "Event session deleted successfully", "session_id": str(session_id)}

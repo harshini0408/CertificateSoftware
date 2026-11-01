@@ -39,12 +39,12 @@ from ...models.dept_certificate import DeptCertificate
 from ...models.field_position import FieldPosition
 from ...models.credit_rule import CreditRule
 from ...models.guest_session import GuestSession
+from ...models.faculty_session import FacultySession
 from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.user import User, UserRole
 from ...services.storage_service import storage_path_to_url
 from ...services.semester_service import get_current_semester
 from ...services.email_service import send_certificate_email
-from ...services.credit_service import capped_credit_points
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -73,21 +73,47 @@ def _guest_templates_dir() -> Path:
     return d
 
 
-async def _resolve_active_session(user: User) -> GuestSession:
-    """Return the most recent non-expired GuestSession for this user.
+def _is_faculty_user(user: User) -> bool:
+    return getattr(user, "role", None) in (UserRole.FACULTY, UserRole.TUTOR)
 
-    Raises HTTP 400 if no active session exists — the guest must call
+
+def _get_session_model(user: User):
+    if _is_faculty_user(user):
+        return FacultySession
+    return GuestSession
+
+
+async def _get_session_by_id(session_id: PydanticObjectId):
+    s = await GuestSession.get(session_id)
+    if not s:
+        s = await FacultySession.get(session_id)
+    return s
+
+
+async def _resolve_active_session(user: User) -> Any:
+    """Return the most recent non-expired session for this user (FacultySession or GuestSession).
+
+    Raises HTTP 400 if no active session exists — the user must call
     POST /guest/start-session first.
     """
-    session = await GuestSession.find_one(
-        GuestSession.user_id == user.id,
-        GuestSession.expires_at > datetime.utcnow(),
+    Model = _get_session_model(user)
+    session = await Model.find_one(
+        Model.user_id == user.id,
+        Model.expires_at > datetime.utcnow(),
         sort=[("created_at", -1)],
     )
     if not session:
+        AltModel = GuestSession if Model is FacultySession else FacultySession
+        session = await AltModel.find_one(
+            AltModel.user_id == user.id,
+            AltModel.expires_at > datetime.utcnow(),
+            sort=[("created_at", -1)],
+        )
+    if not session:
+        role_label = "faculty" if _is_faculty_user(user) else "guest"
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "No active guest session. Please start a new session from the dashboard.",
+            f"No active {role_label} session. Please start a new session from the dashboard.",
         )
     return session
 
@@ -186,19 +212,12 @@ async def _award_guest_credits(
 
     credit_doc = await StudentCredit.find_one(StudentCredit.student_email == email)
     semester = await get_current_semester() or "Unknown"
-    awarded_points = await capped_credit_points(
-        credit_doc,
-        cert_type,
-        semester,
-        points,
-    )
     entry = CreditHistoryEntry(
         cert_number=cert_number,
         event_name=event_name,
         club_name=club_name,
         cert_type=cert_type,
-        points_awarded=awarded_points,
-        eligible_points=points,
+        points_awarded=points,
         semester=semester,
         awarded_at=datetime.utcnow(),
     )
@@ -206,7 +225,7 @@ async def _award_guest_credits(
     if credit_doc:
         if any(h.cert_number == cert_number for h in credit_doc.credit_history):
             return
-        credit_doc.total_credits += awarded_points
+        credit_doc.total_credits += points
         credit_doc.credit_history.append(entry)
         credit_doc.last_updated = datetime.utcnow()
         await credit_doc.save()
@@ -214,13 +233,13 @@ async def _award_guest_credits(
         await StudentCredit(
             student_email=email,
             student_name=student_name,
-            total_credits=awarded_points,
+            total_credits=points,
             credit_history=[entry],
             last_updated=datetime.utcnow(),
         ).insert()
 
 
-def _safe_session_cert_path(session: GuestSession, cert_path_str: str) -> Path:
+def _safe_session_cert_path(session: Any, cert_path_str: str) -> Path:
     cert_path = Path(cert_path_str)
     base_dir = _guest_certs_dir(str(session.id)).resolve()
     resolved = cert_path.resolve()
@@ -257,16 +276,17 @@ async def start_guest_session(
     body: StartSessionRequest,
     current_user: User = Depends(require_guest),
 ):
-    """Create a new GuestSession for this guest user.
+    """Create a new session for this user (FacultySession for faculty/tutor, GuestSession for guests).
 
     Each call creates a fresh session; previous sessions remain accessible
     in history until they expire (15 days).
     """
     now = datetime.utcnow()
+    Model = _get_session_model(current_user)
 
     # Clean up previous draft sessions where no certificates were generated
-    old_drafts = await GuestSession.find(
-        GuestSession.user_id == current_user.id
+    old_drafts = await Model.find(
+        Model.user_id == current_user.id
     ).to_list()
     for draft in old_drafts:
         if not draft.guest_generated_certs:
@@ -277,7 +297,7 @@ async def start_guest_session(
                     pass
             await draft.delete()
 
-    session = GuestSession(
+    session = Model(
         user_id=current_user.id,
         event_name=body.event_name,
         created_at=now,
@@ -816,12 +836,13 @@ async def send_guest_emails(
 ):
     """Send each generated certificate to the email address in the email column."""
     session = await _resolve_active_session(current_user)
-    return await _send_guest_emails_for_session(session, payload)
+    return await _send_guest_emails_for_session(session, payload, current_user=current_user)
 
 
 async def _send_guest_emails_for_session(
-    session: GuestSession,
+    session: Any,
     payload: Optional[SendGuestEmailsRequest] = None,
+    current_user: Optional[User] = None,
 ) -> Dict[str, Any]:
     """Send guest certificate emails for one session and persist row status."""
 
@@ -905,7 +926,15 @@ async def _send_guest_emails_for_session(
     failed = 0
     errors: List[str] = []
 
-    is_faculty_session = current_user.role in (UserRole.FACULTY, UserRole.TUTOR)
+    is_faculty_session = (
+        isinstance(session, FacultySession)
+        or (current_user is not None and _is_faculty_user(current_user))
+    )
+    if not is_faculty_session and getattr(session, "user_id", None):
+        creator = await User.get(session.user_id)
+        if creator and _is_faculty_user(creator):
+            is_faculty_session = True
+
     cert_prefix = f"FAC-{str(session.id)[-6:]}" if is_faculty_session else f"GUEST-{str(session.id)[-6:]}"
     club_label = "Faculty Event" if is_faculty_session else "Guest Event"
     cert_type_label = "Faculty Certificate" if is_faculty_session else "Guest Certificate"
@@ -1052,7 +1081,7 @@ async def send_guest_session_emails(
     current_user: User = Depends(require_guest),
 ):
     """Send unsent certificate emails for a historical guest session."""
-    session = await GuestSession.get(session_id)
+    session = await _get_session_by_id(session_id)
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     if session.user_id != current_user.id:
@@ -1060,7 +1089,7 @@ async def send_guest_session_emails(
     if session.expires_at < datetime.utcnow():
         raise HTTPException(status.HTTP_410_GONE, "Session has expired and files have been deleted")
 
-    return await _send_guest_emails_for_session(session, payload)
+    return await _send_guest_emails_for_session(session, payload, current_user=current_user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1157,13 +1186,23 @@ async def get_guest_status(
 async def get_guest_history(
     current_user: User = Depends(require_guest),
 ):
-    """Return all non-expired GuestSessions for this guest, newest first."""
+    """Return all non-expired sessions for this user, newest first."""
     now = datetime.utcnow()
-    sessions = await GuestSession.find(
-        GuestSession.user_id == current_user.id,
-        GuestSession.expires_at > now,
+    Model = _get_session_model(current_user)
+    sessions = await Model.find(
+        Model.user_id == current_user.id,
+        Model.expires_at > now,
         sort=[("created_at", -1)],
     ).to_list()
+
+    if Model is FacultySession:
+        legacy = await GuestSession.find(
+            GuestSession.user_id == current_user.id,
+            GuestSession.expires_at > now,
+            sort=[("created_at", -1)],
+        ).to_list()
+        if legacy:
+            sessions = sorted(sessions + legacy, key=lambda s: s.created_at, reverse=True)
 
     result = []
     for s in sessions:
@@ -1195,7 +1234,7 @@ async def get_guest_session_detail(
     current_user: User = Depends(require_guest),
 ):
     """Return details for one historical guest session."""
-    session = await GuestSession.get(session_id)
+    session = await _get_session_by_id(session_id)
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     if session.user_id != current_user.id:
@@ -1261,7 +1300,7 @@ async def download_guest_session_certificate(
     current_user: User = Depends(require_guest),
 ):
     """Return a single generated certificate image for preview or download."""
-    session = await GuestSession.get(session_id)
+    session = await _get_session_by_id(session_id)
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     if session.user_id != current_user.id:
@@ -1300,7 +1339,7 @@ async def download_session_zip(
     current_user: User = Depends(require_guest),
 ):
     """Re-download ZIP for a historical session. Ownership-checked."""
-    session = await GuestSession.get(session_id)
+    session = await _get_session_by_id(session_id)
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     if session.user_id != current_user.id:
@@ -1314,7 +1353,7 @@ async def download_session_zip(
 # Internal: build StreamingResponse ZIP
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_zip_response(session: GuestSession) -> StreamingResponse:
+def _build_zip_response(session: Any) -> StreamingResponse:
     """Build a ZIP StreamingResponse from a session's generated certs."""
     if not session.guest_generated_certs:
         raise HTTPException(
@@ -1389,7 +1428,7 @@ async def update_guest_session(
     current_user: User = Depends(require_guest),
 ):
     """Update event name for a historical guest session."""
-    session = await GuestSession.get(session_id)
+    session = await _get_session_by_id(session_id)
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
@@ -1411,7 +1450,7 @@ async def delete_guest_session(
     current_user: User = Depends(require_guest),
 ):
     """Delete a session and its associated files."""
-    session = await GuestSession.get(session_id)
+    session = await _get_session_by_id(session_id)
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     if session.user_id != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
