@@ -84,6 +84,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
     register,
     handleSubmit,
     reset,
+    watch,
     setValue,
     formState: { errors, isSubmitting },
   } = useForm({
@@ -95,13 +96,18 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       session: 'FN',
       venue: '',
       category: 'Workshop',
+      activity_type: 'individual',
       max_participants: '',
+      max_teams: '',
+      min_team_size: 2,
+      max_team_size: 4,
       volunteers_required: 0,
       is_published: true,
     },
   })
 
   const onSubmitEvent = async (formData) => {
+    const isGroup = formData.activity_type === 'group'
     const payload = {
       name: formData.name.trim(),
       description: formData.description?.trim() || null,
@@ -110,7 +116,12 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       session: formData.session || 'FN',
       venue: formData.venue?.trim() || null,
       category: formData.category || 'Workshop',
-      max_participants: formData.max_participants ? parseInt(formData.max_participants, 10) : null,
+      activity_type: formData.activity_type || 'individual',
+      is_team_event: isGroup,
+      max_participants: !isGroup && formData.max_participants ? parseInt(formData.max_participants, 10) : null,
+      max_teams: isGroup && formData.max_teams ? parseInt(formData.max_teams, 10) : null,
+      min_team_size: isGroup && formData.min_team_size ? parseInt(formData.min_team_size, 10) : null,
+      max_team_size: isGroup && formData.max_team_size ? parseInt(formData.max_team_size, 10) : null,
       volunteers_required: formData.volunteers_required ? parseInt(formData.volunteers_required, 10) : 0,
       is_published: !!formData.is_published,
     }
@@ -148,7 +159,11 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       session: ev.session || 'FN',
       venue: ev.venue || '',
       category: ev.category || 'Workshop',
+      activity_type: ev.activity_type || (ev.is_team_event ? 'group' : 'individual'),
       max_participants: ev.max_participants != null ? String(ev.max_participants) : '',
+      max_teams: ev.max_teams != null ? String(ev.max_teams) : '',
+      min_team_size: ev.min_team_size || 2,
+      max_team_size: ev.max_team_size || 4,
       volunteers_required: ev.volunteers_required || 0,
       is_published: !!ev.is_published,
     })
@@ -334,13 +349,18 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                       )}
                       <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1">
                         <span>
-                          👥 Participants: <strong className="text-gray-700">{ev.participant_count ?? 0}</strong>
-                          {ev.max_participants ? ` / ${ev.max_participants}` : ''}
+                          👥 {ev.is_team_event || ev.activity_type === 'group' ? 'Teams' : 'Participants'}: <strong className="text-gray-700">{ev.is_team_event || ev.activity_type === 'group' ? (ev.teams_count ?? 0) : (ev.participant_count ?? 0)}</strong>
+                          {ev.is_team_event || ev.activity_type === 'group' ? (ev.max_teams ? ` / ${ev.max_teams}` : '') : (ev.max_participants ? ` / ${ev.max_participants}` : '')}
                         </span>
                         {(ev.volunteers_required || 0) > 0 && (
                           <span>🤝 Volunteers: {ev.volunteers_registered || 0}/{ev.volunteers_required}</span>
                         )}
                       </div>
+                      {(ev.is_team_event || ev.activity_type === 'group') && (
+                        <div className="text-[11px] text-teal-700 font-medium">
+                          Team Size: {ev.team_size > 1 ? `${ev.team_size} members` : `${ev.min_team_size || 2}–${ev.max_team_size || 4} members`}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -512,27 +532,122 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                 <input type="hidden" {...register('venue')} />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="form-label">Max Participants</label>
-                  <input
-                    type="number"
-                    min={1}
-                    placeholder="Leave blank for unlimited"
-                    className="form-input text-sm"
-                    {...register('max_participants')}
-                  />
+              <div>
+                <label className="form-label" htmlFor="society-volunteers-required">Volunteers Required</label>
+                <input
+                  id="society-volunteers-required"
+                  type="number"
+                  min="0"
+                  className={`form-input text-sm ${errors.volunteers_required ? 'form-input-error' : ''}`}
+                  placeholder="0"
+                  onWheel={(e) => e.target.blur()}
+                  {...register('volunteers_required', {
+                    setValueAs: (value) =>
+                      value === '' || value == null || Number.isNaN(Number(value))
+                        ? 0
+                        : Math.max(0, parseInt(value, 10) || 0),
+                    min: { value: 0, message: 'Cannot be negative' }
+                  })}
+                />
+                {errors.volunteers_required && <p className="form-error">{errors.volunteers_required.message}</p>}
+              </div>
+
+              {/* Activity Type / Group Event Settings */}
+              <div className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/60 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="form-label mb-0" htmlFor="society-activity-type">Participation Format *</label>
+                    <p className="text-[11px] text-gray-500">Choose whether participants register individually or as a team</p>
+                  </div>
+                  <select
+                    id="society-activity-type"
+                    className="form-input sm:w-56 text-xs font-semibold"
+                    {...register('activity_type')}
+                  >
+                    <option value="individual">👤 Individual Participation</option>
+                    <option value="group">👥 Group / Team Activity</option>
+                  </select>
                 </div>
-                <div>
-                  <label className="form-label">Volunteers Required</label>
-                  <input
-                    type="number"
-                    min={0}
-                    placeholder="0"
-                    className="form-input text-sm"
-                    {...register('volunteers_required')}
-                  />
-                </div>
+
+                {watch('activity_type') === 'individual' ? (
+                  <div className="max-w-sm pt-2.5 border-t border-gray-200 animate-in fade-in duration-150">
+                    <label className="form-label" htmlFor="society-max-participants">Max Participants (Optional)</label>
+                    <input
+                      id="society-max-participants"
+                      type="number"
+                      min="0"
+                      className={`form-input text-xs ${errors.max_participants ? 'form-input-error' : ''}`}
+                      placeholder="No limit"
+                      onWheel={(e) => e.target.blur()}
+                      {...register('max_participants', {
+                        setValueAs: (value) => value === '' || Number.isNaN(Number(value)) ? null : parseInt(value, 10),
+                        min: { value: 0, message: 'Cannot be negative' },
+                      })}
+                    />
+                    {errors.max_participants && <p className="form-error">{errors.max_participants.message}</p>}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2.5 border-t border-gray-200 animate-in fade-in duration-150">
+                    <div>
+                      <label className="form-label" htmlFor="society-max-teams">Max Teams (Optional)</label>
+                      <input
+                        id="society-max-teams"
+                        type="number"
+                        min="0"
+                        className={`form-input text-xs ${errors.max_teams ? 'form-input-error' : ''}`}
+                        placeholder="No limit"
+                        onWheel={(e) => e.target.blur()}
+                        {...register('max_teams', {
+                          setValueAs: (value) => value === '' || Number.isNaN(Number(value)) ? null : parseInt(value, 10),
+                          min: { value: 0, message: 'Cannot be negative' },
+                        })}
+                      />
+                      {errors.max_teams && <p className="form-error">{errors.max_teams.message}</p>}
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="society-min-team-size">Min Team Size *</label>
+                      <input
+                        id="society-min-team-size"
+                        type="number"
+                        min="2"
+                        max="20"
+                        className={`form-input text-xs ${errors.min_team_size ? 'form-input-error' : ''}`}
+                        placeholder="2"
+                        {...register('min_team_size', {
+                          setValueAs: (value) =>
+                            value === '' || value == null || Number.isNaN(Number(value))
+                              ? 2
+                              : parseInt(value, 10),
+                          min: { value: 2, message: 'Minimum team size is 2' },
+                          max: { value: 20, message: 'Maximum allowed minimum team size is 20' },
+                          validate: (value) => value <= (watch('max_team_size') || 30) || 'Minimum team size cannot exceed maximum team size',
+                        })}
+                      />
+                      {errors.min_team_size && <p className="form-error">{errors.min_team_size.message}</p>}
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="society-max-team-size">Max Team Size *</label>
+                      <input
+                        id="society-max-team-size"
+                        type="number"
+                        min="2"
+                        max="30"
+                        className={`form-input text-xs ${errors.max_team_size ? 'form-input-error' : ''}`}
+                        placeholder="4"
+                        {...register('max_team_size', {
+                          setValueAs: (value) =>
+                            value === '' || value == null || Number.isNaN(Number(value))
+                              ? 4
+                              : parseInt(value, 10),
+                          min: { value: 2, message: 'Minimum is 2' },
+                          max: { value: 30, message: 'Maximum team size is 30' },
+                          validate: (value) => value >= (watch('min_team_size') || 2) || 'Maximum team size cannot be less than minimum team size',
+                        })}
+                      />
+                      {errors.max_team_size && <p className="form-error">{errors.max_team_size.message}</p>}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 pt-1">

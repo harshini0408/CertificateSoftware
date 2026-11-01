@@ -65,6 +65,12 @@ class SocietyEvent(Document):
     mapping_confirmed: bool = False
     max_participants: Optional[int] = None
     participant_count: int = 0
+    activity_type: Optional[str] = "individual"
+    is_team_event: bool = False
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
+    max_teams: Optional[int] = None
+    team_size: Optional[int] = None
     volunteers_required: int = 0
     volunteers_registered: int = 0
     qr_generations_count: int = 0

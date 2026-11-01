@@ -1,7 +1,7 @@
 from pathlib import Path
 import re
 from datetime import date, datetime
-from typing import Optional, List, Dict, Literal
+from typing import Optional, List, Dict, Literal, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -956,6 +956,8 @@ async def _student_event_conflict(event: Event, student: User) -> Optional[str]:
             if not team or team.status not in {"pending", "registered"}:
                 continue
         other_event = await Event.get(claim.event_id)
+        if not other_event:
+            other_event = await SocietyEvent.get(claim.event_id)
         if not other_event or _event_date_string(other_event) != event_date:
             continue
         other_session = getattr(other_event, "session", None) or _normalize_session(other_event.event_time)
@@ -967,7 +969,7 @@ async def _student_event_conflict(event: Event, student: User) -> Optional[str]:
     return None
 
 
-async def _event_capacity_reserved(event: Event, additional_members: int, exclude_team_id=None) -> bool:
+async def _event_capacity_reserved(event: Any, additional_members: int, exclude_team_id=None) -> bool:
     is_team_event = event_activity_type(event) == "group"
     max_teams = getattr(event, "max_teams", None)
     if is_team_event and max_teams and max_teams > 0:
@@ -1529,6 +1531,21 @@ async def cancel_event_registration(
     return {"message": "Registration cancelled successfully"}
 
 
+async def _get_any_event(event_id: PydanticObjectId):
+    ev = await Event.get(event_id)
+    if ev:
+        return ev
+    return await SocietyEvent.get(event_id)
+
+
+def _is_event_registration_active(ev) -> bool:
+    if not ev:
+        return False
+    if isinstance(ev, Event):
+        return ev.status == EventStatus.ACTIVE
+    return ev.status in (SocietyEventStatus.ACTIVE, SocietyEventStatus.CLOSED) or getattr(ev, "is_published", False)
+
+
 @router.get("/student/events/{event_id}/team-candidates")
 async def search_event_team_candidates(
     event_id: PydanticObjectId,
@@ -1536,8 +1553,8 @@ async def search_event_team_candidates(
     team_id: Optional[PydanticObjectId] = Query(None),
     current_user: User = Depends(require_role(UserRole.STUDENT)),
 ):
-    event = await Event.get(event_id)
-    if not event or event.status != EventStatus.ACTIVE:
+    event = await _get_any_event(event_id)
+    if not event or not _is_event_registration_active(event):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
     if event_activity_type(event) != "group":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "This event is not configured for team registration")
@@ -1602,8 +1619,8 @@ async def create_event_team_invitations(
     body: EventTeamCreateRequest,
     current_user: User = Depends(require_role(UserRole.STUDENT)),
 ):
-    event = await Event.get(event_id)
-    if not event or event.status != EventStatus.ACTIVE:
+    event = await _get_any_event(event_id)
+    if not event or not _is_event_registration_active(event):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found or not open for registration")
     configured_team_size = getattr(event, "team_size", None)
     is_team_event = event_activity_type(event) == "group"
@@ -1715,8 +1732,8 @@ async def invite_replacement_event_team_members(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pending team registration not found.")
     if team.status != "pending":
         raise HTTPException(status.HTTP_409_CONFLICT, "This team is no longer accepting invitations.")
-    event = await Event.get(team.event_id)
-    if not event or event.status != EventStatus.ACTIVE:
+    event = await _get_any_event(team.event_id)
+    if not event or not _is_event_registration_active(event):
         raise HTTPException(status.HTTP_409_CONFLICT, "This event is no longer accepting team registrations.")
 
     progress = await _team_invitation_progress(team)
@@ -1815,7 +1832,7 @@ async def remove_pending_event_team_invitation(
     if invitation.status != "pending":
         raise HTTPException(status.HTTP_409_CONFLICT, "Only pending invitations can be removed.")
 
-    event = await Event.get(team.event_id)
+    event = await _get_any_event(team.event_id)
     if not event:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "The event for this team no longer exists.")
     invitation.status = "removed"
@@ -1853,7 +1870,7 @@ async def get_event_team_invitation(
     invitation = await EventTeamInvitation.get(invitation_id)
     if not invitation or invitation.invitee_student_id != current_user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Team invitation not found.")
-    event = await Event.get(invitation.event_id)
+    event = await _get_any_event(invitation.event_id)
     team = await EventTeam.get(invitation.team_id)
     inviter = await User.get(invitation.inviter_student_id)
     if not event or not team:
@@ -1879,7 +1896,7 @@ async def get_event_team_invitation(
             "event_date": event.event_date.isoformat() if event.event_date else None,
             "event_time": event.event_time,
             "session": getattr(event, "session", None) or _normalize_session(event.event_time),
-            "slot": event.slot,
+            "slot": getattr(event, "slot", None),
             "venue": event.venue,
             "category": event.category,
         },
@@ -1900,12 +1917,12 @@ async def list_event_team_invitations(
     results = []
     for invitation in invitations:
         team = await EventTeam.get(invitation.team_id)
-        event = await Event.get(invitation.event_id)
+        event = await _get_any_event(invitation.event_id)
         if (
             not team
             or team.status != "pending"
             or not event
-            or event.status != EventStatus.ACTIVE
+            or not _is_event_registration_active(event)
             or not event.event_date
             or event.event_date < today_start
         ):
@@ -1931,7 +1948,7 @@ async def list_event_team_invitations(
                 "name": event.name,
                 "event_date": event.event_date.isoformat(),
                 "session": getattr(event, "session", None) or _normalize_session(event.event_time),
-                "slot": event.slot,
+                "slot": getattr(event, "slot", None),
                 "venue": event.venue,
             },
         })
@@ -1951,7 +1968,7 @@ async def respond_to_event_team_invitation(
     if invitation.status != "pending" and not retrying_accepted_invitation:
         raise HTTPException(status.HTTP_409_CONFLICT, f"This invitation is already {invitation.status}.")
     team = await EventTeam.get(invitation.team_id)
-    event = await Event.get(invitation.event_id)
+    event = await _get_any_event(invitation.event_id)
     if not team or not event:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "The event or team invitation no longer exists.")
     if team.status == "registered" and invitation.status == "accepted":
@@ -1983,7 +2000,7 @@ async def respond_to_event_team_invitation(
             **progress,
         }
 
-    if event.status != EventStatus.ACTIVE:
+    if not _is_event_registration_active(event):
         await _cancel_event_team(team)
         raise HTTPException(status.HTTP_409_CONFLICT, "This event is no longer accepting team registrations.")
 
@@ -2120,7 +2137,7 @@ async def respond_to_event_team_invitation(
                 department=member.department,
                 event_date_str=event_date_str,
                 session=session,
-                slot=event.slot,
+                slot=getattr(event, "slot", None),
                 registration_type="participant",
                 team_id=team.id,
                 status="accepted",
@@ -2128,40 +2145,42 @@ async def respond_to_event_team_invitation(
             await registration.insert()
             created_registrations.append(registration)
             normalized_email = _norm_email(member.email)
-            existing_participant = await Participant.find_one({
-                "event_id": event.id,
-                "email": {"$regex": f"^{re.escape(normalized_email)}$", "$options": "i"},
-            })
-            if existing_participant:
-                continue
 
-            participant = Participant(
-                event_id=event.id,
-                club_id=event.club_id,
-                email=normalized_email,
-                registration_number=member.registration_number,
-                cert_type=participant_type,
-                fields={
-                    "Name": member.name or "",
-                    "Email": normalized_email,
-                    "Registration Number": member.registration_number or "",
-                    "Department": member.department or "",
-                    "Role": participant_type,
-                },
-                source=ParticipantSource.REGISTRATION,
-                verified=False,
-                status="registered",
-            )
-            try:
-                await participant.insert()
-                created_participants.append(participant)
-            except DuplicateKeyError:
+            if hasattr(event, "club_id") and getattr(event, "club_id", None):
                 existing_participant = await Participant.find_one({
                     "event_id": event.id,
                     "email": {"$regex": f"^{re.escape(normalized_email)}$", "$options": "i"},
                 })
-                if not existing_participant:
-                    raise
+                if existing_participant:
+                    continue
+
+                participant = Participant(
+                    event_id=event.id,
+                    club_id=event.club_id,
+                    email=normalized_email,
+                    registration_number=member.registration_number,
+                    cert_type=participant_type,
+                    fields={
+                        "Name": member.name or "",
+                        "Email": normalized_email,
+                        "Registration Number": member.registration_number or "",
+                        "Department": member.department or "",
+                        "Role": participant_type,
+                    },
+                    source=ParticipantSource.REGISTRATION,
+                    verified=False,
+                    status="registered",
+                )
+                try:
+                    await participant.insert()
+                    created_participants.append(participant)
+                except DuplicateKeyError:
+                    existing_participant = await Participant.find_one({
+                        "event_id": event.id,
+                        "email": {"$regex": f"^{re.escape(normalized_email)}$", "$options": "i"},
+                    })
+                    if not existing_participant:
+                        raise
     except Exception:
         for registration in created_registrations:
             await registration.delete()
@@ -2174,7 +2193,7 @@ async def respond_to_event_team_invitation(
     team.status = "registered"
     await team.save()
     await event.set({
-        "participant_count": (event.participant_count or 0) + len(created_participants),
+        "participant_count": (event.participant_count or 0) + len(created_registrations),
     })
     await _remove_creator_competing_invitations(team, event)
     return {
@@ -2230,16 +2249,53 @@ async def list_upcoming_society_events(
             "id": str(r.id),
             "type": reg_type,
             "status": reg_status,
+            "team_id": str(r.team_id) if getattr(r, "team_id", None) else None,
+            "team_size": None,
         }
+
+    event_ids = [event.id for event in events]
+    event_teams = await EventTeam.find({
+        "event_id": {"$in": event_ids},
+        "status": {"$in": ["pending", "registering", "registered"]},
+    }).to_list() if event_ids else []
+    teams_count_by_event: dict[str, int] = {}
+    teams_reserved_by_event: dict[str, int] = {}
+    for event_team in event_teams:
+        event_key = str(event_team.event_id)
+        teams_reserved_by_event[event_key] = teams_reserved_by_event.get(event_key, 0) + 1
+        if event_team.status == "registered":
+            teams_count_by_event[event_key] = teams_count_by_event.get(event_key, 0) + 1
+
+    claims = await EventTeamClaim.find({
+        "event_id": {"$in": event_ids},
+        "student_id": current_user.id,
+        "team_id": {"$ne": None},
+    }).to_list() if event_ids else []
+    team_ids = [claim.team_id for claim in claims if claim.team_id]
+    teams = await EventTeam.find({"_id": {"$in": team_ids}}).to_list() if team_ids else []
+    team_map = {str(team.id): team for team in teams}
+    pending_team_by_event = {
+        str(claim.event_id): team_map.get(str(claim.team_id))
+        for claim in claims
+        if claim.team_id and team_map.get(str(claim.team_id))
+    }
+    for registration in registrations:
+        if registration.team_id:
+            team = team_map.get(str(registration.team_id))
+            if team and str(registration.event_id) in student_reg_map:
+                student_reg_map[str(registration.event_id)]["team_size"] = team.team_size
 
     all_regs = await EventRegistration.find().to_list()
     reg_counts = {}
+    participant_counts = {}
     volunteer_counts = {}
     for r in all_regs:
         eid = str(r.event_id)
         reg_type = getattr(r, "registration_type", "participant")
         reg_status = getattr(r, "status", "accepted")
         reg_counts[eid] = reg_counts.get(eid, 0) + 1
+        if reg_type == "participant" and reg_status != "rejected":
+            participant_counts[eid] = participant_counts.get(eid, 0) + 1
         if reg_type == "volunteer" and reg_status != "rejected":
             volunteer_counts[eid] = volunteer_counts.get(eid, 0) + 1
 
@@ -2247,7 +2303,14 @@ async def list_upcoming_society_events(
     for e in events:
         eid = str(e.id)
         session = e.session or _normalize_session(e.event_time)
+        slot = getattr(e, "slot", None)
         my_reg = student_reg_map.get(eid)
+        pending_team = pending_team_by_event.get(eid)
+        team_progress = (
+            await _team_invitation_progress(pending_team)
+            if pending_team and pending_team.status in {"pending", "registering", "registered"}
+            else None
+        )
         results.append({
             "id": eid,
             "name": e.name,
@@ -2257,14 +2320,56 @@ async def list_upcoming_society_events(
             "event_date": e.event_date.isoformat() if e.event_date else None,
             "event_time": e.event_time,
             "session": session,
+            "slot": slot,
             "venue": e.venue,
             "category": e.category,
             "poster_url": e.poster_url,
+            "activity_type": event_activity_type(e),
+            "is_team_event": event_activity_type(e) == "group",
+            "min_team_size": getattr(e, "min_team_size", None),
+            "max_team_size": getattr(e, "max_team_size", None),
+            "max_participants": getattr(e, "max_participants", None),
+            "max_teams": getattr(e, "max_teams", None),
+            "team_size": getattr(e, "team_size", None),
             "is_registered": my_reg is not None,
             "registration_id": my_reg["id"] if my_reg else None,
             "registration_type": my_reg["type"] if my_reg else None,
             "volunteer_status": my_reg["status"] if (my_reg and my_reg["type"] == "volunteer") else None,
+            "team_id": my_reg["team_id"] if my_reg else None,
+            "registration_team_size": my_reg["team_size"] if my_reg else None,
+            "team_registration_status": (
+                pending_team_by_event[eid].status
+                if eid in pending_team_by_event
+                and pending_team_by_event[eid].status in {"pending", "registering", "registered"}
+                else None
+            ),
+            "team_registration_id": (
+                str(pending_team_by_event[eid].id)
+                if eid in pending_team_by_event
+                and pending_team_by_event[eid].status in {"pending", "registering", "registered"}
+                else None
+            ),
+            "team_registration_is_creator": (
+                pending_team.creator_student_id == current_user.id
+                if pending_team and team_progress
+                else False
+            ),
+            "team_registration_accepted_members": (
+                team_progress["accepted_members"] if team_progress else None
+            ),
+            "team_registration_required_members": (
+                team_progress["required_members"] if team_progress else None
+            ),
+            "team_registration_open_slots": (
+                team_progress["open_slots"] if team_progress else 0
+            ),
+            "team_registration_participants": (
+                team_progress["participants"] if team_progress else []
+            ),
             "registered_count": reg_counts.get(eid, 0),
+            "participant_count": max(e.participant_count or 0, participant_counts.get(eid, 0)),
+            "teams_count": teams_count_by_event.get(eid, 0),
+            "teams_reserved_count": teams_reserved_by_event.get(eid, 0),
             "volunteers_required": getattr(e, "volunteers_required", 0) or 0,
             "volunteers_registered": volunteer_counts.get(eid, 0),
             "registration_stopped": getattr(e, "registration_stopped", False) or False,
@@ -2282,6 +2387,12 @@ async def register_for_society_event(
     event = await SocietyEvent.get(event_id)
     if not event or (event.status != SocietyEventStatus.ACTIVE and not event.is_published):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Society event not found or not open for registration")
+
+    if event_activity_type(event) == "group" and type == "participant":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This event requires team registration. Create a team and invite the required members.",
+        )
 
     if getattr(event, "registration_stopped", False):
         raise HTTPException(
@@ -2396,9 +2507,34 @@ async def cancel_society_event_registration(
     if not reg:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
 
-    await reg.delete()
-
     event = await SocietyEvent.get(event_id)
+    if reg.team_id:
+        team = await EventTeam.get(reg.team_id)
+        team_regs = await EventRegistration.find({
+            "event_id": event_id,
+            "team_id": reg.team_id,
+        }).to_list()
+        for team_reg in team_regs:
+            await team_reg.delete()
+        await EventTeamClaim.find({
+            "event_id": event_id,
+            "team_id": reg.team_id,
+        }).delete()
+        if team:
+            team.status = "cancelled"
+            await team.save()
+        if event and team_regs:
+            await event.set({
+                "participant_count": max(0, (event.participant_count or 0) - len(team_regs)),
+            })
+        return {"message": "Team registration cancelled for all members"}
+
+    await reg.delete()
+    await EventTeamClaim.find_one({
+        "event_id": event_id,
+        "student_id": reg.student_id,
+        "kind": "individual",
+    }).delete()
     if event and (event.participant_count or 0) > 0:
         await event.set({"participant_count": max(0, event.participant_count - 1)})
 

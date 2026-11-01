@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -18,12 +18,32 @@ class EventCreate(BaseModel):
     max_participants: Optional[int] = Field(None, ge=0)
     max_teams: Optional[int] = Field(None, ge=0)
     team_size: Optional[int] = Field(None, ge=2)
-    volunteers_required: int = 0
+    volunteers_required: Optional[int] = 0
     activity_type: Literal["individual", "group"] = "individual"
     min_team_size: Optional[int] = Field(2, ge=2)
     max_team_size: Optional[int] = Field(4, ge=2)
     template_map: Dict[str, Optional[str]] = Field(default_factory=dict)
     is_published: bool = False
+
+    @field_validator("volunteers_required", mode="before")
+    @classmethod
+    def coerce_volunteers_required(cls, v: Any) -> int:
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return 0
+        try:
+            return max(0, int(v))
+        except (ValueError, TypeError):
+            return 0
+
+    @field_validator("max_participants", "max_teams", "team_size", "min_team_size", "max_team_size", mode="before")
+    @classmethod
+    def coerce_optional_int(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
 
 
 class EventUpdate(BaseModel):
@@ -50,6 +70,26 @@ class EventUpdate(BaseModel):
     template_map: Optional[Dict[str, Optional[str]]] = None
     mapping_confirmed: Optional[bool] = None
     is_published: Optional[bool] = None
+
+    @field_validator("volunteers_required", mode="before")
+    @classmethod
+    def coerce_update_volunteers_required(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return None
+        try:
+            return max(0, int(v))
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("max_participants", "max_teams", "team_size", "min_team_size", "max_team_size", mode="before")
+    @classmethod
+    def coerce_update_optional_int(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
 
 
 class EventResponse(BaseModel):

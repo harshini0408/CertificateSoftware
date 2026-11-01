@@ -188,6 +188,7 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
       slot: '8:45 AM - 10:15 AM',
       timing: '',
       venue: '',
+      volunteers_required: 0,
       activity_type: 'individual',
       max_participants: null,
       max_teams: null,
@@ -246,11 +247,17 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
 
     const payload = {
       ...data,
-      max_participants: data.activity_type === 'individual' ? data.max_participants : null,
-      max_teams: data.activity_type === 'group' ? data.max_teams : null,
+      volunteers_required:
+        data.volunteers_required === '' ||
+        data.volunteers_required == null ||
+        Number.isNaN(Number(data.volunteers_required))
+          ? 0
+          : Math.max(0, parseInt(data.volunteers_required, 10) || 0),
+      max_participants: data.activity_type === 'individual' ? (data.max_participants != null && !Number.isNaN(Number(data.max_participants)) && data.max_participants !== '' ? Math.max(0, parseInt(data.max_participants, 10)) : null) : null,
+      max_teams: data.activity_type === 'group' ? (data.max_teams != null && !Number.isNaN(Number(data.max_teams)) && data.max_teams !== '' ? Math.max(0, parseInt(data.max_teams, 10)) : null) : null,
       team_size: null,
-      min_team_size: data.activity_type === 'group' ? data.min_team_size : null,
-      max_team_size: data.activity_type === 'group' ? data.max_team_size : null,
+      min_team_size: data.activity_type === 'group' ? (data.min_team_size != null && !Number.isNaN(Number(data.min_team_size)) && data.min_team_size !== '' ? Math.max(2, parseInt(data.min_team_size, 10)) : 2) : null,
+      max_team_size: data.activity_type === 'group' ? (data.max_team_size != null && !Number.isNaN(Number(data.max_team_size)) && data.max_team_size !== '' ? Math.max(2, parseInt(data.max_team_size, 10)) : 4) : null,
       session: sessionCode,
       slot: data.slot,
       event_time: data.timing ? `${eventTimeStr} (${data.timing})` : eventTimeStr,
@@ -548,7 +555,10 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                     placeholder="0"
                     onWheel={(e) => e.target.blur()}
                     {...register('volunteers_required', {
-                      valueAsNumber: true,
+                      setValueAs: (value) =>
+                        value === '' || value == null || Number.isNaN(Number(value))
+                          ? 0
+                          : Math.max(0, parseInt(value, 10) || 0),
                       min: { value: 0, message: 'Cannot be negative' }
                     })}
                   />
@@ -618,7 +628,10 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                         className={`form-input text-xs ${errors.min_team_size ? 'form-input-error' : ''}`}
                         placeholder="2"
                         {...register('min_team_size', {
-                          valueAsNumber: true,
+                          setValueAs: (value) =>
+                            value === '' || value == null || Number.isNaN(Number(value))
+                              ? 2
+                              : parseInt(value, 10),
                           min: { value: 2, message: 'Minimum team size is 2' },
                           max: { value: 20, message: 'Maximum allowed minimum team size is 20' },
                           validate: (value) => value <= (watch('max_team_size') || 30) || 'Minimum team size cannot exceed maximum team size',
@@ -636,7 +649,10 @@ function DashboardTab({ clubId, dashboard, isLoading }) {
                         className={`form-input text-xs ${errors.max_team_size ? 'form-input-error' : ''}`}
                         placeholder="4"
                         {...register('max_team_size', {
-                          valueAsNumber: true,
+                          setValueAs: (value) =>
+                            value === '' || value == null || Number.isNaN(Number(value))
+                              ? 4
+                              : parseInt(value, 10),
                           min: { value: 2, message: 'Minimum is 2' },
                           max: { value: 30, message: 'Maximum team size is 30' },
                           validate: (value) => value >= (watch('min_team_size') || 2) || 'Maximum team size cannot be less than minimum team size',

@@ -6,13 +6,14 @@ from typing import List, Optional, Dict, Any
 from beanie import PydanticObjectId
 from bson import ObjectId as _ObjId
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ...core.dependencies import get_current_user, require_role, require_society_access, require_society_event_access
 from ...models.user import User, UserRole
 from ...models.professional_society import ProfessionalSociety, DEFAULT_SOCIETY_OFFICE_BEARER_POSITIONS
 from ...models.society_event import SocietyEvent, SocietyEventStatus
 from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
+from ...models.event_team import EventTeam
 from ...models.attendance import Attendance
 from ...models.attendance_session import AttendanceSession
 from ...schemas.professional_society import SocietyResponse
@@ -61,9 +62,35 @@ class SocietyEventCreate(BaseModel):
     category: Optional[str] = None
     academic_year: Optional[str] = None
     academic_years: List[str] = Field(default_factory=list)
+    activity_type: Optional[str] = "individual"
+    is_team_event: bool = False
+    min_team_size: Optional[int] = 2
+    max_team_size: Optional[int] = 4
+    max_teams: Optional[int] = None
+    team_size: Optional[int] = None
     max_participants: Optional[int] = None
-    volunteers_required: int = 0
+    volunteers_required: Optional[int] = 0
     is_published: bool = False
+
+    @field_validator("volunteers_required", mode="before")
+    @classmethod
+    def coerce_society_volunteers_required(cls, v: Any) -> int:
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return 0
+        try:
+            return max(0, int(v))
+        except (ValueError, TypeError):
+            return 0
+
+    @field_validator("max_participants", "max_teams", "team_size", "min_team_size", "max_team_size", mode="before")
+    @classmethod
+    def coerce_society_optional_int(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
 
 
 class SocietyEventUpdate(BaseModel):
@@ -76,11 +103,37 @@ class SocietyEventUpdate(BaseModel):
     category: Optional[str] = None
     academic_year: Optional[str] = None
     academic_years: Optional[List[str]] = None
+    activity_type: Optional[str] = None
+    is_team_event: Optional[bool] = None
+    min_team_size: Optional[int] = None
+    max_team_size: Optional[int] = None
+    max_teams: Optional[int] = None
+    team_size: Optional[int] = None
     max_participants: Optional[int] = None
     volunteers_required: Optional[int] = None
     registration_stopped: Optional[bool] = None
     status: Optional[str] = None
     is_published: Optional[bool] = None
+
+    @field_validator("volunteers_required", mode="before")
+    @classmethod
+    def coerce_society_update_volunteers_required(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return None
+        try:
+            return max(0, int(v))
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("max_participants", "max_teams", "team_size", "min_team_size", "max_team_size", mode="before")
+    @classmethod
+    def coerce_society_update_optional_int(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
 
 
 class ReviewMembershipRequest(BaseModel):
@@ -156,6 +209,15 @@ async def get_society_events(
     _user: User = Depends(require_society_access),
 ):
     events = await SocietyEvent.find(SocietyEvent.society_id == society_id).sort("-created_at").to_list()
+    event_ids = [e.id for e in events]
+    teams = await EventTeam.find({
+        "event_id": {"$in": event_ids},
+        "status": "registered",
+    }).to_list() if event_ids else []
+    teams_count_map = {}
+    for t in teams:
+        teams_count_map[str(t.event_id)] = teams_count_map.get(str(t.event_id), 0) + 1
+
     return [
         {
             "id": str(e.id),
@@ -170,6 +232,13 @@ async def get_society_events(
             "status": e.status.value if hasattr(e.status, "value") else str(e.status),
             "poster_url": e.poster_url,
             "is_published": e.is_published,
+            "activity_type": getattr(e, "activity_type", "individual"),
+            "is_team_event": getattr(e, "is_team_event", False),
+            "min_team_size": getattr(e, "min_team_size", None),
+            "max_team_size": getattr(e, "max_team_size", None),
+            "max_teams": getattr(e, "max_teams", None),
+            "team_size": getattr(e, "team_size", None),
+            "teams_count": teams_count_map.get(str(e.id), 0),
             "max_participants": e.max_participants,
             "participant_count": e.participant_count,
             "volunteers_required": e.volunteers_required,
@@ -192,6 +261,7 @@ async def create_society_event(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Professional Society not found")
 
     status_val = SocietyEventStatus.ACTIVE if body.is_published else SocietyEventStatus.DRAFT
+    is_team = body.is_team_event or (body.activity_type == "group")
     new_event = SocietyEvent(
         society_id=society_id,
         name=body.name,
@@ -204,7 +274,13 @@ async def create_society_event(
         academic_year=body.academic_year,
         academic_years=body.academic_years or [],
         status=status_val,
-        max_participants=body.max_participants,
+        activity_type="group" if is_team else "individual",
+        is_team_event=is_team,
+        min_team_size=body.min_team_size if is_team else None,
+        max_team_size=body.max_team_size if is_team else None,
+        max_teams=body.max_teams if is_team else None,
+        team_size=body.team_size if is_team else None,
+        max_participants=None if is_team else body.max_participants,
         volunteers_required=body.volunteers_required,
         is_published=body.is_published,
     )
@@ -237,6 +313,12 @@ async def get_society_event_detail(
         "status": event.status.value if hasattr(event.status, "value") else str(event.status),
         "poster_url": event.poster_url,
         "is_published": event.is_published,
+        "activity_type": getattr(event, "activity_type", "individual"),
+        "is_team_event": getattr(event, "is_team_event", False),
+        "min_team_size": getattr(event, "min_team_size", None),
+        "max_team_size": getattr(event, "max_team_size", None),
+        "max_teams": getattr(event, "max_teams", None),
+        "team_size": getattr(event, "team_size", None),
         "max_participants": event.max_participants,
         "participant_count": event.participant_count,
         "volunteers_required": event.volunteers_required,

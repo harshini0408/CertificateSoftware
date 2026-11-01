@@ -354,6 +354,7 @@ export function useCreateEventTeamInvitations() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
       addToast({
         type: 'success',
         message: data?.message || 'Team created. Invitees can respond in their Upcoming Events tab.',
@@ -382,6 +383,7 @@ export function useInviteReplacementEventTeamMembers() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
       qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
       addToast({
         type: 'success',
@@ -410,6 +412,7 @@ export function useRemovePendingEventTeamInvitation() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
       qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
       addToast({ type: 'success', message: data?.message || 'Pending invitation removed.' })
     },
@@ -433,6 +436,7 @@ export function useCancelPendingEventTeam() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
       qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
       addToast({ type: 'success', message: data?.message || 'Team request cancelled.' })
     },
@@ -484,6 +488,7 @@ export function useRespondToEventTeamInvitation() {
       qc.invalidateQueries({ queryKey: ['student', 'event-team-invitation'] })
       qc.invalidateQueries({ queryKey: ['student', 'pending-event-team-invitations'] })
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
       addToast({
         type: data?.team_status === 'cancelled' ? 'error' : 'success',
         message: data?.message || 'Invitation response saved.',

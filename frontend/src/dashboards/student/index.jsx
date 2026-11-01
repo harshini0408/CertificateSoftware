@@ -93,7 +93,7 @@ function TeamParticipants({ participants, compact = false, onRemovePending, remo
 }
 
 function isTeamRegistrationEvent(event) {
-  return event?.activity_type === 'group' || (event?.team_size || 1) > 1
+  return event?.activity_type === 'group' || (event?.team_size || 1) > 1 || Boolean(event?.is_team_event)
 }
 
 function isEventAtCapacity(event) {
@@ -840,7 +840,7 @@ export default function StudentDashboard() {
   const inviteReplacementTeamMembers = useInviteReplacementEventTeamMembers()
   const removePendingTeamInvitation = useRemovePendingEventTeamInvitation()
   const cancelPendingEventTeam = useCancelPendingEventTeam()
-  const teamStatusEvent = (upcomingEvents || []).find((event) => event.id === teamStatusEventId)
+  const teamStatusEvent = [...(upcomingEvents || []), ...(upcomingSocietyEvents || [])].find((event) => event.id === teamStatusEventId)
 
   useEffect(() => {
     setSelectedTeamMemberIds(new Set())
@@ -1238,7 +1238,7 @@ export default function StudentDashboard() {
                   {sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''}
                 </span>
               </div>
-              {!isSociety && isTeamRegistrationEvent(ev) && (
+              {isTeamRegistrationEvent(ev) && (
                 <div className="text-[11px] font-medium text-indigo-700">
                   Team registration required: {
                     ev.team_size > 1
@@ -1289,7 +1289,7 @@ export default function StudentDashboard() {
                   ✓ {ev.team_id ? `Team registered (${ev.registration_team_size} members)` : 'Registered for Event'} ({sessionLabel}{ev.slot ? ` • ${ev.slot}` : ''})
                 </div>
               )}
-              {!isSociety && ev.team_id && (
+              {ev.team_id && (
                 <TeamParticipants participants={ev.team_registration_participants} compact />
               )}
 
@@ -1323,7 +1323,7 @@ export default function StudentDashboard() {
                   : ev.team_id ? 'Cancel Entire Team Registration' : 'Cancel Registration'}
               </button>
             </div>
-          ) : (!isSociety && ['pending', 'registering'].includes(ev.team_registration_status)) ? (
+          ) : (['pending', 'registering'].includes(ev.team_registration_status)) ? (
             <div className="space-y-2">
               {ev.team_registration_is_creator ? (
                 <button
@@ -1386,11 +1386,11 @@ export default function StudentDashboard() {
               <button
                 type="button"
                 onClick={() => {
-                  if (isSociety) {
-                    handleRegisterSociety(ev.id, 'participant')
-                  } else if (isTeamRegistrationEvent(ev)) {
+                  if (isTeamRegistrationEvent(ev)) {
                     setTeamRegistrationTeamId(null)
                     setTeamRegistrationEvent(ev)
+                  } else if (isSociety) {
+                    handleRegisterSociety(ev.id, 'participant')
                   } else {
                     handleRegister(ev.id, 'participant')
                   }
@@ -1400,7 +1400,7 @@ export default function StudentDashboard() {
               >
                 {registeringEventId === ev.id
                   ? 'Registering…'
-                  : !isSociety && isTeamRegistrationEvent(ev)
+                  : isTeamRegistrationEvent(ev)
                   ? 'Register as a Team'
                   : 'Register for Event'}
               </button>
