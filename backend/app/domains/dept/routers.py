@@ -27,6 +27,7 @@ from ...services.storage_service import storage_path_to_url
 from ...services.storage_service import storage_url_to_path
 from ...services.email_service import send_certificate_email
 from ...services.semester_service import get_current_semester
+from ...services.credit_service import capped_credit_points
 from ...schemas.event import DeptCertificateSendRequest
 from ...config import get_settings
 
@@ -154,12 +155,19 @@ async def _award_dept_event_credits(evt: DeptEvent, cert: DeptCertificate) -> No
     })
 
     semester = await get_current_semester() or "Unknown"
+    awarded_points = await capped_credit_points(
+        credit_doc,
+        contribution,
+        semester,
+        int(rule.points or 0),
+    )
     entry = CreditHistoryEntry(
         cert_number=cert.cert_number,
         event_name=evt.name,
         club_name=evt.department,
         cert_type=contribution,
-        points_awarded=int(rule.points or 0),
+        points_awarded=awarded_points,
+        eligible_points=int(rule.points or 0),
         semester=semester,
         awarded_at=datetime.utcnow(),
     )
@@ -182,7 +190,7 @@ async def _award_dept_event_credits(evt: DeptEvent, cert: DeptCertificate) -> No
             await credit_doc.set(updates)
             credit_doc = await StudentCredit.get(credit_doc.id)
 
-        credit_doc.total_credits = int(credit_doc.total_credits or 0) + int(rule.points or 0)
+        credit_doc.total_credits = int(credit_doc.total_credits or 0) + awarded_points
         credit_doc.credit_history.append(entry)
         credit_doc.last_updated = datetime.utcnow()
         await credit_doc.save()
@@ -194,7 +202,7 @@ async def _award_dept_event_credits(evt: DeptEvent, cert: DeptCertificate) -> No
         department=user_student.department if user_student else None,
         batch=user_student.batch if user_student else None,
         section=user_student.section if user_student else None,
-        total_credits=int(rule.points or 0),
+        total_credits=awarded_points,
         credit_history=[entry],
         last_updated=datetime.utcnow(),
     ).insert()
@@ -216,12 +224,20 @@ async def _award_manual_dept_credits(evt: DeptEvent, cert: DeptCertificate, manu
     })
 
     semester = await get_current_semester() or "Unknown"
+    cert_type = cert.contribution or "manual_allocation"
+    awarded_points = await capped_credit_points(
+        credit_doc,
+        cert_type,
+        semester,
+        int(manual_points),
+    )
     entry = CreditHistoryEntry(
         cert_number=cert.cert_number,
         event_name=evt.name,
         club_name=evt.department,
-        cert_type=cert.contribution or "manual_allocation",
-        points_awarded=int(manual_points),
+        cert_type=cert_type,
+        points_awarded=awarded_points,
+        eligible_points=int(manual_points),
         semester=semester,
         awarded_at=datetime.utcnow(),
     )
@@ -244,7 +260,7 @@ async def _award_manual_dept_credits(evt: DeptEvent, cert: DeptCertificate, manu
             await credit_doc.set(updates)
             credit_doc = await StudentCredit.get(credit_doc.id)
 
-        credit_doc.total_credits = int(credit_doc.total_credits or 0) + int(manual_points)
+        credit_doc.total_credits = int(credit_doc.total_credits or 0) + awarded_points
         credit_doc.credit_history.append(entry)
         credit_doc.last_updated = datetime.utcnow()
         await credit_doc.save()
@@ -256,7 +272,7 @@ async def _award_manual_dept_credits(evt: DeptEvent, cert: DeptCertificate, manu
         department=user_student.department if user_student else None,
         batch=user_student.batch if user_student else None,
         section=user_student.section if user_student else None,
-        total_credits=int(manual_points),
+        total_credits=awarded_points,
         credit_history=[entry],
         last_updated=datetime.utcnow(),
     ).insert()

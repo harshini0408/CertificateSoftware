@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class CreditRuleSchema(BaseModel):
     cert_type: str
     points: int
+    max_certificates: Optional[int] = Field(default=None, ge=1)
 
 
 class CreditRulesUpdateRequest(BaseModel):
@@ -17,6 +18,7 @@ class CreditRuleResponse(BaseModel):
     id: str
     cert_type: str
     points: int
+    max_certificates: Optional[int] = None
     updated_by: Optional[str] = None
     updated_at: datetime
 
@@ -30,6 +32,7 @@ class CreditHistoryEntrySchema(BaseModel):
     club_name: str
     cert_type: str
     points_awarded: int
+    eligible_points: Optional[int] = None
     semester: Optional[str] = None
     awarded_at: datetime
 

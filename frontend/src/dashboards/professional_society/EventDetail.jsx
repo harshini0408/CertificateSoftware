@@ -267,8 +267,9 @@ function OverviewTab({ event, societyId, eventId, onNextStep }) {
       event_time: timeStr,
       venue: finalVenue,
       category: editCategory,
-      max_participants: editMaxParticipants ? parseInt(editMaxParticipants, 10) : null,
+      activity_type: editIsTeamEvent ? 'group' : 'individual',
       is_team_event: editIsTeamEvent,
+      max_participants: !editIsTeamEvent && editMaxParticipants ? parseInt(editMaxParticipants, 10) : null,
       min_team_size: editIsTeamEvent ? parseInt(editMinTeamSize, 10) : 2,
       max_team_size: editIsTeamEvent ? parseInt(editMaxTeamSize, 10) : 4,
       max_teams: editIsTeamEvent && editMaxTeams ? parseInt(editMaxTeams, 10) : null,
@@ -465,16 +466,18 @@ function OverviewTab({ event, societyId, eventId, onNextStep }) {
                 )}
               </div>
 
-              <div>
-                <label className="form-label text-xs">Max Registrations</label>
-                <input
-                  type="number"
-                  value={editMaxParticipants}
-                  onChange={(e) => setEditMaxParticipants(e.target.value)}
-                  placeholder="Unlimited if blank"
-                  className="form-input text-xs"
-                />
-              </div>
+              {!editIsTeamEvent && (
+                <div>
+                  <label className="form-label text-xs">Max Registrations</label>
+                  <input
+                    type="number"
+                    value={editMaxParticipants}
+                    onChange={(e) => setEditMaxParticipants(e.target.value)}
+                    placeholder="Unlimited if blank"
+                    className="form-input text-xs"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="form-label text-xs">Event Status</label>

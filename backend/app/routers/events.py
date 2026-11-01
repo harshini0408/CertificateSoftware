@@ -402,8 +402,6 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
         team_size_changed and updates.get("team_size") is not None
     )
     if leaving_team_registration or assigning_fixed_team_size:
-        from ..models.event_team import EventTeam
-
         active_teams = await EventTeam.find({
             "event_id": event.id,
             "status": {"$in": ["pending", "registering", "registered"]},
@@ -419,13 +417,13 @@ async def update_event(club_id: PydanticObjectId, event_id: PydanticObjectId,
             )
     if "activity_type" in updates and updates["activity_type"] is not None:
         updates["is_team_event"] = updates["activity_type"] == "group"
+    elif "is_team_event" in updates and updates["is_team_event"] is not None:
+        updates["activity_type"] = "group" if updates["is_team_event"] else "individual"
     if "template_map" in updates and updates["template_map"]:
         updates["template_map"] = {k: v for k, v in updates["template_map"].items()}
-    if "is_published" in updates and "status" not in updates:
-        updates["status"] = EventStatus.ACTIVE if updates["is_published"] else EventStatus.DRAFT
     if "status" in updates:
         updates["status"] = EventStatus(updates["status"])
-    if "is_published" in updates and "status" not in updates:
+    elif "is_published" in updates:
         updates["status"] = EventStatus.ACTIVE if updates["is_published"] else EventStatus.DRAFT
     if updates:
         await event.set(updates)

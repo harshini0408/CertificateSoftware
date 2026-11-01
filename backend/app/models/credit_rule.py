@@ -8,6 +8,7 @@ from pydantic import Field
 class CreditRule(Document):
     cert_type: Indexed(str, unique=True)  # type: ignore[valid-type]
     points: int = 0
+    max_certificates: Optional[int] = None
     updated_by: Optional[PydanticObjectId] = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
