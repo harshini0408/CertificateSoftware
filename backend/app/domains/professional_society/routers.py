@@ -1375,7 +1375,8 @@ async def list_society_participants(
 
     # Auto-sync registered participants from EventRegistration into Participant collection
     portal_regs = await EventRegistration.find(
-        {"event_id": event_id, "registration_type": {"$ne": "volunteer"}}
+        EventRegistration.event_id == event_id,
+        EventRegistration.registration_type != "volunteer",
     ).to_list()
 
     # Query attendance records to accurately reflect who has actually attended
@@ -1396,6 +1397,21 @@ async def list_society_participants(
                 continue
             default_role = _resolve_event_category_role("participant", getattr(event, "category", None))
             has_attended = email in attended_emails
+
+            t_id = str(reg.team_id) if reg.team_id else None
+            t_name = getattr(reg, "team_name", None)
+            t_role = getattr(reg, "team_role", None)
+            if t_id and (not t_name or not t_role):
+                try:
+                    team_doc = await EventTeam.get(PydanticObjectId(t_id) if isinstance(reg.team_id, (str, PydanticObjectId)) else reg.team_id)
+                    if team_doc:
+                        if not t_name:
+                            t_name = getattr(team_doc, "name", None) or f"{team_doc.creator_name}'s Team"
+                        if not t_role:
+                            t_role = "leader" if reg.student_id == team_doc.creator_student_id else "member"
+                except Exception:
+                    pass
+
             new_p = Participant(
                 event_id=event_id,
                 club_id=society_id,
@@ -1412,20 +1428,46 @@ async def list_society_participants(
                 source=ParticipantSource.REGISTRATION,
                 verified=has_attended,
                 status="accepted" if has_attended else "registered",
-                team_id=getattr(reg, "team_id", None),
-                team_name=getattr(reg, "team_name", None),
-                team_role=getattr(reg, "team_role", None),
+                team_id=t_id,
+                team_name=t_name,
+                team_role=t_role,
             )
             await new_p.insert()
             existing_emails.add(email)
 
-        # For existing participants from registration, sync verified flag if not manually overridden
+        # For existing participants from registration, sync verified flag & missing team info
         for p in existing_parts:
+            updates = {}
+            matching_reg = next((r for r in portal_regs if (r.student_email or "").strip().lower() == (p.email or "").strip().lower()), None)
+            if matching_reg and matching_reg.team_id and (not getattr(p, "team_id", None) or not getattr(p, "team_name", None)):
+                t_id = str(matching_reg.team_id)
+                t_name = getattr(matching_reg, "team_name", None)
+                t_role = getattr(matching_reg, "team_role", None)
+                if not t_name or not t_role:
+                    try:
+                        team_doc = await EventTeam.get(PydanticObjectId(t_id) if isinstance(matching_reg.team_id, (str, PydanticObjectId)) else matching_reg.team_id)
+                        if team_doc:
+                            t_name = t_name or getattr(team_doc, "name", None) or f"{team_doc.creator_name}'s Team"
+                            t_role = t_role or ("leader" if matching_reg.student_id == team_doc.creator_student_id else "member")
+                    except Exception:
+                        pass
+                updates["team_id"] = t_id
+                if t_name:
+                    updates["team_name"] = t_name
+                if t_role:
+                    updates["team_role"] = t_role
+
             if p.source == ParticipantSource.REGISTRATION and not getattr(p, "manually_verified", False):
                 p_email = (p.email or "").strip().lower()
                 actual_attended = p_email in attended_emails
                 if p.verified != actual_attended:
-                    await p.set({"verified": actual_attended, "status": "accepted" if actual_attended else "registered"})
+                    updates["verified"] = actual_attended
+                    updates["status"] = "accepted" if actual_attended else "registered"
+
+            if updates:
+                await p.set(updates)
+                for k, v in updates.items():
+                    setattr(p, k, v)
 
     query: Dict[str, Any] = {"event_id": event_id}
     if source:

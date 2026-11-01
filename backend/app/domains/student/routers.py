@@ -2228,6 +2228,9 @@ async def respond_to_event_team_invitation(
     created_participants = []
     try:
         for member in members:
+            is_leader = member.id == team.creator_student_id
+            t_name = getattr(team, "name", None) or f"{team.creator_name}'s Team"
+            t_role = "leader" if is_leader else "member"
             registration = EventRegistration(
                 event_id=event.id,
                 student_id=member.id,
@@ -2240,13 +2243,16 @@ async def respond_to_event_team_invitation(
                 slot=getattr(event, "slot", None),
                 registration_type="participant",
                 team_id=team.id,
+                team_name=t_name,
+                team_role=t_role,
                 status="accepted",
             )
             await registration.insert()
             created_registrations.append(registration)
             normalized_email = _norm_email(member.email)
 
-            if hasattr(event, "club_id") and getattr(event, "club_id", None):
+            owner_id = getattr(event, "club_id", None) or getattr(event, "society_id", None)
+            if owner_id:
                 existing_participant = await Participant.find_one({
                     "event_id": event.id,
                     "email": {"$regex": f"^{re.escape(normalized_email)}$", "$options": "i"},
@@ -2256,7 +2262,7 @@ async def respond_to_event_team_invitation(
 
                 participant = Participant(
                     event_id=event.id,
-                    club_id=event.club_id,
+                    club_id=owner_id,
                     email=normalized_email,
                     registration_number=member.registration_number,
                     cert_type=participant_type,
@@ -2270,6 +2276,9 @@ async def respond_to_event_team_invitation(
                     source=ParticipantSource.REGISTRATION,
                     verified=False,
                     status="registered",
+                    team_id=str(team.id),
+                    team_name=t_name,
+                    team_role=t_role,
                 )
                 try:
                     await participant.insert()
@@ -2616,6 +2625,12 @@ async def cancel_society_event_registration(
         }).to_list()
         for team_reg in team_regs:
             await team_reg.delete()
+            participant = await Participant.find_one({
+                "event_id": event_id,
+                "email": {"$regex": f"^{re.escape(_norm_email(team_reg.student_email))}$", "$options": "i"},
+            })
+            if participant and participant.source == ParticipantSource.REGISTRATION:
+                await participant.delete()
         await EventTeamClaim.find({
             "event_id": event_id,
             "team_id": reg.team_id,
@@ -2630,6 +2645,12 @@ async def cancel_society_event_registration(
         return {"message": "Team registration cancelled for all members"}
 
     await reg.delete()
+    participant = await Participant.find_one({
+        "event_id": event_id,
+        "email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"},
+    })
+    if participant and participant.source == ParticipantSource.REGISTRATION:
+        await participant.delete()
     await EventTeamClaim.find_one({
         "event_id": event_id,
         "student_id": reg.student_id,
