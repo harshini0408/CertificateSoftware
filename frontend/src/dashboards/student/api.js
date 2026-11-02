@@ -317,6 +317,7 @@ export function useCancelEventRegistration() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'event-team-candidates'] })
       addToast({ type: 'success', message: data?.message || 'Event registration cancelled.' })
     },
     onError: (err) => {
@@ -707,6 +708,7 @@ export function useCancelSocietyEventRegistration() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['student', 'upcoming-society-events'] })
+      qc.invalidateQueries({ queryKey: ['student', 'event-team-candidates'] })
       addToast({ type: 'success', message: data?.message || 'Event registration cancelled.' })
     },
     onError: (err) => {

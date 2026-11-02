@@ -999,13 +999,51 @@ def _event_date_string(event: Event) -> str:
     return event.event_date.strftime("%Y-%m-%d") if event.event_date else "unknown"
 
 
+def _active_registration_conflict_query(
+    student: User,
+    event_date: str,
+    session: str,
+    slot: Optional[str],
+    exclude_event_id: PydanticObjectId,
+) -> dict:
+    email = _norm_email(student.email)
+    slot_query = (
+        {"$or": [
+            {"slot": slot},
+            {"session": session, "slot": None},
+            {"session": session, "slot": {"$exists": False}},
+        ]}
+        if slot
+        else {"session": session}
+    )
+    return {
+        "$and": [
+            {
+                "$or": [
+                    {"student_id": student.id},
+                    {"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+                ]
+            },
+            {"event_id": {"$ne": exclude_event_id}},
+            {"event_date_str": event_date},
+            slot_query,
+            {"status": {"$in": ["accepted", "pending", None]}},
+        ]
+    }
+
+
 async def _student_has_event_registration(event_id: PydanticObjectId, student: User) -> bool:
     email = _norm_email(student.email)
     registration = await EventRegistration.find_one({
-        "event_id": event_id,
-        "$or": [
-            {"student_id": student.id},
-            {"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+        "$and": [
+            {"event_id": event_id},
+            {
+                "$or": [
+                    {"student_id": student.id},
+                    {"student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+                ]
+            },
+            {"status": {"$in": ["accepted", "pending", None]}},
         ],
     })
     if registration:
@@ -1017,28 +1055,26 @@ async def _student_has_event_registration(event_id: PydanticObjectId, student: U
     return participant is not None
 
 
+async def _student_has_active_team_claim(event_id: PydanticObjectId, student: User) -> bool:
+    claims = await EventTeamClaim.find({
+        "event_id": event_id,
+        "student_id": student.id,
+        "team_id": {"$ne": None},
+    }).to_list()
+    for claim in claims:
+        team = await EventTeam.get(claim.team_id)
+        if team and team.status in {"pending", "registering", "registered"}:
+            return True
+    return False
+
+
 async def _student_event_conflict(event: Event, student: User) -> Optional[str]:
     event_date = _event_date_string(event)
     session = getattr(event, "session", None) or _normalize_session(event.event_time)
     slot = getattr(event, "slot", None)
-    email = _norm_email(student.email)
-
-    if slot:
-        collision = await EventRegistration.find_one({
-            "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
-            "event_date_str": event_date,
-            "$or": [
-                {"slot": slot},
-                {"session": session, "slot": None},
-                {"session": session, "slot": {"$exists": False}},
-            ],
-        })
-    else:
-        collision = await EventRegistration.find_one({
-            "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
-            "event_date_str": event_date,
-            "session": session,
-        })
+    collision = await EventRegistration.find_one(
+        _active_registration_conflict_query(student, event_date, session, slot, event.id)
+    )
     if collision:
         conflicting_event = await Event.get(collision.event_id)
         if not conflicting_event:
@@ -1051,10 +1087,12 @@ async def _student_event_conflict(event: Event, student: User) -> Optional[str]:
     for claim in claims:
         if claim.event_id == event.id:
             continue
-        if claim.team_id:
-            team = await EventTeam.get(claim.team_id)
-            if not team or team.status not in {"pending", "registered"}:
-                continue
+        if not claim.team_id:
+            # Individual registrations are checked from EventRegistration; claims may be stale.
+            continue
+        team = await EventTeam.get(claim.team_id)
+        if not team or team.status not in {"pending", "registered"}:
+            continue
         other_event = await Event.get(claim.event_id)
         if not other_event:
             other_event = await SocietyEvent.get(claim.event_id)
@@ -1434,10 +1472,18 @@ async def register_for_event(
     student_email = current_user.email.lower()
 
     # Check if already registered for this event
-    existing_reg = await EventRegistration.find_one(
-        EventRegistration.event_id == event_id,
-        EventRegistration.student_email == student_email,
-    )
+    existing_reg = await EventRegistration.find_one({
+        "$and": [
+            {"event_id": event_id},
+            {
+                "$or": [
+                    {"student_id": current_user.id},
+                    {"student_email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"}},
+                ]
+            },
+            {"status": {"$in": ["accepted", "pending", None]}},
+        ]
+    })
     if existing_reg:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event")
 
@@ -1447,23 +1493,9 @@ async def register_for_event(
     slot = getattr(event, "slot", None)
     session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
 
-    # Collision Check: Cannot register for conflicting slot on same date
-    if slot:
-        collision = await EventRegistration.find_one({
-            "student_email": student_email,
-            "event_date_str": event_date_str,
-            "$or": [
-                {"slot": slot},
-                {"session": session, "slot": None},
-                {"session": session, "slot": {"$exists": False}},
-            ]
-        })
-    else:
-        collision = await EventRegistration.find_one(
-            EventRegistration.student_email == student_email,
-            EventRegistration.event_date_str == event_date_str,
-            EventRegistration.session == session,
-        )
+    collision = await EventRegistration.find_one(
+        _active_registration_conflict_query(current_user, event_date_str, session, slot, event.id)
+    )
     if collision:
         conflicting_event = await Event.get(collision.event_id)
         if not conflicting_event:
@@ -1578,12 +1610,16 @@ async def cancel_event_registration(
 ):
     """Cancel registration for an upcoming event."""
     student_email = current_user.email.lower()
-    reg = await EventRegistration.find_one(
-        EventRegistration.event_id == event_id,
-        EventRegistration.student_email == student_email,
-    )
-    if not reg:
+    registrations = await EventRegistration.find({
+        "event_id": event_id,
+        "$or": [
+            {"student_id": current_user.id},
+            {"student_email": {"$regex": f"^{re.escape(_norm_email(student_email))}$", "$options": "i"}},
+        ],
+    }).to_list()
+    if not registrations:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
+    reg = registrations[0]
 
     event = await Event.get(event_id)
     if reg.team_id:
@@ -1613,20 +1649,24 @@ async def cancel_event_registration(
             })
         return {"message": "Team registration cancelled for all members"}
 
-    await reg.delete()
+    for registration in registrations:
+        await registration.delete()
     participant = await Participant.find_one({
         "event_id": event_id,
         "email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"},
     })
     if participant and participant.source == ParticipantSource.REGISTRATION:
         await participant.delete()
-    await EventTeamClaim.find_one({
+    claims = await EventTeamClaim.find({
         "event_id": event_id,
         "student_id": reg.student_id,
-        "kind": "individual",
-    }).delete()
-    if event and event.participant_count > 0:
-        await event.set({"participant_count": max(0, event.participant_count - 1)})
+    }).to_list()
+    for claim in claims:
+        await claim.delete()
+    if event and (event.participant_count or 0) > 0:
+        await event.set({
+            "participant_count": max(0, event.participant_count - len(registrations)),
+        })
 
     return {"message": "Registration cancelled successfully"}
 
@@ -1687,12 +1727,9 @@ async def search_event_team_candidates(
     for student in students:
         previously_invited = str(student.id) in previously_invited_ids
         registration_exists = await _student_has_event_registration(event.id, student)
-        claim = await EventTeamClaim.find_one({
-            "event_id": event.id,
-            "student_id": student.id,
-        })
+        has_active_team_claim = await _student_has_active_team_claim(event.id, student)
         conflict = await _student_event_conflict(event, student)
-        available = not previously_invited and not registration_exists and claim is None and conflict is None
+        available = not previously_invited and not registration_exists and not has_active_team_claim and conflict is None
         results.append({
             "id": str(student.id),
             "name": student.name,
@@ -1706,7 +1743,7 @@ async def search_event_team_candidates(
                 "Already invited to this team"
                 if previously_invited
                 else "Already registered or committed to a team for this event"
-                if registration_exists or claim
+                if registration_exists or has_active_team_claim
                 else f"Conflicts with {conflict}" if conflict else None
             ),
         })
@@ -2521,10 +2558,18 @@ async def register_for_society_event(
 
     student_email = current_user.email.lower()
 
-    existing_reg = await EventRegistration.find_one(
-        EventRegistration.event_id == event_id,
-        EventRegistration.student_email == student_email,
-    )
+    existing_reg = await EventRegistration.find_one({
+        "$and": [
+            {"event_id": event_id},
+            {
+                "$or": [
+                    {"student_id": current_user.id},
+                    {"student_email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"}},
+                ]
+            },
+            {"status": {"$in": ["accepted", "pending", None]}},
+        ]
+    })
     if existing_reg:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "You are already registered for this event")
 
@@ -2533,22 +2578,9 @@ async def register_for_society_event(
     slot = getattr(event, "slot", None)
     session_label = "Morning (FN)" if session == "FN" else "Afternoon (AN)"
 
-    if slot:
-        collision = await EventRegistration.find_one({
-            "student_email": student_email,
-            "event_date_str": event_date_str,
-            "$or": [
-                {"slot": slot},
-                {"session": session, "slot": None},
-                {"session": session, "slot": {"$exists": False}},
-            ]
-        })
-    else:
-        collision = await EventRegistration.find_one(
-            EventRegistration.student_email == student_email,
-            EventRegistration.event_date_str == event_date_str,
-            EventRegistration.session == session,
-        )
+    collision = await EventRegistration.find_one(
+        _active_registration_conflict_query(current_user, event_date_str, session, slot, event.id)
+    )
     if collision:
         conflicting_name = "another event"
         c_event = await SocietyEvent.get(collision.event_id)
@@ -2609,12 +2641,16 @@ async def cancel_society_event_registration(
 ):
     """Cancel registration for an upcoming society event."""
     student_email = current_user.email.lower()
-    reg = await EventRegistration.find_one(
-        EventRegistration.event_id == event_id,
-        EventRegistration.student_email == student_email,
-    )
-    if not reg:
+    registrations = await EventRegistration.find({
+        "event_id": event_id,
+        "$or": [
+            {"student_id": current_user.id},
+            {"student_email": {"$regex": f"^{re.escape(_norm_email(student_email))}$", "$options": "i"}},
+        ],
+    }).to_list()
+    if not registrations:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration record not found")
+    reg = registrations[0]
 
     event = await SocietyEvent.get(event_id)
     if reg.team_id:
@@ -2644,19 +2680,23 @@ async def cancel_society_event_registration(
             })
         return {"message": "Team registration cancelled for all members"}
 
-    await reg.delete()
+    for registration in registrations:
+        await registration.delete()
     participant = await Participant.find_one({
         "event_id": event_id,
         "email": {"$regex": f"^{re.escape(student_email)}$", "$options": "i"},
     })
     if participant and participant.source == ParticipantSource.REGISTRATION:
         await participant.delete()
-    await EventTeamClaim.find_one({
+    claims = await EventTeamClaim.find({
         "event_id": event_id,
         "student_id": reg.student_id,
-        "kind": "individual",
-    }).delete()
+    }).to_list()
+    for claim in claims:
+        await claim.delete()
     if event and (event.participant_count or 0) > 0:
-        await event.set({"participant_count": max(0, event.participant_count - 1)})
+        await event.set({
+            "participant_count": max(0, event.participant_count - len(registrations)),
+        })
 
     return {"message": "Registration cancelled successfully"}
