@@ -53,6 +53,8 @@ export function useHodPerformance(filters = {}) {
       const { data } = await axiosInstance.get('/hod/performance', { params })
       return data
     },
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -63,5 +65,7 @@ export function useHodSectionCreditOverview() {
       const { data } = await axiosInstance.get('/hod/section-credit-overview')
       return data
     },
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   })
 }

@@ -598,23 +598,25 @@ function ClassRosterModal({ classData, onClose, onSelectStudent }) {
 }
 
 // ── Performance Tab ────────────────────────────────────────────────────────────
-function PerformanceTab({ assignedDepartments, profile, onSelectStudent }) {
+function PerformanceTab({ profile, onSelectStudent }) {
   const [batchFilter, setBatchFilter] = useState('')
   const [selectedClassForRoster, setSelectedClassForRoster] = useState(null)
 
   const { data: perfResp, isLoading } = useHodPerformance({ batch: batchFilter })
 
   const summary = perfResp?.summary || {}
-  const topPerforming = perfResp?.top_performing || []
-  const poorPerforming = perfResp?.poor_performing || []
   const allClasses = perfResp?.classes || []
   const availableBatches = perfResp?.available_batches || []
+  const batchOptions = [...new Set([
+    ...availableBatches,
+    ...(!profile?.batch ? ['2025', '2026'] : []),
+  ])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
 
-  const rankBadgeColors = {
-    1: 'bg-amber-100 text-amber-800 border-amber-300 ring-2 ring-amber-200',
-    2: 'bg-slate-100 text-slate-700 border-slate-300 ring-2 ring-slate-200',
-    3: 'bg-orange-100 text-orange-800 border-orange-300 ring-2 ring-orange-200',
-  }
+  useEffect(() => {
+    if (!batchFilter && availableBatches.length) {
+      setBatchFilter(availableBatches.includes('2025') ? '2025' : availableBatches[availableBatches.length - 1])
+    }
+  }, [availableBatches, batchFilter])
 
   const performanceColumns = [
     {
@@ -697,24 +699,6 @@ function PerformanceTab({ assignedDepartments, profile, onSelectStudent }) {
       ),
     },
     {
-      key: 'status',
-      header: 'Performance Status',
-      align: 'center',
-      render: (v) => {
-        const isTop = v === 'Top Performer' || v === 'Good'
-        const isPoor = v === 'Needs Attention' || v === 'Needs Improvement'
-        return (
-          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-            isTop ? 'bg-green-100 text-green-800' :
-            isPoor ? 'bg-red-100 text-red-700' :
-            'bg-blue-100 text-blue-800'
-          }`}>
-            {v}
-          </span>
-        )
-      },
-    },
-    {
       key: '_actions',
       header: 'Student Roster',
       align: 'center',
@@ -736,45 +720,46 @@ function PerformanceTab({ assignedDepartments, profile, onSelectStudent }) {
 
   return (
     <div className="space-y-6">
-      {/* Header & Filter */}
+      {/* Header & Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Class-Wise Performance Analytics</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Evaluating classes by 3 key benchmarks: <span className="font-semibold text-navy">Average Credits</span>, <span className="font-semibold text-purple-700">Median Credits</span>, and <span className="font-semibold text-green-700">Students with ≥50% (≥10) Credits</span>.
+            Compare sections within one batch by <span className="font-semibold text-navy">Average Credits</span>, <span className="font-semibold text-purple-700">Median Credits</span>, and <span className="font-semibold text-green-700">Students with ≥10 Credits</span>.
           </p>
         </div>
 
-        {/* Batch Filter */}
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">Filter Batch:</label>
+        <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600">
+          Choose a batch to rank
           <select
-            className="form-input text-xs py-1.5"
+            className="form-input min-w-[220px] py-2 text-sm"
             value={batchFilter}
             onChange={(e) => setBatchFilter(e.target.value)}
           >
-            <option value="">All Batches</option>
-            {availableBatches.map((b) => (
-              <option key={b} value={b}>Batch {b}</option>
+            <option value="" disabled>Choose a batch</option>
+            {batchOptions.map((b) => (
+              <option key={b} value={b}>
+                {b === '2025' ? 'Batch 2025–2029' : b === '2026' ? 'Batch 2026–2030' : `Batch ${b}`}
+              </option>
             ))}
           </select>
-        </div>
+        </label>
       </div>
 
       {/* KPI Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
-          label="Dept Average Credits"
+          label="Batch Average Credits"
           value={`${summary.overall_average_credits ?? 0} pts`}
-          subText="Mean credit points across all students"
+          subText="Mean credit points in selected batch"
           icon={Icons.chart}
           accent="navy"
           isLoading={isLoading}
         />
         <StatCard
-          label="Dept Median Credits"
+          label="Batch Median Credits"
           value={`${summary.overall_median_credits ?? 0} pts`}
-          subText="50th percentile benchmark"
+          subText="50th percentile in selected batch"
           icon={Icons.star}
           accent="purple"
           isLoading={isLoading}
@@ -782,14 +767,14 @@ function PerformanceTab({ assignedDepartments, profile, onSelectStudent }) {
         <StatCard
           label="Students ≥ 10 Credits (≥50%)"
           value={`${summary.overall_students_ge_10_count ?? 0} (${summary.overall_percentage_ge_10 ?? 0}%)`}
-          subText="Meeting ≥50% credit threshold"
+          subText="Meeting threshold in selected batch"
           icon={Icons.trophy}
           accent="green"
           isLoading={isLoading}
         />
         <StatCard
-          label="Classes Monitored"
-          value={`${summary.total_classes ?? 0} Classes`}
+          label="Sections Ranked"
+          value={`${summary.total_classes ?? 0} Sections`}
           subText={`Total ${summary.total_students ?? 0} active students`}
           icon={Icons.users}
           accent="gold"
@@ -797,150 +782,21 @@ function PerformanceTab({ assignedDepartments, profile, onSelectStudent }) {
         />
       </div>
 
-      {/* Top 3 & Poor Performing 3 Classes Highlights */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* 🏆 Top 3 Performing Classes */}
-        <div className="card p-5 border-t-4 border-t-green-500 space-y-4">
-          <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-            <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-green-100 text-green-700">
-                🏆
-              </span>
-              <div>
-                <h2 className="text-base font-bold text-foreground">Top Performing Classes</h2>
-                <p className="text-xs text-gray-500">Highest ranked based on the 3 performance parameters</p>
-              </div>
-            </div>
-            <span className="rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-semibold text-green-700 border border-green-200">
-              Top 3
-            </span>
-          </div>
-
-          {topPerforming.length === 0 ? (
-            <p className="text-xs text-gray-400 py-4 text-center">No class performance data available.</p>
-          ) : (
-            <div className="space-y-3">
-              {topPerforming.map((c, idx) => (
-                <div
-                  key={c.class_id}
-                  className="rounded-xl border border-gray-200 bg-gradient-to-r from-gray-50/80 to-white p-4 hover:shadow-md transition-all space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold border ${
-                        rankBadgeColors[c.rank] || 'bg-gray-100 text-gray-700'
-                      }`}>
-                        #{c.rank}
-                      </span>
-                      <span className="font-bold text-foreground text-sm">{c.class_name}</span>
-                    </div>
-                    <span className="text-xs text-gray-500">{c.total_students} students</span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 rounded-lg bg-white p-2.5 border border-gray-100 text-center">
-                    <div>
-                      <span className="text-[11px] text-gray-400 block">Avg Credits</span>
-                      <span className="text-sm font-bold text-navy">{c.average_credits} pts</span>
-                    </div>
-                    <div>
-                      <span className="text-[11px] text-gray-400 block">Median</span>
-                      <span className="text-sm font-bold text-purple-700">{c.median_credits} pts</span>
-                    </div>
-                    <div>
-                      <span className="text-[11px] text-gray-400 block">≥ 10 Credits</span>
-                      <span className="text-sm font-bold text-green-700">{c.percentage_ge_10}%</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="w-full text-center text-xs font-semibold text-navy hover:text-navy/80 hover:underline py-1"
-                    onClick={() => setSelectedClassForRoster(c)}
-                  >
-                    View Class Student Roster →
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* ⚠️ Poor Performing 3 Classes */}
-        <div className="card p-5 border-t-4 border-t-amber-500 space-y-4">
-          <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-            <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                ⚠️
-              </span>
-              <div>
-                <h2 className="text-base font-bold text-foreground">Poor Performing Classes</h2>
-                <p className="text-xs text-gray-500">Classes requiring academic / event credit intervention</p>
-              </div>
-            </div>
-            <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700 border border-amber-200">
-              Needs Focus
-            </span>
-          </div>
-
-          {poorPerforming.length === 0 ? (
-            <p className="text-xs text-gray-400 py-4 text-center">No class performance data available.</p>
-          ) : (
-            <div className="space-y-3">
-              {poorPerforming.map((c) => (
-                <div
-                  key={c.class_id}
-                  className="rounded-xl border border-amber-200/70 bg-gradient-to-r from-amber-50/30 to-white p-4 hover:shadow-md transition-all space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                        #{c.rank}
-                      </span>
-                      <span className="font-bold text-foreground text-sm">{c.class_name}</span>
-                    </div>
-                    <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                      Needs Attention
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 rounded-lg bg-white p-2.5 border border-gray-100 text-center">
-                    <div>
-                      <span className="text-[11px] text-gray-400 block">Avg Credits</span>
-                      <span className="text-sm font-bold text-amber-700">{c.average_credits} pts</span>
-                    </div>
-                    <div>
-                      <span className="text-[11px] text-gray-400 block">Median</span>
-                      <span className="text-sm font-bold text-purple-700">{c.median_credits} pts</span>
-                    </div>
-                    <div>
-                      <span className="text-[11px] text-gray-400 block">≥ 10 Credits</span>
-                      <span className="text-sm font-bold text-gray-600">{c.percentage_ge_10}%</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="w-full text-center text-xs font-semibold text-amber-800 hover:underline py-1"
-                    onClick={() => setSelectedClassForRoster(c)}
-                  >
-                    View Class Student Roster →
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* All Batches and Classes Performance Monitoring Table */}
+      {/* Selected Batch Section Rankings */}
       <div className="card p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-gray-100 pb-3">
           <div>
-            <h2 className="text-base font-bold text-foreground">All Batches & Classes Performance Monitoring</h2>
-            <p className="text-xs text-gray-500">Comprehensive class rankings, statistics, and student credit distributions</p>
+            <h2 className="text-base font-bold text-foreground">
+              {batchFilter
+                ? `${batchFilter === '2025' ? 'Batch 2025–2029' : batchFilter === '2026' ? 'Batch 2026–2030' : `Batch ${batchFilter}`} Section Rankings`
+                : 'Choose a batch to see section rankings'}
+            </h2>
+            <p className="text-xs text-gray-500">
+              Sections are ranked within the selected batch by average credits, median credits, and students with at least 10 credits.
+            </p>
           </div>
           <span className="text-xs text-gray-500">
-            Total {allClasses.length} class{allClasses.length > 1 ? 'es' : ''} listed
+            {allClasses.length} section{allClasses.length === 1 ? '' : 's'}
           </span>
         </div>
 
@@ -948,9 +804,7 @@ function PerformanceTab({ assignedDepartments, profile, onSelectStudent }) {
           columns={performanceColumns}
           data={allClasses}
           isLoading={isLoading}
-          emptyMessage="No classes found for the selected batch filter."
-          searchable
-          searchPlaceholder="Search class name or batch..."
+          emptyMessage={batchFilter ? 'No sections found for this batch.' : 'Choose a batch to view section rankings.'}
         />
       </div>
 
@@ -1095,7 +949,6 @@ export default function HodDashboard() {
           <div className="page-container space-y-5">
             {activeTab === 'performance' ? (
               <PerformanceTab
-                assignedDepartments={assignedDepartments}
                 profile={profile}
                 onSelectStudent={(id, name) => {
                   setSelectedStudentId(id)

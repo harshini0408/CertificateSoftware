@@ -587,13 +587,27 @@ async def get_hod_performance_analytics(
         if requested_batch and requested_batch != mapped_batch:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to the requested batch")
         query["batch"] = mapped_batch
-    elif requested_batch:
-        query["batch"] = requested_batch
 
     if mapped_section:
         query["section"] = mapped_section
 
-    students = await User.find(query).sort("name").to_list()
+    scoped_students = await User.find(query).sort("name").to_list()
+    available_batches = sorted({
+        student.batch.strip()
+        for student in scoped_students
+        if student.batch and student.batch.strip()
+    })
+    if not mapped_batch:
+        available_batches = sorted(
+            {*available_batches, "2025", "2026"},
+            key=lambda value: value.casefold(),
+        )
+
+    if requested_batch and not mapped_batch:
+        query["batch"] = requested_batch
+        students = await User.find(query).sort("name").to_list()
+    else:
+        students = scoped_students
 
     emails = [(s.email or "").strip().lower() for s in students if s.email]
     reg_numbers = [(s.registration_number or "").strip() for s in students if s.registration_number]
@@ -621,13 +635,10 @@ async def get_hod_performance_analytics(
 
     # Group students by (batch, section)
     classes_dict: dict[tuple[str, str], list[dict]] = {}
-    all_batches_set: set[str] = set()
 
     for s in students:
         s_batch = (s.batch or "Unknown").strip()
         s_sec = (s.section or "A").strip()
-        if s.batch:
-            all_batches_set.add(s.batch.strip())
 
         email_key = (s.email or "").strip().lower()
         reg_key = (s.registration_number or "").strip()
@@ -701,24 +712,6 @@ async def get_hod_performance_analytics(
     total_classes = len(class_stats)
     for idx, c in enumerate(class_stats):
         c["rank"] = idx + 1
-        if total_classes <= 3:
-            c["status"] = "Good" if c["average_credits"] >= 5 else "Needs Improvement"
-        else:
-            if idx < 3:
-                c["status"] = "Top Performer"
-            elif idx >= total_classes - 3:
-                c["status"] = "Needs Attention"
-            else:
-                c["status"] = "Moderate"
-
-    top_performing = class_stats[:3] if total_classes >= 1 else []
-    # Poor performing 3 classes: bottom 3 (sorted lowest first for clear view)
-    if total_classes >= 3:
-        poor_performing = list(reversed(class_stats[-3:]))
-    elif total_classes > 0:
-        poor_performing = list(reversed(class_stats))
-    else:
-        poor_performing = []
 
     # Overall department-level summary
     total_dept_students = len(students)
@@ -747,8 +740,6 @@ async def get_hod_performance_analytics(
             "overall_students_ge_10_count": overall_ge_10,
             "overall_percentage_ge_10": overall_pct_ge_10,
         },
-        "top_performing": top_performing,
-        "poor_performing": poor_performing,
         "classes": class_stats,
-        "available_batches": sorted(list(all_batches_set)),
+        "available_batches": available_batches,
     }
