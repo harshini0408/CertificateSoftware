@@ -31,6 +31,7 @@ from ...models.event_team import EventTeam, EventTeamClaim, EventTeamInvitation
 from ...models.participant import Participant, ParticipantSource
 from ...services.storage_service import storage_url_to_path
 from ...services.semester_service import get_current_semester
+from ...services.credit_service import filter_emailed_credit_entries
 
 router = APIRouter(tags=["Student"])
 
@@ -187,43 +188,6 @@ def _norm_cert_type(value: str | None) -> str:
     return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
-async def _filter_emailed_credit_entries(entries: list):
-    """Keep manual entries and only keep certificate-linked entries that are EMAILED."""
-    if not entries:
-        return []
-
-    cert_numbers = [e.cert_number for e in entries if getattr(e, "cert_number", None)]
-    if not cert_numbers:
-        return entries
-
-    certs = await Certificate.find({"cert_number": {"$in": cert_numbers}}).to_list()
-    cert_status_map = {c.cert_number: c.status.value for c in certs if c and c.cert_number}
-
-    filtered = []
-    for entry in entries:
-        cert_number = getattr(entry, "cert_number", None)
-        if not cert_number:
-            # Manual/tutor entries without a Certificate document stay valid.
-            filtered.append(entry)
-            continue
-
-        # If it's a student manual upload, direct tutor award, department cert, or not an event Certificate document, keep it
-        if (
-            cert_number.startswith("STU-MANUAL-")
-            or cert_number.startswith("MANUAL-")
-            or cert_number.startswith("DPT-")
-            or cert_number not in cert_status_map
-        ):
-            filtered.append(entry)
-            continue
-
-        status_value = (cert_status_map.get(cert_number) or "").lower()
-        if status_value == CertStatus.EMAILED.value:
-            filtered.append(entry)
-
-    return filtered
-
-
 async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
     normalized = _norm_cert_type(cert_type_raw)
     spaced = normalized.replace("_", " ")
@@ -282,7 +246,7 @@ async def get_credits(current_user: User = Depends(require_role(UserRole.STUDENT
         if key not in dedup:
             dedup[key] = entry
     all_history = list(dedup.values())
-    all_history = await _filter_emailed_credit_entries(all_history)
+    all_history = await filter_emailed_credit_entries(all_history)
 
     # Build breakdown by cert_type for the current semester if set
     breakdown = {}
@@ -341,7 +305,7 @@ async def get_credits_history(current_user: User = Depends(require_role(UserRole
         key = entry.cert_number or f"manual::{entry.awarded_at.isoformat()}::{entry.cert_type}"
         if key not in dedup:
             dedup[key] = entry
-    filtered = await _filter_emailed_credit_entries(list(dedup.values()))
+    filtered = await filter_emailed_credit_entries(list(dedup.values()))
     ordered = sorted(filtered, key=lambda e: e.awarded_at, reverse=True)
     return [e.model_dump() for e in ordered]
 
@@ -892,7 +856,7 @@ async def get_student_credits(student_id: str):
         key = entry.cert_number or f"manual::{entry.awarded_at.isoformat()}::{entry.cert_type}"
         if key not in dedup:
             dedup[key] = entry
-    filtered_history = await _filter_emailed_credit_entries(list(dedup.values()))
+    filtered_history = await filter_emailed_credit_entries(list(dedup.values()))
 
     breakdown = {}
     semester_history = filtered_history

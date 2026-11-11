@@ -9,12 +9,172 @@ import StatCard from '../../components/StatCard'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import StatusBadge from '../../components/StatusBadge'
 import { BACKEND_URL } from '../../utils/axiosInstance'
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from 'recharts'
 
-import { useHodProfile, useHodStudents, useHodStudentCertificates, useHodPerformance } from './api'
+import {
+  useHodProfile,
+  useHodStudents,
+  useHodStudentCertificates,
+  useHodPerformance,
+  useHodSectionCreditOverview,
+} from './api'
 
 function fmtDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+function SectionCreditChart({ batch, classes, isLoading, error, multipleDepartments }) {
+  const gradientId = `hod-credit-${batch.replace(/[^a-zA-Z0-9]/g, '')}`
+  const chartData = classes.map((item) => ({
+    ...item,
+    chartLabel: multipleDepartments ? `${item.section} · ${item.department}` : item.section,
+  }))
+  const errorMessage = error?.response?.data?.detail || 'Could not load section credit analytics.'
+
+  return (
+    <div className="card min-w-0 p-4 sm:p-5">
+      <div className="mb-3">
+        <h2 className="text-base font-bold text-foreground">Batch {batch}</h2>
+        <p className="mt-1 text-xs text-gray-500">
+          Average student credit total by section · All semesters
+        </p>
+      </div>
+      {isLoading ? (
+        <div className="flex h-64 items-center justify-center text-sm text-gray-500">
+          Loading section analytics...
+        </div>
+      ) : error ? (
+        <div role="alert" className="flex h-64 items-center justify-center px-4 text-center text-sm text-red-700">
+          {errorMessage}
+        </div>
+      ) : !chartData.length ? (
+        <div className="flex h-64 items-center justify-center px-4 text-center text-sm text-gray-400">
+          No class data is available for this batch in your department scope.
+        </div>
+      ) : (
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 20 }}>
+              <defs>
+                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.95} />
+                  <stop offset="100%" stopColor="#047857" stopOpacity={0.95} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <XAxis
+                dataKey="chartLabel"
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                interval={0}
+                angle={chartData.length > 4 ? -25 : 0}
+                textAnchor={chartData.length > 4 ? 'end' : 'middle'}
+                tickLine={false}
+                axisLine={{ stroke: '#e2e8f0' }}
+                label={{
+                  value: 'Sections',
+                  position: 'insideBottom',
+                  offset: -14,
+                  style: { fill: '#64748b', fontSize: 11 },
+                }}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                tickLine={false}
+                axisLine={{ stroke: '#e2e8f0' }}
+                allowDecimals
+                label={{
+                  value: 'Average credit points',
+                  angle: -90,
+                  position: 'insideLeft',
+                  style: { fill: '#64748b', fontSize: 10 },
+                }}
+              />
+              <Tooltip
+                cursor={{ fill: '#f8fafc' }}
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null
+                  const item = payload[0].payload
+                  return (
+                    <div className="max-w-xs space-y-1.5 rounded-xl border border-gray-100 bg-white/95 p-3 text-xs shadow-xl backdrop-blur-sm">
+                      <p className="border-b border-gray-100 pb-1 font-bold text-gray-900">
+                        Section {item.section} · {item.department}
+                      </p>
+                      <p className="font-semibold text-green-700">
+                        Average: {item.average_credits} credit points
+                      </p>
+                      <p className="text-gray-600">
+                        Students below 10 points: {item.students_below_10}
+                      </p>
+                      <p className="text-gray-600">Students in class: {item.total_students}</p>
+                      <div className="border-t border-gray-100 pt-1">
+                        <p className="font-semibold text-gray-700">Class tutor(s)</p>
+                        {item.tutors.length ? (
+                          item.tutors.map((tutor) => (
+                            <p key={`${tutor.name}-${tutor.department}`} className="text-gray-600">
+                              {tutor.name} · {tutor.department}
+                            </p>
+                          ))
+                        ) : (
+                          <p className="text-gray-400">No tutor assigned</p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                }}
+              />
+              <Bar
+                dataKey="average_credits"
+                name="Average credit points"
+                fill={`url(#${gradientId})`}
+                radius={[6, 6, 0, 0]}
+                maxBarSize={48}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HodSectionCreditCharts({ assignedDepartments }) {
+  const { data, isLoading, error } = useHodSectionCreditOverview()
+  const batches = data?.batches || []
+
+  return (
+    <section aria-label="Student credit totals by class">
+      <div className="mb-3">
+        <h2 className="text-lg font-bold text-foreground">Student Credit Totals by Section</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Totals match the credit points shown on student dashboards. Hover for tutor assignments and class details.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        {['2025-2029', '2026-2030'].map((batch) => {
+          const batchData = batches.find((item) => item.batch === batch)
+          return (
+            <SectionCreditChart
+              key={batch}
+              batch={batch}
+              classes={batchData?.classes || []}
+              isLoading={isLoading}
+              error={error}
+              multipleDepartments={assignedDepartments.length > 1}
+            />
+          )
+        })}
+      </div>
+    </section>
+  )
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -861,13 +1021,15 @@ export default function HodDashboard() {
             ) : (
               <>
                 <div>
-                  <h1 className="text-2xl font-bold text-foreground">HOD Dashboard</h1>
+                  <h1 className="text-2xl font-bold text-foreground">Overview</h1>
                   <p className="mt-1 text-sm text-gray-500">
                     {assignedDepartments.length > 1 ? 'Departments' : 'Department'}: {assignedDepartments.length ? assignedDepartments.join(', ') : '—'}
                     {profile?.batch ? ` · Batch ${profile.batch}` : ''}
                     {profile?.section ? ` · Section ${profile.section}` : ''}
                   </p>
                 </div>
+
+                <HodSectionCreditCharts assignedDepartments={assignedDepartments} />
 
                 <div className="card p-4">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -897,8 +1059,6 @@ export default function HodDashboard() {
                   data={students}
                   isLoading={loadingStudents}
                   emptyMessage="No students found for selected filters."
-                  searchable
-                  searchPlaceholder="Search by name, email, reg no..."
                 />
               </>
             )}

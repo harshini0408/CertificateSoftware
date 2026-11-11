@@ -6,6 +6,7 @@ export const hodKeys = {
   students: (filters) => ['hod', 'students', filters],
   certificates: (studentId) => ['hod', 'student-certificates', studentId],
   performance: (filters) => ['hod', 'performance', filters],
+  sectionCreditOverview: () => ['hod', 'section-credit-overview'],
 }
 
 export function useHodProfile() {
@@ -55,3 +56,12 @@ export function useHodPerformance(filters = {}) {
   })
 }
 
+export function useHodSectionCreditOverview() {
+  return useQuery({
+    queryKey: hodKeys.sectionCreditOverview(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/hod/section-credit-overview')
+      return data
+    },
+  })
+}
