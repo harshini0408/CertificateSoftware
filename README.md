@@ -14,7 +14,7 @@ The app is prepared for deployment under a subpath:
 
 ## Key Capabilities & Recent Features
 - **Activity Points Management**: Track, calculate, and roll over student activity credits semester by semester.
-- **HOD Overview**: Department-scoped student search with average student-dashboard credit totals for batches 2025–2029 and 2026–2030; charts read the same configured database as student credit endpoints and accept either short (`2025`, `2026`) or full (`2025-2029`, `2026-2030`) batch values. Hover over a section to see its tutors, average points, students below 10 points, and class size.
+- **HOD Overview**: Department-scoped student search with current-semester average credit charts on a 0–20 scale for batches 2025–2029 and 2026–2030; charts read the same configured database as student credit endpoints and accept either short (`2025`, `2026`) or full (`2025-2029`, `2026-2030`) batch values. Hover over a section to see its tutors, average points, students below 10 points, and class size.
 - **Club Dashboard**: Mandatory event completion report submission before certificates can be issued; live semester and cumulative completed event counts.
 - **Student Dashboard**: 1-time registration number update for students admitted with temporary IDs (e.g., `T24Z108` → 12-digit permanent ID); credit breakdown, event registration, and certificate verification submissions.
 - **Tutor Dashboard**: Class credit monitoring, external certificate verification, and mapped student registration number editing (strictly up to 2 times).

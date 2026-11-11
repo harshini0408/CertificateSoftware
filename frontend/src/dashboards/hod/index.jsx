@@ -32,7 +32,7 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function SectionCreditChart({ batch, classes, isLoading, error, multipleDepartments }) {
+function SectionCreditChart({ batch, classes, semester, isLoading, error, multipleDepartments }) {
   const gradientId = `hod-credit-${batch.replace(/[^a-zA-Z0-9]/g, '')}`
   const chartData = classes.map((item) => ({
     ...item,
@@ -45,7 +45,7 @@ function SectionCreditChart({ batch, classes, isLoading, error, multipleDepartme
       <div className="mb-3">
         <h2 className="text-base font-bold text-foreground">Batch {batch}</h2>
         <p className="mt-1 text-xs text-gray-500">
-          Average student credit total by section · All semesters
+          Average credit points by section · {semester ? `Semester ${semester}` : 'Current semester'} (out of 20)
         </p>
       </div>
       {isLoading ? (
@@ -87,19 +87,21 @@ function SectionCreditChart({ batch, classes, isLoading, error, multipleDepartme
                 }}
               />
               <YAxis
+                domain={[0, 20]}
+                ticks={[0, 5, 10, 15, 20]}
+                allowDataOverflow
                 tick={{ fontSize: 11, fill: '#64748b' }}
                 tickLine={false}
                 axisLine={{ stroke: '#e2e8f0' }}
-                allowDecimals
                 label={{
-                  value: 'Average credit points',
+                  value: 'Average credit points (out of 20)',
                   angle: -90,
                   position: 'insideLeft',
                   style: { fill: '#64748b', fontSize: 10 },
                 }}
               />
               <Tooltip
-                cursor={{ fill: '#f8fafc' }}
+                cursor={{ fill: '#e2e8f0' }}
                 content={({ active, payload }) => {
                   if (!active || !payload?.length) return null
                   const item = payload[0].payload
@@ -120,7 +122,7 @@ function SectionCreditChart({ batch, classes, isLoading, error, multipleDepartme
                         {item.tutors.length ? (
                           item.tutors.map((tutor) => (
                             <p key={`${tutor.name}-${tutor.department}`} className="text-gray-600">
-                              {tutor.name} · {tutor.department}
+                              {tutor.name} · {getShortDepartmentName(tutor.department)}
                             </p>
                           ))
                         ) : (
@@ -146,6 +148,87 @@ function SectionCreditChart({ batch, classes, isLoading, error, multipleDepartme
   )
 }
 
+function getShortDepartmentName(department) {
+  const knownCodes = {
+    'BE CIVIL ENGINEERING': 'CIV',
+    'BE COMPUTER SCIENCE & ENGINEERING': 'CSE',
+    'BE ELECTRICAL & ELECTRONICS ENGINEERING': 'EEE',
+    'BE ELECTRONICS & COMMUNICATION ENGINEERING': 'ECE',
+    'BE INSTRUMENTATION AND CONTROL ENGINEERING': 'ICE',
+    'BE MECHANICAL ENGINEERING': 'MECH',
+    'BTECH ARTIFICIAL INTELLIGENCE AND DATA SCIENCE': 'AIDS',
+    'BTECH ELECTRONICS ENGINEERING (VLSI DESIGN AND TECHNOLOGY)': 'VLSI',
+  }
+  const normalizedDepartment = department.trim().toUpperCase()
+  if (knownCodes[normalizedDepartment]) return knownCodes[normalizedDepartment]
+  if (!/\s/.test(normalizedDepartment) && normalizedDepartment.length <= 5) return normalizedDepartment
+
+  const words = department
+    .replace(/[()&,]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word && !['BE', 'BTECH', 'AND'].includes(word.toUpperCase()))
+  return words.map((word) => word[0]).join('').toUpperCase() || department
+}
+
+function LowCreditClassAlert({ assignedDepartments }) {
+  const { data } = useHodSectionCreditOverview()
+  const flaggedClasses = (data?.batches || []).flatMap(({ batch, classes }) =>
+    classes
+      .filter((item) => item.total_students > 0 && item.students_below_10 / item.total_students >= 0.5)
+      .map((item) => ({
+        ...item,
+        batch,
+        departmentLabel: getShortDepartmentName(item.department),
+      })),
+  )
+
+  if (!flaggedClasses.length) return null
+
+  const classSummary = (item) => (
+    <>
+      <span className="font-semibold">{item.batch}</span>
+      <span> · {item.departmentLabel}</span>
+      <span> · Sec {item.section}</span>
+      <span className="ml-1 text-red-700">
+        ({item.students_below_10}/{item.total_students} below 10)
+      </span>
+    </>
+  )
+
+  if (flaggedClasses.length === 1) {
+    return (
+      <div
+        role="status"
+        className="rounded-lg border border-red-500 bg-red-50 px-3 py-2 text-right text-xs text-red-800"
+      >
+        <p className="font-bold">Low credit alert</p>
+        <p>{classSummary(flaggedClasses[0])}</p>
+      </div>
+    )
+  }
+
+  return (
+    <details className="relative">
+      <summary className="list-none cursor-pointer rounded-lg border border-red-500 bg-red-50 px-3 py-2 text-right text-xs font-bold text-red-800 marker:hidden">
+        {flaggedClasses.length} classes need credit attention
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 w-72 max-w-[85vw] rounded-lg border border-red-300 bg-white p-2 shadow-lg">
+        <p className="px-2 py-1 text-xs font-bold text-red-800">At least 50% below 10 credits</p>
+        <ul className="divide-y divide-red-100">
+          {flaggedClasses.map((item) => (
+            <li
+              key={`${item.batch}-${item.department}-${item.section}`}
+              className="px-2 py-2 text-left text-xs text-gray-700"
+            >
+              {classSummary(item)}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  )
+}
+
 function HodSectionCreditCharts({ assignedDepartments }) {
   const { data, isLoading, error } = useHodSectionCreditOverview()
   const batches = data?.batches || []
@@ -153,9 +236,9 @@ function HodSectionCreditCharts({ assignedDepartments }) {
   return (
     <section aria-label="Student credit totals by class">
       <div className="mb-3">
-        <h2 className="text-lg font-bold text-foreground">Student Credit Totals by Section</h2>
+        <h2 className="text-lg font-bold text-foreground">Average Credit Points by Section</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Totals match the credit points shown on student dashboards. Hover for tutor assignments and class details.
+          Current-semester averages are shown on a 0–20 scale. Hover for tutor assignments and class details.
         </p>
       </div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -166,6 +249,7 @@ function HodSectionCreditCharts({ assignedDepartments }) {
               key={batch}
               batch={batch}
               classes={batchData?.classes || []}
+              semester={data?.current_semester}
               isLoading={isLoading}
               error={error}
               multipleDepartments={assignedDepartments.length > 1}
@@ -1020,13 +1104,16 @@ export default function HodDashboard() {
               />
             ) : (
               <>
-                <div>
-                  <h1 className="text-2xl font-bold text-foreground">Overview</h1>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {assignedDepartments.length > 1 ? 'Departments' : 'Department'}: {assignedDepartments.length ? assignedDepartments.join(', ') : '—'}
-                    {profile?.batch ? ` · Batch ${profile.batch}` : ''}
-                    {profile?.section ? ` · Section ${profile.section}` : ''}
-                  </p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h1 className="text-2xl font-bold text-foreground">Overview</h1>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {assignedDepartments.length > 1 ? 'Departments' : 'Department'}: {assignedDepartments.length ? assignedDepartments.join(', ') : '—'}
+                      {profile?.batch ? ` · Batch ${profile.batch}` : ''}
+                      {profile?.section ? ` · Section ${profile.section}` : ''}
+                    </p>
+                  </div>
+                  <LowCreditClassAlert assignedDepartments={assignedDepartments} />
                 </div>
 
                 <HodSectionCreditCharts assignedDepartments={assignedDepartments} />

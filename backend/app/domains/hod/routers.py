@@ -446,6 +446,7 @@ async def get_hod_section_credit_overview(current_user: User = _hod):
     }
 
     class_stats: dict[tuple[str, str, str], dict] = {}
+    current_semester_key = current_semester.strip().casefold()
     for student in students:
         department = (student.department or "").strip()
         batch = (student.batch or "").strip()
@@ -469,7 +470,11 @@ async def get_hod_section_credit_overview(current_user: User = _hod):
             for entry in deduplicated_history.values()
             if not entry.cert_number or entry.cert_number in visible_cert_numbers
         ]
-        student_credits = sum(int(entry.points_awarded or 0) for entry in student_history)
+        student_credits = sum(
+            int(entry.points_awarded or 0)
+            for entry in student_history
+            if (entry.semester or "").strip().casefold() == current_semester_key
+        )
 
         stats = class_stats.setdefault(
             key,
