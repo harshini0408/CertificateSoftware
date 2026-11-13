@@ -4,6 +4,7 @@ import axiosInstance from '../../utils/axiosInstance'
 export const hodKeys = {
   me: () => ['hod', 'me'],
   students: (filters) => ['hod', 'students', filters],
+  studentFilterOptions: () => ['hod', 'student-filter-options'],
   certificates: (studentId) => ['hod', 'student-certificates', studentId],
   performance: (filters) => ['hod', 'performance', filters],
   sectionCreditOverview: () => ['hod', 'section-credit-overview'],
@@ -28,6 +29,16 @@ export function useHodStudents(filters = {}) {
       if (filters.section) params.section = filters.section
       if (filters.search) params.search = filters.search
       const { data } = await axiosInstance.get('/hod/students', { params })
+      return data
+    },
+  })
+}
+
+export function useHodStudentFilterOptions() {
+  return useQuery({
+    queryKey: hodKeys.studentFilterOptions(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/hod/student-filter-options')
       return data
     },
   })

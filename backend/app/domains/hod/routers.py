@@ -218,6 +218,36 @@ async def list_hod_students(
     }
 
 
+@router.get("/student-filter-options")
+async def get_hod_student_filter_options(current_user: User = _hod):
+    """Return all batch and section options within this HOD's assigned scope."""
+    scope = await _build_hod_scope(current_user)
+    query = {
+        "role": UserRole.STUDENT,
+        "is_active": True,
+        "department": {"$in": scope["departments"]},
+    }
+
+    if scope.get("batch"):
+        query["batch"] = scope["batch"]
+    if scope.get("section"):
+        query["section"] = scope["section"]
+
+    students = await User.find(query).to_list()
+    return {
+        "batches": sorted({
+            student.batch.strip()
+            for student in students
+            if student.batch and student.batch.strip()
+        }),
+        "sections": sorted({
+            student.section.strip()
+            for student in students
+            if student.section and student.section.strip()
+        }),
+    }
+
+
 @router.get("/students/{student_id}/certificates")
 async def get_hod_student_certificates(student_id: PydanticObjectId, current_user: User = _hod):
     scope = await _build_hod_scope(current_user)

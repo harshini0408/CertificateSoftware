@@ -22,6 +22,7 @@ import {
 import {
   useHodProfile,
   useHodStudents,
+  useHodStudentFilterOptions,
   useHodStudentCertificates,
   useHodPerformance,
   useHodSectionCreditOverview,
@@ -849,16 +850,11 @@ export default function HodDashboard() {
   }, [search, batch, section])
 
   const { data: studentsResp, isLoading: loadingStudents } = useHodStudents(filters)
+  const { data: filterOptions } = useHodStudentFilterOptions()
   const students = studentsResp?.items || []
 
-  const batchOptions = useMemo(
-    () => [...new Set((students || []).map((s) => s.batch).filter(Boolean))].sort(),
-    [students],
-  )
-  const sectionOptions = useMemo(
-    () => [...new Set((students || []).map((s) => s.section).filter(Boolean))].sort(),
-    [students],
-  )
+  const batchOptions = filterOptions?.batches || []
+  const sectionOptions = filterOptions?.sections || []
 
   const studentColumns = [
     {
