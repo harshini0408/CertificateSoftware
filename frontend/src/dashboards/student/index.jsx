@@ -467,6 +467,8 @@ const TYPE_COLORS = {
   volunteer:   'bg-teal-100 text-teal-700',
 }
 
+const ALL_SEMESTERS = '__all__'
+
 // ── Credits breakdown bar ─────────────────────────────────────────────────────
 function normalizeCertType(value) {
   return (value || '').toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_')
@@ -956,26 +958,41 @@ export default function StudentDashboard() {
   const currentSemester = credits?.current_semester
   const semesterTotals = credits?.semester_totals || []
   const creditHistory = credits?.credit_history || []
+  const creditHistoryByCertificate = new Map(
+    creditHistory
+      .filter((entry) => entry.cert_number)
+      .map((entry) => [entry.cert_number, entry]),
+  )
+  const certificateRows = visibleCertificates.map((certificate) => {
+    const history = creditHistoryByCertificate.get(certificate.cert_number)
+    return {
+      ...certificate,
+      semester: history?.semester || 'Unknown',
+      points_awarded: history?.points_awarded ?? null,
+      awarded_at: history?.awarded_at || null,
+    }
+  })
   const semesterOptions = [
     ...(currentSemester ? [currentSemester] : []),
     ...semesterTotals.map((item) => item?.semester || 'Unknown'),
+    ...(certificateRows.some((certificate) => certificate.semester === 'Unknown') ? ['Unknown'] : []),
   ].filter(Boolean)
   const uniqueSemesters = Array.from(new Set(semesterOptions))
-  const [selectedSemester, setSelectedSemester] = useState(
-    currentSemester || uniqueSemesters[0] || 'Unknown',
-  )
+  const [selectedSemester, setSelectedSemester] = useState(ALL_SEMESTERS)
 
   useEffect(() => {
-    const next = currentSemester || uniqueSemesters[0]
-    if (next) setSelectedSemester(next)
-  }, [currentSemester, semesterTotals])
+    if (selectedSemester !== ALL_SEMESTERS && !uniqueSemesters.includes(selectedSemester)) {
+      setSelectedSemester(ALL_SEMESTERS)
+    }
+  }, [selectedSemester, uniqueSemesters])
 
-  const selectedHistory = creditHistory.filter(
-    (entry) => (entry.semester || 'Unknown') === selectedSemester,
+  const selectedCertificates = certificateRows.filter(
+    (certificate) => selectedSemester === ALL_SEMESTERS || certificate.semester === selectedSemester,
   )
-  const selectedTotal = semesterTotals.find(
-    (item) => (item?.semester || 'Unknown') === selectedSemester,
-  )?.total_credits ?? 0
+  const selectedTotal = selectedCertificates.reduce(
+    (total, certificate) => total + Number(certificate.points_awarded || 0),
+    0,
+  )
 
   const handleDownload = async (certNumber, certId) => {
     setDownloadingId(certId)
@@ -1061,6 +1078,26 @@ export default function StudentDashboard() {
           {(v ?? 'participant').replace(/_/g, ' ')}
         </span>
       ),
+    },
+    {
+      key: 'points_awarded',
+      header: 'Credits',
+      align: 'right',
+      sortable: true,
+      render: (v) => v == null
+        ? '—'
+        : <span className="font-semibold text-green-700">+{v}</span>,
+    },
+    {
+      key: 'awarded_at',
+      header: 'Date',
+      sortable: true,
+      render: (v) =>
+        v
+          ? new Date(v).toLocaleDateString('en-IN', {
+              day: '2-digit', month: 'short', year: 'numeric',
+            })
+          : '—',
     },
     {
       key: 'issued_at',
@@ -2178,57 +2215,35 @@ export default function StudentDashboard() {
             </div>
 
             <div>
-              <h2 className="section-title mb-3">Certificates by Semester</h2>
-              {uniqueSemesters.length === 0 ? (
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-                  No semester data yet.
-                </div>
-              ) : (
-                <div className="card p-4">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-semibold text-gray-600">Semester</label>
-                      <select
-                        className="form-input h-9 py-1 text-sm"
-                        value={selectedSemester}
-                        onChange={(e) => setSelectedSemester(e.target.value)}
-                      >
-                        {uniqueSemesters.map((semester) => (
-                          <option key={semester} value={semester}>
-                            {semester}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <span className="text-xs text-gray-500">Total: {selectedTotal}</span>
-                  </div>
-                  <DataTable
-                    columns={[
-                      { key: 'cert_number', header: 'Cert No.', render: (v) => <span className="font-mono text-xs">{v || '—'}</span> },
-                      { key: 'event_name', header: 'Event' },
-                      { key: 'club_name', header: 'Club', render: (v) => <span className="text-xs text-gray-500">{v || '—'}</span> },
-                      { key: 'cert_type', header: 'Type', render: (v) => <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${TYPE_COLORS[v] ?? 'bg-gray-100 text-gray-600'}`}>{(v || 'participant').replace(/_/g, ' ')}</span> },
-                      { key: 'points_awarded', header: 'Credits', align: 'right', render: (v) => <span className="font-semibold text-green-700">+{v ?? 0}</span> },
-                      { key: 'awarded_at', header: 'Date', render: (v) => v ? new Date(v).toLocaleDateString('en-IN') : '—' },
-                    ]}
-                    data={selectedHistory}
-                    isLoading={creditsLoading}
-                    emptyMessage="No certificates for this semester."
-                    rowKey="cert_number"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div>
               <h2 className="section-title mb-3">My Certificates</h2>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-gray-600">
+                  Semester
+                  <select
+                    className="form-input h-9 py-1 text-sm"
+                    value={selectedSemester}
+                    onChange={(e) => setSelectedSemester(e.target.value)}
+                  >
+                    <option value={ALL_SEMESTERS}>All Semesters</option>
+                    {uniqueSemesters.map((semester) => (
+                      <option key={semester} value={semester}>{semester}</option>
+                    ))}
+                  </select>
+                </label>
+                <span className="text-xs text-gray-500">
+                  {selectedCertificates.length} certificate{selectedCertificates.length !== 1 ? 's' : ''}
+                  {' · '}Credits: {selectedTotal}
+                </span>
+              </div>
               <DataTable
                 columns={certColumns}
-                data={visibleCertificates}
-                isLoading={certsLoading}
-                emptyMessage="No certificates yet. Participate in events to earn certificates."
+                data={selectedCertificates}
+                isLoading={certsLoading || creditsLoading}
+                emptyMessage={selectedSemester === ALL_SEMESTERS
+                  ? 'No certificates yet. Participate in events to earn certificates.'
+                  : `No certificates found for ${selectedSemester}.`}
                 searchable
-                searchPlaceholder="Search by event name, cert no…"
+                searchPlaceholder="Search by event, club, cert no…"
                 rowKey="_id"
               />
             </div>

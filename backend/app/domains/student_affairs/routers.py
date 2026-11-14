@@ -98,7 +98,7 @@ async def get_stats(_user: User = _affairs):
     now = datetime.utcnow()
     next_week = now + timedelta(days=7)
     upcoming_count = await Event.find(
-        Event.is_published == True,
+        {"status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]}},
         Event.event_date >= now,
         Event.event_date <= next_week,
     ).count()
@@ -516,22 +516,20 @@ async def list_upcoming_events(
     category: Optional[str] = None,
     _user: User = _affairs,
 ):
-    """List published, upcoming club events (excluding completed events)."""
+    """List active or closed upcoming club events, excluding drafts."""
     now = datetime.utcnow()
     today_start = datetime(now.year, now.month, now.day)
 
-    # Auto-complete past published events.
+    # Auto-complete past active or closed events.
     past_active = await Event.find({
-        "is_published": True,
-        "status": {"$ne": EventStatus.COMPLETED.value},
+        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
         "event_date": {"$lt": today_start},
     }).to_list()
     for pe in past_active:
         await pe.set({"status": EventStatus.COMPLETED.value})
 
     query: dict = {
-        "is_published": True,
-        "status": {"$ne": EventStatus.COMPLETED.value},
+        "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
         "event_date": {"$gte": today_start},
     }
     if club_id:

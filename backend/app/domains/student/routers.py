@@ -1252,7 +1252,6 @@ async def list_upcoming_events(
     events = await Event.find({
         "status": {"$in": [EventStatus.ACTIVE.value, EventStatus.CLOSED.value]},
         "event_date": {"$gte": today_start},
-        "is_published": True,
     }).sort(+Event.event_date).to_list()
 
     clubs = await Club.find().to_list()
