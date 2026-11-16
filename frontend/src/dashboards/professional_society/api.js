@@ -385,7 +385,21 @@ export function useSocietyActiveMembers() {
     queryKey: societyKeys.activeMembers(),
     queryFn: async () => {
       const { data } = await axiosInstance.get('/society-coordinator/active-members')
-      return data
+      const members = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.members)
+          ? data.members
+          : []
+
+      return members
+        .filter((member) => member.membership_status !== 'No')
+        .map((member) => ({
+          ...member,
+          id: member.id ?? member.membership_id,
+          student_name: member.student_name ?? member.name,
+          student_email: member.student_email ?? member.email,
+          applied_at: member.applied_at ?? member.joined_at,
+        }))
     },
   })
 }

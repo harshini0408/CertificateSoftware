@@ -23,6 +23,7 @@ class Participant(Document):
     field_mapping: Dict[str, str] = Field(default_factory=dict)
     source: ParticipantSource = ParticipantSource.MANUAL
     verified: bool = True
+    manually_verified: bool = False
     status: Optional[str] = "accepted"  # "accepted", "pending", "rejected"
     team_id: Optional[str] = None
     team_name: Optional[str] = None
