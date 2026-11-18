@@ -55,7 +55,18 @@ const axiosInstance = axios.create({
 // ─── Request interceptor ────────────────────────────────────────────────────
 // Cookies are sent automatically — nothing to inject.
 axiosInstance.interceptors.request.use(
-  (config) => config,
+  (config) => {
+    // Let the browser set the multipart boundary for FormData uploads.
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      if (typeof config.headers?.delete === 'function') {
+        config.headers.delete('Content-Type')
+      } else if (config.headers) {
+        delete config.headers['Content-Type']
+        delete config.headers['content-type']
+      }
+    }
+    return config
+  },
   (error) => Promise.reject(error),
 )
 

@@ -216,7 +216,7 @@ function Step1({ initialTemplateUrl, onComplete }) {
           maxSizeMB={15}
           label="Drop your certificate template here, or browse"
           hint="PNG or JPG up to 15 MB. Orientation will be preserved."
-          onFileChange={handleFileChange}
+          onFile={handleFileChange}
         />
 
         {displayUrl && (
@@ -321,7 +321,7 @@ function Step2({ initialState, onBack, onComplete }) {
           maxSizeMB={20}
           label="Drop your participants Excel file (.xlsx) here"
           hint="XLSX format up to 20 MB."
-          onFileChange={handleFile}
+          onFile={handleFile}
         />
 
         {parsing && (
@@ -802,9 +802,15 @@ function Step5({
           if (match) setSelectedRuleId(match.id)
         }
       }
-    }).catch(() => {})
+    }).catch((err) => {
+      if (!mounted || err?.response?.status === 403) return
+      addToast({
+        type: 'error',
+        message: err?.response?.data?.detail || 'Failed to load credit rules.',
+      })
+    })
     return () => { mounted = false }
-  }, [pointsPerCert])
+  }, [pointsPerCert, addToast])
 
   const generate = async () => {
     setGenerating(true)
@@ -1132,8 +1138,16 @@ function Step6({
       URL.revokeObjectURL(url)
       addToast({ type: 'success', message: 'ZIP download started.' })
     } catch (err) {
-      const msg = err?.response?.data?.detail || 'ZIP download failed.'
-      addToast({ type: 'error', message: msg })
+      let msg = err?.response?.data?.detail
+      if (!msg && err?.response?.data instanceof Blob) {
+        try {
+          const body = JSON.parse(await err.response.data.text())
+          msg = body?.detail
+        } catch {
+          // Keep the fallback message for non-JSON error responses.
+        }
+      }
+      addToast({ type: 'error', message: msg || 'ZIP download failed.' })
     } finally {
       setDownloadingZip(false)
     }

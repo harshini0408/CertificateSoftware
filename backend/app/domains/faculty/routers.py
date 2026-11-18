@@ -388,7 +388,12 @@ async def upload_guest_excel(
         if not headers_row:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Excel file is empty")
 
-        headers = [str(h).strip() for h in headers_row if h is not None]
+        header_columns = []
+        for col_idx, value in enumerate(headers_row):
+            header = str(value).strip() if value is not None else ""
+            if header:
+                header_columns.append((col_idx, header))
+        headers = [header for _, header in header_columns]
         if not headers:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "No column headers found in the first row"
@@ -399,11 +404,9 @@ async def upload_guest_excel(
             if all(cell is None for cell in row):
                 continue
             record: Dict = {}
-            for col_idx, cell_value in enumerate(row):
-                if col_idx < len(headers) and headers[col_idx]:
-                    record[headers[col_idx]] = (
-                        str(cell_value).strip() if cell_value is not None else ""
-                    )
+            for col_idx, header in header_columns:
+                cell_value = row[col_idx] if col_idx < len(row) else None
+                record[header] = str(cell_value).strip() if cell_value is not None else ""
             parsed_rows.append(record)
 
         wb.close()

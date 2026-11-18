@@ -420,7 +420,16 @@ export function FacultyEventHistoryContent({ onNewSession }) {
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
-      addToast({ type: 'error', message: err?.response?.data?.detail || 'Download failed or session expired.' })
+      let msg = err?.response?.data?.detail
+      if (!msg && err?.response?.data instanceof Blob) {
+        try {
+          const body = JSON.parse(await err.response.data.text())
+          msg = body?.detail
+        } catch {
+          // Keep the fallback message for non-JSON error responses.
+        }
+      }
+      addToast({ type: 'error', message: msg || 'Download failed or session expired.' })
       refetch()
     }
   }

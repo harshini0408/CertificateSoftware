@@ -673,7 +673,6 @@ async def update_volunteer_status(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
 
     target_status = body.status
-    is_verified = (target_status == "accepted")
 
     p = None
     try:
@@ -702,7 +701,6 @@ async def update_volunteer_status(
     if p:
         email = p.email.lower()
         await p.set({
-            "verified": is_verified,
             "status": target_status,
         })
     if reg:
@@ -726,10 +724,9 @@ async def update_volunteer_status(
         )
         if matching_p:
             await matching_p.set({
-                "verified": is_verified,
                 "status": target_status,
             })
-        elif is_verified and reg:
+        elif target_status == "accepted" and reg:
             new_p = Participant(
                 event_id=event_id,
                 club_id=club_id,
@@ -743,7 +740,7 @@ async def update_volunteer_status(
                     "Department": reg.department or "",
                 },
                 source=ParticipantSource.REGISTRATION,
-                verified=True,
+                verified=False,
                 status="accepted",
             )
             await new_p.insert()
