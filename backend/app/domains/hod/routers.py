@@ -7,16 +7,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...core.dependencies import require_role
 from ...models.certificate import Certificate
+from ...models.department import Department
 from ...models.dept_certificate import DeptCertificate
 from ...models.manual_credit_submission import ManualCreditSubmission
 from ...models.student_credit import StudentCredit
 from ...services.semester_service import get_current_semester
+from ...services.credit_service import filter_emailed_credit_entries
 from ...models.user import User, UserRole
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 
 router = APIRouter(prefix="/hod", tags=["HOD"])
 
 _hod = Depends(require_role(UserRole.HOD, UserRole.SUPER_ADMIN))
+_HOD_OVERVIEW_BATCHES = {
+    "2025-2029": ("2025", "2025-2029"),
+    "2026-2030": ("2026", "2026-2030"),
+}
 
 
 def _normalize_optional(value: Optional[str]) -> Optional[str]:
@@ -24,7 +30,11 @@ def _normalize_optional(value: Optional[str]) -> Optional[str]:
     return text or None
 
 
-def _build_hod_scope(current_user: User) -> dict:
+def _class_scope_key(department: str, batch: str, section: str) -> tuple[str, str, str]:
+    return department.strip().casefold(), batch.strip().casefold(), section.strip().casefold()
+
+
+async def _build_hod_scope(current_user: User) -> dict:
     departments = []
 
     primary_department = _normalize_optional(current_user.department)
@@ -42,9 +52,31 @@ def _build_hod_scope(current_user: User) -> dict:
             "Departments are not configured for this HOD account.",
         )
 
+    configured_departments = await Department.find({"is_active": True}).to_list()
+    canonical_departments = []
+    for department in departments:
+        normalized_name = re.sub(r"\s+", " ", department).casefold()
+        normalized_slug = re.sub(r"[^A-Za-z0-9]", "", department).casefold()
+        match = next(
+            (
+                item
+                for item in configured_departments
+                if normalized_name == re.sub(r"\s+", " ", item.name).casefold()
+                or normalized_slug == re.sub(r"[^A-Za-z0-9]", "", item.name).casefold()
+                or (
+                    item.slug
+                    and normalized_slug == re.sub(r"[^A-Za-z0-9]", "", item.slug).casefold()
+                )
+            ),
+            None,
+        )
+        canonical = match.name if match else department
+        if canonical not in canonical_departments:
+            canonical_departments.append(canonical)
+
     scope = {
-        "department": departments[0],
-        "departments": departments,
+        "department": canonical_departments[0],
+        "departments": canonical_departments,
     }
     mapped_batch = _normalize_optional(current_user.batch)
     mapped_section = _normalize_optional(current_user.section)
@@ -74,7 +106,7 @@ def _student_summary(user: User, total_credits: int, clubs: list | None = None, 
 
 @router.get("/me")
 async def get_hod_profile(current_user: User = _hod):
-    scope = _build_hod_scope(current_user)
+    scope = await _build_hod_scope(current_user)
     return {
         "id": str(current_user.id),
         "name": current_user.name,
@@ -93,7 +125,7 @@ async def list_hod_students(
     search: Optional[str] = None,
     current_user: User = _hod,
 ):
-    scope = _build_hod_scope(current_user)
+    scope = await _build_hod_scope(current_user)
 
     query: dict = {
         "role": UserRole.STUDENT,
@@ -186,9 +218,39 @@ async def list_hod_students(
     }
 
 
+@router.get("/student-filter-options")
+async def get_hod_student_filter_options(current_user: User = _hod):
+    """Return all batch and section options within this HOD's assigned scope."""
+    scope = await _build_hod_scope(current_user)
+    query = {
+        "role": UserRole.STUDENT,
+        "is_active": True,
+        "department": {"$in": scope["departments"]},
+    }
+
+    if scope.get("batch"):
+        query["batch"] = scope["batch"]
+    if scope.get("section"):
+        query["section"] = scope["section"]
+
+    students = await User.find(query).to_list()
+    return {
+        "batches": sorted({
+            student.batch.strip()
+            for student in students
+            if student.batch and student.batch.strip()
+        }),
+        "sections": sorted({
+            student.section.strip()
+            for student in students
+            if student.section and student.section.strip()
+        }),
+    }
+
+
 @router.get("/students/{student_id}/certificates")
 async def get_hod_student_certificates(student_id: PydanticObjectId, current_user: User = _hod):
-    scope = _build_hod_scope(current_user)
+    scope = await _build_hod_scope(current_user)
 
     student = await User.get(student_id)
     if not student or student.role != UserRole.STUDENT:
@@ -332,12 +394,214 @@ async def get_hod_student_certificates(student_id: PydanticObjectId, current_use
     }
 
 
+@router.get("/section-credit-overview")
+async def get_hod_section_credit_overview(current_user: User = _hod):
+    scope = await _build_hod_scope(current_user)
+    current_semester = await get_current_semester()
+    if not current_semester:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The current academic semester is not configured.",
+        )
+
+    scoped_batch = (scope.get("batch") or "").casefold()
+    visible_batches = [
+        (label, database_batches)
+        for label, database_batches in _HOD_OVERVIEW_BATCHES.items()
+        if not scoped_batch
+        or scoped_batch == label.casefold()
+        or scoped_batch in {database_batch.casefold() for database_batch in database_batches}
+    ]
+    visible_database_batches = {
+        database_batch.casefold()
+        for _, database_batches in visible_batches
+        for database_batch in database_batches
+    }
+    query: dict = {
+        "role": UserRole.STUDENT,
+        "is_active": True,
+        "department": {"$in": scope["departments"]},
+        "batch": {
+            "$in": [
+                database_batch
+                for _, database_batches in visible_batches
+                for database_batch in database_batches
+            ]
+        },
+    }
+    if scope.get("section"):
+        query["section"] = scope["section"]
+
+    students = await User.find(query).to_list()
+    emails = {
+        email
+        for student in students
+        if student.email
+        for email in (student.email.strip(), student.email.strip().lower())
+    }
+    registration_numbers = {
+        student.registration_number.strip()
+        for student in students
+        if student.registration_number and student.registration_number.strip()
+    }
+
+    credit_clauses = []
+    if emails:
+        credit_clauses.append({"student_email": {"$in": list(emails)}})
+    if registration_numbers:
+        credit_clauses.append({"registration_number": {"$in": list(registration_numbers)}})
+    credit_docs = await StudentCredit.find({"$or": credit_clauses}).to_list() if credit_clauses else []
+
+    histories_by_email: dict[str, list] = {}
+    histories_by_registration: dict[str, list] = {}
+    for credit_doc in credit_docs:
+        email = (credit_doc.student_email or "").strip().lower()
+        registration_number = (credit_doc.registration_number or "").strip()
+        if email:
+            histories_by_email.setdefault(email, []).extend(credit_doc.credit_history or [])
+        if registration_number:
+            histories_by_registration.setdefault(registration_number, []).extend(
+                credit_doc.credit_history or []
+            )
+
+    visible_credit_history = await filter_emailed_credit_entries(
+        [
+            entry
+            for credit_doc in credit_docs
+            for entry in credit_doc.credit_history or []
+        ]
+    )
+    visible_cert_numbers = {
+        entry.cert_number for entry in visible_credit_history if entry.cert_number
+    }
+
+    class_stats: dict[tuple[str, str, str], dict] = {}
+    current_semester_key = current_semester.strip().casefold()
+    for student in students:
+        department = (student.department or "").strip()
+        batch = (student.batch or "").strip()
+        section = (student.section or "").strip() or "Unassigned"
+        key = _class_scope_key(department, batch, section)
+        student_email = (student.email or "").strip().lower()
+        registration_number = (student.registration_number or "").strip()
+
+        history = [
+            *histories_by_email.get(student_email, []),
+            *histories_by_registration.get(registration_number, []),
+        ]
+        deduplicated_history = {}
+        for entry in history:
+            history_key = entry.cert_number or (
+                f"manual::{entry.awarded_at.isoformat()}::{entry.cert_type}"
+            )
+            deduplicated_history.setdefault(history_key, entry)
+        student_history = [
+            entry
+            for entry in deduplicated_history.values()
+            if not entry.cert_number or entry.cert_number in visible_cert_numbers
+        ]
+        student_credits = sum(
+            int(entry.points_awarded or 0)
+            for entry in student_history
+            if (entry.semester or "").strip().casefold() == current_semester_key
+        )
+
+        stats = class_stats.setdefault(
+            key,
+            {
+                "department": department,
+                "batch": batch,
+                "section": section,
+                "total_students": 0,
+                "students_below_10": 0,
+                "credit_points_total": 0,
+            },
+        )
+        stats["total_students"] += 1
+        stats["students_below_10"] += int(student_credits < 10)
+        stats["credit_points_total"] += student_credits
+
+    tutors = await User.find({
+        "role": UserRole.TUTOR,
+        "is_active": True,
+    }).to_list()
+    tutors_by_class: dict[tuple[str, str, str], dict[str, dict[str, str]]] = {}
+    scoped_departments = {department.casefold() for department in scope["departments"]}
+    overview_batch_by_database_value = {
+        database_batch.casefold(): label
+        for label, database_batches in visible_batches
+        for database_batch in database_batches
+    }
+    for tutor in tutors:
+        assignments = []
+        if tutor.department and tutor.batch and tutor.section:
+            assignments.append({
+                "department": tutor.department,
+                "batch": tutor.batch,
+                "section": tutor.section,
+            })
+        assignments.extend(
+            assignment
+            for assignment in (tutor.assigned_classes or [])
+            if isinstance(assignment, dict)
+        )
+
+        for assignment in assignments:
+            department = str(assignment.get("department") or "").strip()
+            batch = str(assignment.get("batch") or "").strip()
+            section = str(assignment.get("section") or "").strip()
+            if (
+                not department
+                or not batch
+                or not section
+                or department.casefold() not in scoped_departments
+                or batch.casefold() not in overview_batch_by_database_value
+            ):
+                continue
+            key = _class_scope_key(department, batch, section)
+            tutors_by_class.setdefault(key, {})[str(tutor.id)] = {
+                "name": tutor.name,
+                "department": department,
+            }
+
+    batches = []
+    for batch, database_batches in _HOD_OVERVIEW_BATCHES.items():
+        if not any(label == batch for label, _ in visible_batches):
+            batches.append({"batch": batch, "classes": []})
+            continue
+        classes = []
+        for key, stats in class_stats.items():
+            if stats["batch"].casefold() not in {
+                database_batch.casefold() for database_batch in database_batches
+            }:
+                continue
+            total_students = stats["total_students"]
+            classes.append({
+                "department": stats["department"],
+                "section": stats["section"],
+                "average_credits": round(stats["credit_points_total"] / total_students, 2),
+                "students_below_10": stats["students_below_10"],
+                "total_students": total_students,
+                "tutors": sorted(
+                    tutors_by_class.get(key, {}).values(),
+                    key=lambda tutor: tutor["name"].casefold(),
+                ),
+            })
+        classes.sort(key=lambda item: (item["section"].casefold(), item["department"].casefold()))
+        batches.append({"batch": batch, "classes": classes})
+
+    return {
+        "current_semester": current_semester,
+        "batches": batches,
+    }
+
+
 @router.get("/performance")
 async def get_hod_performance_analytics(
     batch: Optional[str] = None,
     current_user: User = _hod,
 ):
-    scope = _build_hod_scope(current_user)
+    scope = await _build_hod_scope(current_user)
 
     query: dict = {
         "role": UserRole.STUDENT,
@@ -353,13 +617,27 @@ async def get_hod_performance_analytics(
         if requested_batch and requested_batch != mapped_batch:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to the requested batch")
         query["batch"] = mapped_batch
-    elif requested_batch:
-        query["batch"] = requested_batch
 
     if mapped_section:
         query["section"] = mapped_section
 
-    students = await User.find(query).sort("name").to_list()
+    scoped_students = await User.find(query).sort("name").to_list()
+    available_batches = sorted({
+        student.batch.strip()
+        for student in scoped_students
+        if student.batch and student.batch.strip()
+    })
+    if not mapped_batch:
+        available_batches = sorted(
+            {*available_batches, "2025", "2026"},
+            key=lambda value: value.casefold(),
+        )
+
+    if requested_batch and not mapped_batch:
+        query["batch"] = requested_batch
+        students = await User.find(query).sort("name").to_list()
+    else:
+        students = scoped_students
 
     emails = [(s.email or "").strip().lower() for s in students if s.email]
     reg_numbers = [(s.registration_number or "").strip() for s in students if s.registration_number]
@@ -387,13 +665,10 @@ async def get_hod_performance_analytics(
 
     # Group students by (batch, section)
     classes_dict: dict[tuple[str, str], list[dict]] = {}
-    all_batches_set: set[str] = set()
 
     for s in students:
         s_batch = (s.batch or "Unknown").strip()
         s_sec = (s.section or "A").strip()
-        if s.batch:
-            all_batches_set.add(s.batch.strip())
 
         email_key = (s.email or "").strip().lower()
         reg_key = (s.registration_number or "").strip()
@@ -467,24 +742,6 @@ async def get_hod_performance_analytics(
     total_classes = len(class_stats)
     for idx, c in enumerate(class_stats):
         c["rank"] = idx + 1
-        if total_classes <= 3:
-            c["status"] = "Good" if c["average_credits"] >= 5 else "Needs Improvement"
-        else:
-            if idx < 3:
-                c["status"] = "Top Performer"
-            elif idx >= total_classes - 3:
-                c["status"] = "Needs Attention"
-            else:
-                c["status"] = "Moderate"
-
-    top_performing = class_stats[:3] if total_classes >= 1 else []
-    # Poor performing 3 classes: bottom 3 (sorted lowest first for clear view)
-    if total_classes >= 3:
-        poor_performing = list(reversed(class_stats[-3:]))
-    elif total_classes > 0:
-        poor_performing = list(reversed(class_stats))
-    else:
-        poor_performing = []
 
     # Overall department-level summary
     total_dept_students = len(students)
@@ -513,9 +770,6 @@ async def get_hod_performance_analytics(
             "overall_students_ge_10_count": overall_ge_10,
             "overall_percentage_ge_10": overall_pct_ge_10,
         },
-        "top_performing": top_performing,
-        "poor_performing": poor_performing,
         "classes": class_stats,
-        "available_batches": sorted(list(all_batches_set)),
+        "available_batches": available_batches,
     }
-

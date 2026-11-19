@@ -143,7 +143,7 @@ function useNavItems() {
 
     case 'hod':
       return [
-        { to: '/hod', icon: icons.dashboard, label: 'Dashboard', end: true },
+        { to: '/hod', icon: icons.dashboard, label: 'Overview', end: true },
         { to: '/hod?tab=performance', icon: icons.performance, label: 'Performance' },
         { to: '/faculty', icon: icons.certificate, label: 'Generate Certificates' },
         { to: '/faculty/history', icon: icons.calendar, label: 'Event History' },

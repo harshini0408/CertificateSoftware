@@ -20,6 +20,38 @@ def _norm_cert_type(value: str | None) -> str:
     return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
+async def filter_emailed_credit_entries(
+    entries: list[CreditHistoryEntry],
+) -> list[CreditHistoryEntry]:
+    """Keep the same certificate-linked credit entries visible in student dashboards."""
+    if not entries:
+        return []
+
+    cert_numbers = [entry.cert_number for entry in entries if entry.cert_number]
+    if not cert_numbers:
+        return entries
+
+    certificates = await Certificate.find({"cert_number": {"$in": cert_numbers}}).to_list()
+    cert_status_by_number = {
+        cert.cert_number: cert.status.value
+        for cert in certificates
+        if cert and cert.cert_number
+    }
+
+    filtered = []
+    for entry in entries:
+        cert_number = entry.cert_number
+        if (
+            not cert_number
+            or cert_number.startswith(("STU-MANUAL-", "MANUAL-", "DPT-"))
+            or cert_number not in cert_status_by_number
+            or cert_status_by_number[cert_number] == CertStatus.EMAILED.value
+        ):
+            filtered.append(entry)
+
+    return filtered
+
+
 async def _resolve_credit_rule(cert_type_raw: str) -> CreditRule | None:
     normalized = _norm_cert_type(cert_type_raw)
     spaced = normalized.replace("_", " ")

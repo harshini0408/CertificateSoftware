@@ -22,6 +22,7 @@ import {
   useSocietyOfficeBearers,
   useAssignSocietyOfficeBearer,
   useRemoveSocietyOfficeBearer,
+  useAddOfficeBearerPosition,
   useSocietyActiveMembers,
 } from './api'
 import { useAuthStore } from '../../store/authStore'
@@ -62,6 +63,22 @@ const VENUE_OPTIONS = [
   'Other',
 ]
 
+const SESSION_SLOTS = {
+  'Morning (FN)': ['8:45 AM - 10:15 AM', '10:30 AM - 12:00 PM', 'Other'],
+  'Afternoon (AN)': ['1:10 PM - 2:50 PM', '3:05 PM - 4:45 PM', 'Other'],
+}
+
+const EVENT_CATEGORIES = [
+  'Workshop',
+  'Technical Talk',
+  'Technical Event',
+  'Non-Technical Event',
+  'Hackathon',
+  'Other',
+]
+
+const ACADEMIC_YEARS = ['2026-2027(ODD)', '2026-2027(EVEN)']
+
 // ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab({ societyId, dashboard, isLoading }) {
   const navigate = useNavigate()
@@ -79,6 +96,12 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
   const [posterFile, setPosterFile] = useState(null)
   const [selectedVenueOption, setSelectedVenueOption] = useState('')
   const [customVenue, setCustomVenue] = useState('')
+  const [selectedSlotOption, setSelectedSlotOption] = useState('8:45 AM - 10:15 AM')
+  const [customSlot, setCustomSlot] = useState('')
+  const [selectedAcademicYears, setSelectedAcademicYears] = useState([])
+  const [academicYearError, setAcademicYearError] = useState('')
+  const [eventPosterFile, setEventPosterFile] = useState(null)
+  const [eventPosterError, setEventPosterError] = useState('')
 
   const {
     register,
@@ -93,7 +116,8 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       description: '',
       event_date: '',
       event_time: '',
-      session: 'FN',
+      session_type: 'Morning (FN)',
+      slot: '8:45 AM - 10:15 AM',
       venue: '',
       category: 'Workshop',
       activity_type: 'individual',
@@ -106,14 +130,67 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
     },
   })
 
+  const selectedSessionType = watch('session_type') || 'Morning (FN)'
+  const availableSlots = SESSION_SLOTS[selectedSessionType] || SESSION_SLOTS['Morning (FN)']
+
+  const handleAcademicYearToggle = (year) => {
+    setSelectedAcademicYears((previous) => {
+      const next = previous.includes(year)
+        ? previous.filter((item) => item !== year)
+        : [...previous, year]
+      if (next.length > 0) setAcademicYearError('')
+      return next
+    })
+  }
+
+  const handleEventPosterChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) {
+      setEventPosterFile(null)
+      setEventPosterError('')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setEventPosterFile(null)
+      setEventPosterError('Poster size must be 2MB or less.')
+      e.target.value = ''
+      return
+    }
+    setEventPosterFile(file)
+    setEventPosterError('')
+  }
+
+  useEffect(() => {
+    if (selectedSlotOption !== 'Other') {
+      const validSlots = availableSlots.filter((slot) => slot !== 'Other')
+      if (!validSlots.includes(selectedSlotOption)) {
+        const nextSlot = validSlots[0] || '8:45 AM - 10:15 AM'
+        setSelectedSlotOption(nextSlot)
+        setValue('slot', nextSlot)
+      }
+    }
+  }, [availableSlots, selectedSlotOption, setValue])
+
   const onSubmitEvent = async (formData) => {
+    if (selectedAcademicYears.length === 0) {
+      setAcademicYearError('Please select at least one academic year')
+      return
+    }
+    if (eventPosterFile && eventPosterFile.size > 2 * 1024 * 1024) {
+      setEventPosterError('Poster size must be 2MB or less.')
+      return
+    }
+
     const isGroup = formData.activity_type === 'group'
+    const sessionCode = formData.session_type?.includes('AN') ? 'AN' : 'FN'
+    const finalSlot = selectedSlotOption === 'Other' ? customSlot.trim() : (formData.slot || selectedSlotOption)
     const payload = {
       name: formData.name.trim(),
-      description: formData.description?.trim() || null,
-      event_date: formData.event_date ? new Date(formData.event_date).toISOString() : null,
-      event_time: formData.event_time?.trim() || null,
-      session: formData.session || 'FN',
+      description: formData.description.trim(),
+      event_date: new Date(formData.event_date).toISOString(),
+      event_time: finalSlot ? `${formData.session_type} | ${finalSlot}` : formData.session_type,
+      session: sessionCode,
+      slot: finalSlot,
       venue: formData.venue?.trim() || null,
       category: formData.category || 'Workshop',
       activity_type: formData.activity_type || 'individual',
@@ -123,19 +200,63 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       min_team_size: isGroup && formData.min_team_size ? parseInt(formData.min_team_size, 10) : null,
       max_team_size: isGroup && formData.max_team_size ? parseInt(formData.max_team_size, 10) : null,
       volunteers_required: formData.volunteers_required ? parseInt(formData.volunteers_required, 10) : 0,
+      academic_years: selectedAcademicYears,
+      academic_year: selectedAcademicYears.join(', '),
       is_published: !!formData.is_published,
     }
 
+    let savedEventId
     if (editingEvent) {
       await updateEvent.mutateAsync({ eventId: editingEvent.id, ...payload })
+      savedEventId = editingEvent.id
       setEditingEvent(null)
     } else {
-      await createEvent.mutateAsync(payload)
+      const response = await createEvent.mutateAsync(payload)
+      savedEventId = response?.data?.id || response?.data?.event_id
+    }
+    if (eventPosterFile && savedEventId) {
+      await uploadPoster.mutateAsync({ eventId: savedEventId, posterFile: eventPosterFile })
     }
     reset()
     setSelectedVenueOption('')
     setCustomVenue('')
+    setSelectedSlotOption('8:45 AM - 10:15 AM')
+    setCustomSlot('')
+    setSelectedAcademicYears([])
+    setAcademicYearError('')
+    setEventPosterFile(null)
+    setEventPosterError('')
     setIsModalOpen(false)
+  }
+
+  const handleOpenCreate = () => {
+    setEditingEvent(null)
+    setSelectedVenueOption('')
+    setCustomVenue('')
+    setSelectedSlotOption('8:45 AM - 10:15 AM')
+    setCustomSlot('')
+    setSelectedAcademicYears([])
+    setAcademicYearError('')
+    setEventPosterFile(null)
+    setEventPosterError('')
+    reset({
+      name: '',
+      description: '',
+      event_date: '',
+      event_time: '',
+      session_type: 'Morning (FN)',
+      slot: '8:45 AM - 10:15 AM',
+      venue: '',
+      category: 'Workshop',
+      activity_type: 'individual',
+      max_participants: '',
+      max_teams: '',
+      min_team_size: 2,
+      max_team_size: 4,
+      volunteers_required: 0,
+      is_published: true,
+    })
+    setIsModalOpen(true)
   }
 
   const handleOpenEdit = (ev) => {
@@ -151,12 +272,26 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       setSelectedVenueOption('')
       setCustomVenue('')
     }
+    const currentSessionType = ev.session === 'AN' ? 'Afternoon (AN)' : 'Morning (FN)'
+    const currentSlot = ev.slot || ''
+    const sessionSlots = SESSION_SLOTS[currentSessionType].filter((slot) => slot !== 'Other')
+    if (sessionSlots.includes(currentSlot)) {
+      setSelectedSlotOption(currentSlot)
+      setCustomSlot('')
+    } else if (currentSlot) {
+      setSelectedSlotOption('Other')
+      setCustomSlot(currentSlot)
+    } else {
+      setSelectedSlotOption(sessionSlots[0])
+      setCustomSlot('')
+    }
     reset({
       name: ev.name || '',
       description: ev.description || '',
       event_date: ev.event_date ? String(ev.event_date).split('T')[0] : '',
       event_time: ev.event_time || '',
-      session: ev.session || 'FN',
+      session_type: currentSessionType,
+      slot: currentSlot || sessionSlots[0],
       venue: ev.venue || '',
       category: ev.category || 'Workshop',
       activity_type: ev.activity_type || (ev.is_team_event ? 'group' : 'individual'),
@@ -167,6 +302,10 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
       volunteers_required: ev.volunteers_required || 0,
       is_published: !!ev.is_published,
     })
+    setSelectedAcademicYears(ev.academic_years?.length ? ev.academic_years : (ev.academic_year ? ev.academic_year.split(', ') : []))
+    setEventPosterFile(null)
+    setEventPosterError('')
+    setAcademicYearError('')
     setIsModalOpen(true)
   }
 
@@ -241,22 +380,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
         <button
           type="button"
           onClick={() => {
-            setEditingEvent(null)
-            setSelectedVenueOption('')
-            setCustomVenue('')
-            reset({
-              name: '',
-              description: '',
-              event_date: '',
-              event_time: '',
-              session: 'FN',
-              venue: '',
-              category: 'Workshop',
-              max_participants: '',
-              volunteers_required: 0,
-              is_published: true,
-            })
-            setIsModalOpen(true)
+            handleOpenCreate()
           }}
           className="btn-primary text-xs flex items-center gap-1.5 self-start sm:self-auto"
         >
@@ -279,7 +403,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
           </p>
           <button
             type="button"
-            onClick={() => setIsModalOpen(true)}
+            onClick={handleOpenCreate}
             className="btn-primary text-xs mx-auto mt-2"
           >
             Create Event
@@ -339,7 +463,7 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                       <div className="flex items-center gap-1.5">
                         <span>📅</span>
                         <span>{fmtDate(ev.event_date)}</span>
-                        {ev.event_time && <span className="text-gray-400">at {ev.event_time}</span>}
+                        {(ev.slot || ev.event_time) && <span className="text-gray-400">at {ev.slot || ev.event_time}</span>}
                       </div>
                       {ev.venue && (
                         <div className="flex items-center gap-1.5 truncate">
@@ -446,110 +570,146 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
               </div>
 
               <div>
-                <label className="form-label">Description</label>
+                <label className="form-label">Description *</label>
                 <textarea
                   rows={3}
                   className="form-input text-sm"
                   placeholder="Brief overview of the event, agenda, and speakers…"
-                  {...register('description')}
+                  {...register('description', { required: 'Event description is required' })}
                 />
+                {errors.description && <p className="form-error">{errors.description.message}</p>}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="form-label">Event Date</label>
+                  <label className="form-label">Event Date *</label>
                   <input
                     type="date"
-                    className="form-input text-sm"
-                    {...register('event_date')}
+                    className={`form-input text-sm ${errors.event_date ? 'form-input-error' : ''}`}
+                    {...register('event_date', { required: 'Event date is required' })}
                   />
+                  {errors.event_date && <p className="form-error">{errors.event_date.message}</p>}
                 </div>
                 <div>
-                  <label className="form-label">Time</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 10:00 AM"
-                    className="form-input text-sm"
-                    {...register('event_time')}
-                  />
+                  <label className="form-label">Event Session *</label>
+                  <select className="form-input text-sm" {...register('session_type', { required: 'Event session is required' })}>
+                    <option value="Morning (FN)">Morning (FN)</option>
+                    <option value="Afternoon (AN)">Afternoon (AN)</option>
+                  </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="form-label">Session *</label>
-                  <select className="form-input text-sm" {...register('session')}>
-                    <option value="FN">Morning (FN)</option>
-                    <option value="AN">Afternoon (AN)</option>
+                  <label className="form-label">Event Slot / Timing *</label>
+                  <select
+                    className={`form-input text-sm ${errors.slot ? 'form-input-error' : ''}`}
+                    value={selectedSlotOption}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setSelectedSlotOption(val)
+                      if (val !== 'Other') {
+                        setValue('slot', val, { shouldValidate: true })
+                        setCustomSlot('')
+                      } else {
+                        setValue('slot', customSlot.trim(), { shouldValidate: true })
+                      }
+                    }}
+                  >
+                    {availableSlots.map((slot) => (
+                      <option key={slot} value={slot}>
+                        {slot === 'Other' ? 'Others (Custom Timing)' : slot}
+                      </option>
+                    ))}
                   </select>
+                  {selectedSlotOption === 'Other' && (
+                    <input
+                      type="text"
+                      className="form-input text-xs mt-2"
+                      placeholder="Enter custom timing (e.g. 9:00 AM - 1:00 PM)"
+                      value={customSlot}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setCustomSlot(val)
+                        setValue('slot', val.trim(), { shouldValidate: true })
+                      }}
+                      required
+                      autoFocus
+                    />
+                  )}
+                  <input type="hidden" {...register('slot', { required: 'Event slot is required' })} />
+                  {errors.slot && <p className="form-error">{errors.slot.message}</p>}
                 </div>
+                <div>
+                  <label className="form-label">Venue *</label>
+                  <select
+                    className={`form-input text-sm ${errors.venue ? 'form-input-error' : ''}`}
+                    value={selectedVenueOption}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setSelectedVenueOption(val)
+                      if (val !== 'Other') {
+                        setValue('venue', val, { shouldValidate: true })
+                      } else {
+                        setValue('venue', customVenue.trim(), { shouldValidate: true })
+                      }
+                    }}
+                  >
+                    <option value="">Select venue</option>
+                    {VENUE_OPTIONS.map((v) => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                  {selectedVenueOption === 'Other' && (
+                    <div className="mt-2">
+                      <input
+                        type="text"
+                        className="form-input text-sm"
+                        placeholder="Type custom venue…"
+                        value={customVenue}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          setCustomVenue(val)
+                          setValue('venue', val.trim(), { shouldValidate: true })
+                        }}
+                        required
+                        autoFocus
+                      />
+                    </div>
+                  )}
+                  <input type="hidden" {...register('venue', { required: 'Venue is required' })} />
+                  {errors.venue && <p className="form-error">{errors.venue.message}</p>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="form-label">Category</label>
                   <select className="form-input text-sm" {...register('category')}>
-                    {['Workshop', 'Technical Talk', 'Technical Event', 'Non-Technical Event', 'Hackathon', 'Conference', 'Other'].map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                    {EVENT_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>{category}</option>
                     ))}
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="form-label">Venue</label>
-                <select
-                  className="form-input text-sm"
-                  value={selectedVenueOption}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    setSelectedVenueOption(val)
-                    if (val !== 'Other') {
-                      setValue('venue', val, { shouldValidate: true })
-                    } else {
-                      setValue('venue', customVenue.trim(), { shouldValidate: true })
-                    }
-                  }}
-                >
-                  <option value="">Select venue</option>
-                  {VENUE_OPTIONS.map((v) => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
-                {selectedVenueOption === 'Other' && (
-                  <div className="mt-2">
-                    <input
-                      type="text"
-                      className="form-input text-sm"
-                      placeholder="Type custom venue…"
-                      value={customVenue}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setCustomVenue(val)
-                        setValue('venue', val.trim(), { shouldValidate: true })
-                      }}
-                      autoFocus
-                    />
-                  </div>
-                )}
-                <input type="hidden" {...register('venue')} />
-              </div>
-
-              <div>
-                <label className="form-label" htmlFor="society-volunteers-required">Volunteers Required</label>
-                <input
-                  id="society-volunteers-required"
-                  type="number"
-                  min="0"
-                  className={`form-input text-sm ${errors.volunteers_required ? 'form-input-error' : ''}`}
-                  placeholder="0"
-                  onWheel={(e) => e.target.blur()}
-                  {...register('volunteers_required', {
-                    setValueAs: (value) =>
-                      value === '' || value == null || Number.isNaN(Number(value))
-                        ? 0
-                        : Math.max(0, parseInt(value, 10) || 0),
-                    min: { value: 0, message: 'Cannot be negative' }
-                  })}
-                />
-                {errors.volunteers_required && <p className="form-error">{errors.volunteers_required.message}</p>}
+                <div>
+                  <label className="form-label" htmlFor="society-volunteers-required">Volunteers Required</label>
+                  <input
+                    id="society-volunteers-required"
+                    type="number"
+                    min="0"
+                    className={`form-input text-sm ${errors.volunteers_required ? 'form-input-error' : ''}`}
+                    placeholder="0 (no volunteers needed)"
+                    onWheel={(e) => e.target.blur()}
+                    {...register('volunteers_required', {
+                      setValueAs: (value) =>
+                        value === '' || value == null || Number.isNaN(Number(value))
+                          ? 0
+                          : Math.max(0, parseInt(value, 10) || 0),
+                      min: { value: 0, message: 'Cannot be negative' },
+                    })}
+                  />
+                  {errors.volunteers_required && <p className="form-error">{errors.volunteers_required.message}</p>}
+                </div>
               </div>
 
               {/* Activity Type / Group Event Settings */}
@@ -647,6 +807,44 @@ function DashboardTab({ societyId, dashboard, isLoading }) {
                       {errors.max_team_size && <p className="form-error">{errors.max_team_size.message}</p>}
                     </div>
                   </div>
+                )}
+              </div>
+
+              <div>
+                <label className="form-label">Academic Year (Select all applicable) *</label>
+                <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3">
+                  {ACADEMIC_YEARS.map((year) => (
+                    <label key={year} className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={selectedAcademicYears.includes(year)}
+                        onChange={() => handleAcademicYearToggle(year)}
+                        className="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                      />
+                      <span>{year}</span>
+                    </label>
+                  ))}
+                </div>
+                {academicYearError && <p className="form-error mt-1">{academicYearError}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <label className="form-label" htmlFor="society-event-poster">
+                  Event Poster (PNG, JPEG, PDF • Max 2MB)
+                </label>
+                <input
+                  id="society-event-poster"
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+                  onChange={handleEventPosterChange}
+                  className="form-input text-xs"
+                />
+                <p className="text-[11px] text-gray-500">Accepted formats: PNG, JPEG, PDF. Maximum file size is 2MB.</p>
+                {eventPosterError && <p className="form-error">{eventPosterError}</p>}
+                {eventPosterFile && (
+                  <p className="text-xs font-medium text-teal-700 mt-1">
+                    Selected: {eventPosterFile.name} ({(eventPosterFile.size / 1024).toFixed(1)} KB)
+                  </p>
                 )}
               </div>
 
@@ -1096,10 +1294,13 @@ function OfficeBearersTab() {
   const { data: activeMembers } = useSocietyActiveMembers()
   const assignBearer = useAssignSocietyOfficeBearer()
   const removeBearer = useRemoveSocietyOfficeBearer()
+  const addPosition = useAddOfficeBearerPosition()
 
   const [assignModalPos, setAssignModalPos] = useState(null)
   const [selectedStudentId, setSelectedStudentId] = useState('')
   const [removePosConfirm, setRemovePosConfirm] = useState(null)
+  const [showAddPositionModal, setShowAddPositionModal] = useState(false)
+  const [newPositionName, setNewPositionName] = useState('')
 
   const positions = Array.isArray(obData?.positions) ? obData.positions : []
   const bearers = Array.isArray(obData?.office_bearers) ? obData.office_bearers : []
@@ -1121,13 +1322,31 @@ function OfficeBearersTab() {
     setSelectedStudentId('')
   }
 
+  const handleAddPosition = async (e) => {
+    e.preventDefault()
+    const position = newPositionName.trim()
+    if (!position) return
+    await addPosition.mutateAsync({ position })
+    setNewPositionName('')
+    setShowAddPositionModal(false)
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Professional Society Office Bearers</h1>
-        <p className="text-xs text-gray-500 mt-0.5">
-          Assign designated executive leadership roles for this professional society.
-        </p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Professional Society Office Bearers</h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Assign designated executive leadership roles for this professional society.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-primary text-xs shrink-0"
+          onClick={() => setShowAddPositionModal(true)}
+        >
+          + Add Position
+        </button>
       </div>
 
       {/* Mandatory Guidelines Informational Box */}
@@ -1270,6 +1489,57 @@ function OfficeBearersTab() {
                   className="btn-primary text-xs"
                 >
                   {assignBearer.isPending ? 'Assigning…' : 'Confirm Assignment'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showAddPositionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="card w-full max-w-md p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="text-base font-bold text-foreground">Add New Position</h3>
+              <button
+                type="button"
+                onClick={() => { setShowAddPositionModal(false); setNewPositionName('') }}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleAddPosition} className="space-y-4">
+              <div>
+                <label className="form-label" htmlFor="society-new-position-name">Position Name *</label>
+                <input
+                  id="society-new-position-name"
+                  type="text"
+                  className="form-input text-sm"
+                  placeholder="e.g. Event Coordinator 1"
+                  value={newPositionName}
+                  onChange={(e) => setNewPositionName(e.target.value)}
+                  required
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Use distinct numbered positions if multiple members hold the same role.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowAddPositionModal(false); setNewPositionName('') }}
+                  className="btn-secondary text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newPositionName.trim() || addPosition.isPending}
+                  className="btn-primary text-xs"
+                >
+                  {addPosition.isPending ? 'Adding…' : 'Add Position'}
                 </button>
               </div>
             </form>

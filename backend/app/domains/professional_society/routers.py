@@ -2655,6 +2655,7 @@ async def get_society_active_members(
             "participation_ratio": ratio,
             "participation_percentage": pct,
             "events_participated": ev_count,
+            "applied_at": m.applied_at,
         })
 
     for p_email in all_participant_emails:

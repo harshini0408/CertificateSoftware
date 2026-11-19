@@ -4,8 +4,10 @@ import axiosInstance from '../../utils/axiosInstance'
 export const hodKeys = {
   me: () => ['hod', 'me'],
   students: (filters) => ['hod', 'students', filters],
+  studentFilterOptions: () => ['hod', 'student-filter-options'],
   certificates: (studentId) => ['hod', 'student-certificates', studentId],
   performance: (filters) => ['hod', 'performance', filters],
+  sectionCreditOverview: () => ['hod', 'section-credit-overview'],
 }
 
 export function useHodProfile() {
@@ -32,6 +34,16 @@ export function useHodStudents(filters = {}) {
   })
 }
 
+export function useHodStudentFilterOptions() {
+  return useQuery({
+    queryKey: hodKeys.studentFilterOptions(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/hod/student-filter-options')
+      return data
+    },
+  })
+}
+
 export function useHodStudentCertificates(studentId) {
   return useQuery({
     queryKey: hodKeys.certificates(studentId),
@@ -52,6 +64,19 @@ export function useHodPerformance(filters = {}) {
       const { data } = await axiosInstance.get('/hod/performance', { params })
       return data
     },
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   })
 }
 
+export function useHodSectionCreditOverview() {
+  return useQuery({
+    queryKey: hodKeys.sectionCreditOverview(),
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/hod/section-credit-overview')
+      return data
+    },
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  })
+}
