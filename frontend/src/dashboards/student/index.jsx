@@ -951,7 +951,7 @@ export default function StudentDashboard() {
   }
 
   const generatedCertificatesCount = (certs || []).filter((c) => ['generated', 'emailed'].includes((c?.status || '').toLowerCase())).length
-  const visibleCertificates = (certs || []).filter((c) => ['emailed', 'verified'].includes((c?.status || '').toLowerCase()))
+  const visibleCertificates = (certs || []).filter((c) => ['generated', 'emailed', 'verified'].includes((c?.status || '').toLowerCase()))
   const uploadedVerifiedCount = (manualSubmissions || []).filter((s) => s?.status === 'verified').length
   const totalCerts   = generatedCertificatesCount + uploadedVerifiedCount
   const totalCredits = credits?.total_credits ?? 0

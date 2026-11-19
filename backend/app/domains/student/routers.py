@@ -910,19 +910,35 @@ async def download_my_certificate(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate has not been generated yet")
         certificate_url = cert.png_url
     else:
-        # Manual submissions keep the uploaded image in their own collection.
         email = _norm_email(current_user.email)
-        manual_submissions = await ManualCreditSubmission.find({
-            "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
-            "status": ManualSubmissionStatus.VERIFIED.value,
-        }).to_list()
-        submission = next(
-            (item for item in manual_submissions if _manual_submission_cert_number(item) == cert_number),
-            None,
-        )
-        if not submission:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
-        certificate_url = submission.certificate_image_url
+        dept_cert = await DeptCertificate.find_one({
+            "cert_number": cert_number,
+            "participant_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+        })
+        if dept_cert:
+            certificate_url = dept_cert.png_url
+        else:
+            fac_cert = await FacultyCertificate.find_one({
+                "cert_number": cert_number,
+                "recipient_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+            })
+            if fac_cert:
+                if (fac_cert.status or "").lower() not in (CertStatus.GENERATED.value, CertStatus.EMAILED.value):
+                    raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate has not been generated yet")
+                certificate_url = fac_cert.png_url
+            else:
+                # Manual submissions keep the uploaded image in their own collection.
+                manual_submissions = await ManualCreditSubmission.find({
+                    "student_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+                    "status": ManualSubmissionStatus.VERIFIED.value,
+                }).to_list()
+                submission = next(
+                    (item for item in manual_submissions if _manual_submission_cert_number(item) == cert_number),
+                    None,
+                )
+                if not submission:
+                    raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate not found")
+                certificate_url = submission.certificate_image_url
 
     if not certificate_url:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate file not available")

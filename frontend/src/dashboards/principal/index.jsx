@@ -1935,28 +1935,29 @@ function StudentSearchTab({ onSelectStudent }) {
 function StudentDetailModal({ studentId, studentName, onClose }) {
   const { data: certResp, isLoading: loadingCerts } = usePrincipalStudentCertificates(studentId)
   const certificates = certResp?.certificates || []
+  const ALL_SEMESTERS = '__all__'
   const semesterTotals = certResp?.semester_totals || []
   const currentSemester = certResp?.current_semester
   const semesterOptions = [
     ...(currentSemester ? [currentSemester] : []),
     ...semesterTotals.map((item) => item?.semester || 'Unknown'),
+    ...certificates.map((cert) => cert?.semester || 'Unknown'),
   ].filter(Boolean)
   const uniqueSemesters = Array.from(new Set(semesterOptions))
-  const [selectedSemester, setSelectedSemester] = useState(
-    currentSemester || uniqueSemesters[0] || 'Unknown',
-  )
+  const [selectedSemester, setSelectedSemester] = useState(ALL_SEMESTERS)
 
   useEffect(() => {
-    const next = currentSemester || uniqueSemesters[0]
-    if (next) setSelectedSemester(next)
-  }, [currentSemester, semesterTotals])
+    if (selectedSemester !== ALL_SEMESTERS && !uniqueSemesters.includes(selectedSemester)) {
+      setSelectedSemester(ALL_SEMESTERS)
+    }
+  }, [selectedSemester, uniqueSemesters])
 
   const selectedRows = certificates.filter(
-    (entry) => (entry.semester || 'Unknown') === selectedSemester,
+    (entry) => selectedSemester === ALL_SEMESTERS || (entry.semester || 'Unknown') === selectedSemester,
   )
-  const selectedTotal = semesterTotals.find(
-    (item) => (item?.semester || 'Unknown') === selectedSemester,
-  )?.total_credits ?? 0
+  const selectedTotal = selectedSemester === ALL_SEMESTERS
+    ? semesterTotals.reduce((sum, item) => sum + Number(item?.total_credits || 0), 0)
+    : (semesterTotals.find((item) => (item?.semester || 'Unknown') === selectedSemester)?.total_credits ?? 0)
 
   if (!studentId) return null
 
@@ -2041,7 +2042,7 @@ function StudentDetailModal({ studentId, studentName, onClose }) {
               />
             </div>
             <div className="space-y-4">
-              {uniqueSemesters.length === 0 ? (
+              {certificates.length === 0 && uniqueSemesters.length === 0 ? (
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
                   No certificates found for this student.
                 </div>
@@ -2055,6 +2056,7 @@ function StudentDetailModal({ studentId, studentName, onClose }) {
                         value={selectedSemester}
                         onChange={(e) => setSelectedSemester(e.target.value)}
                       >
+                        <option value={ALL_SEMESTERS}>All Semesters</option>
                         {uniqueSemesters.map((semester) => (
                           <option key={semester} value={semester}>
                             {semester}
@@ -2062,13 +2064,19 @@ function StudentDetailModal({ studentId, studentName, onClose }) {
                         ))}
                       </select>
                     </div>
-                    <span className="text-xs font-medium text-gray-500">Total: {selectedTotal}</span>
+                    <span className="text-xs font-medium text-gray-500">
+                      {selectedRows.length} certificate{selectedRows.length !== 1 ? 's' : ''} · Total: {selectedTotal}
+                    </span>
                   </div>
                   <DataTable
                     columns={eventDetailColumns}
                     data={selectedRows}
                     isLoading={false}
-                    emptyMessage="No certificates found for this semester."
+                    emptyMessage={
+                      selectedSemester === ALL_SEMESTERS
+                        ? 'No certificates found for this student.'
+                        : 'No certificates found for this semester.'
+                    }
                     searchable
                     searchPlaceholder="Search events..."
                   />

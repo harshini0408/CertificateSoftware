@@ -17,6 +17,7 @@ from ...models.event import Event
 from ...models.student_credit import CreditHistoryEntry, StudentCredit
 from ...models.manual_credit_submission import ManualCreditSubmission, ManualSubmissionStatus
 from ...models.dept_certificate import DeptCertificate
+from ...models.faculty_certificate import FacultyCertificate
 from ...models.user import User, UserRole
 from ...models.student_club_membership import StudentClubMembership, MembershipStatus
 from ...models.student_society_membership import StudentSocietyMembership, SocietyMembershipStatus
@@ -292,8 +293,25 @@ async def get_tutor_student_detail(
         for entry in rolled_history if entry.cert_number
     }
     cert_numbers = [entry.cert_number for entry in rolled_history if entry.cert_number]
-    certs = await Certificate.find({"cert_number": {"$in": cert_numbers}}).to_list() if cert_numbers else []
-    cert_by_number: Dict[str, Certificate] = {c.cert_number: c for c in certs}
+    linked_emails = {_norm_email(d.student_email) for d in linked_docs if d.student_email}
+    if student_email_norm:
+        linked_emails.add(student_email_norm)
+    email_clauses = [
+        {"snapshot.email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}
+        for email in linked_emails
+    ]
+    cert_query_or = []
+    if cert_numbers:
+        cert_query_or.append({"cert_number": {"$in": cert_numbers}})
+    if email_clauses:
+        cert_query_or.append({
+            "$and": [
+                {"status": {"$in": [CertStatus.GENERATED, CertStatus.EMAILED]}},
+                {"$or": email_clauses},
+            ]
+        })
+    certs = await Certificate.find({"$or": cert_query_or}).to_list() if cert_query_or else []
+    cert_by_number: Dict[str, Certificate] = {c.cert_number: c for c in certs if c.cert_number}
 
     event_ids = []
     for c in certs:
@@ -307,14 +325,25 @@ async def get_tutor_student_detail(
     events = await Event.find({"_id": {"$in": event_ids}}).to_list() if event_ids else []
     event_by_id = {str(e.id): e for e in events}
 
-    # Fetch relevant DeptCertificates to handle images for department events
-    dept_certs = await DeptCertificate.find({
-        "participant_email": {"$regex": f"^{re.escape(student_email_norm)}$", "$options": "i"}
-    }).to_list()
+    # Fetch relevant DeptCertificates and FacultyCertificates to include generated certs too
+    dept_email_clauses = [
+        {"participant_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}
+        for email in linked_emails
+    ]
+    dept_certs = await DeptCertificate.find({"$or": dept_email_clauses}).to_list() if dept_email_clauses else []
     dept_cert_by_number = {dc.cert_number: dc for dc in dept_certs if dc.cert_number}
 
+    fac_email_clauses = [
+        {"recipient_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}
+        for email in linked_emails
+    ]
+    fac_certs = await FacultyCertificate.find({"$or": fac_email_clauses}).to_list() if fac_email_clauses else []
+
     event_details = []
+    seen_cert_numbers: set[str] = set()
     for entry in rolled_history:
+        if entry.cert_number:
+            seen_cert_numbers.add(entry.cert_number)
         cert = cert_by_number.get(entry.cert_number) or dept_cert_by_number.get(entry.cert_number)
         event = event_by_id.get(str(cert.event_id)) if cert and isinstance(cert, Certificate) and cert.event_id else None
         event_date = event.event_date if event else None
@@ -332,6 +361,7 @@ async def get_tutor_student_detail(
                     "credit_points": int(cert_points_map.get(dc.cert_number, 0)),
                     "semester": entry.semester or "Unknown",
                     "awarded_at": dc.created_at,
+                    "status": "emailed" if dc.emailed_at else "generated",
                     "certificate_image_url": dc.png_url,
                 }
             )
@@ -346,7 +376,68 @@ async def get_tutor_student_detail(
                 "credit_points": entry.points_awarded,
                 "semester": entry.semester or "Unknown",
                 "awarded_at": entry.awarded_at,
+                "status": cert.status.value if cert and isinstance(cert, Certificate) else None,
                 "certificate_image_url": cert.png_url if cert else None,
+            }
+        )
+
+    for cert in certs:
+        if not cert.cert_number or cert.cert_number in seen_cert_numbers:
+            continue
+        if cert.status not in (CertStatus.GENERATED, CertStatus.EMAILED):
+            continue
+        seen_cert_numbers.add(cert.cert_number)
+        event = event_by_id.get(str(cert.event_id)) if cert.event_id else None
+        snap = cert.snapshot
+        event_details.append(
+            {
+                "event_name": (snap.event_name if snap else "") or (event.title if event else ""),
+                "role": (snap.cert_type if snap else "") or "participant",
+                "certificate_number": cert.cert_number,
+                "event_date": event.event_date if event else cert.issued_at,
+                "credit_points": int(cert_points_map.get(cert.cert_number, 0)),
+                "semester": "Unknown",
+                "awarded_at": cert.issued_at,
+                "status": cert.status.value,
+                "certificate_image_url": cert.png_url,
+            }
+        )
+
+    for dc in dept_certs:
+        if not dc.cert_number or dc.cert_number in seen_cert_numbers:
+            continue
+        seen_cert_numbers.add(dc.cert_number)
+        event_details.append(
+            {
+                "event_name": "Department Event",
+                "role": dc.contribution or "Participant",
+                "certificate_number": dc.cert_number,
+                "event_date": dc.emailed_at or dc.created_at,
+                "credit_points": int(cert_points_map.get(dc.cert_number, 0)),
+                "semester": "Unknown",
+                "awarded_at": dc.emailed_at or dc.created_at,
+                "status": "emailed" if dc.emailed_at else "generated",
+                "certificate_image_url": dc.png_url,
+            }
+        )
+
+    for fc in fac_certs:
+        if not fc.cert_number or fc.cert_number in seen_cert_numbers:
+            continue
+        if (fc.status or "").lower() not in (CertStatus.GENERATED.value, CertStatus.EMAILED.value):
+            continue
+        seen_cert_numbers.add(fc.cert_number)
+        event_details.append(
+            {
+                "event_name": fc.event_name or "Faculty Event",
+                "role": fc.contribution or "faculty",
+                "certificate_number": fc.cert_number,
+                "event_date": fc.emailed_at or fc.created_at,
+                "credit_points": int(cert_points_map.get(fc.cert_number, 0)),
+                "semester": "Unknown",
+                "awarded_at": fc.emailed_at or fc.created_at,
+                "status": fc.status,
+                "certificate_image_url": fc.png_url,
             }
         )
 
