@@ -116,14 +116,18 @@ export function useVerifyParticipant(clubId, eventId) {
   const addToast = useToastStore((s) => s.addToast)
 
   return useMutation({
-    mutationFn: (participantId) =>
+    mutationFn: ({ participantId, verified }) =>
       axiosInstance.patch(
         `/clubs/${clubId}/events/${eventId}/participants/${participantId}/verify`,
+        { verified },
       ),
-    onSuccess: () => {
+    onSuccess: (_data, { verified }) => {
       qc.invalidateQueries({ queryKey: participantKeys.list(clubId, eventId) })
       qc.invalidateQueries({ queryKey: ['clubs', clubId, 'dashboard'] })
-      addToast({ type: 'success', message: 'Registration verified.' })
+      addToast({
+        type: 'success',
+        message: `Attendance marked as ${verified ? 'Attended' : 'Attendance Pending'}.`,
+      })
     },
     onError: () => {
       addToast({ type: 'error', message: 'Verification failed.' })

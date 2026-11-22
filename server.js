@@ -39,6 +39,7 @@ const backendPrefixes = [
   '/templates',
   '/tutor',
   '/verify',
+  '/faculty'
 ];
 
 const shouldProxy = (url) => backendPrefixes.some((prefix) => (

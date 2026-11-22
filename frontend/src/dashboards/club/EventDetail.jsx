@@ -1478,25 +1478,20 @@ function ParticipantListTab({ clubId, eventId }) {
       key: 'verified',
       header: 'Status',
       render: (v, row) => {
-        // Excel/Manual: show verified badge OR allow manual verify override
-        if (row.source === 'excel' || row.source === 'manual') {
-          return v ? (
-            <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Verified</span>
-          ) : (
-            <button
-              className="btn-primary text-xs py-1 px-2 h-auto"
-              onClick={() => verifyParticipant.mutate(row.id)}
-              disabled={verifyParticipant.isPending}
-            >
-              Mark Verified
-            </button>
-          )
-        }
-        // Registration-sourced: attendance-based verification
-        return v ? (
-          <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">✓ Attended</span>
-        ) : (
-          <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Attendance Pending</span>
+        return (
+          <select
+            className="form-input text-xs py-1 h-auto"
+            aria-label={`Attendance status for ${row.fields?.Name || row.email}`}
+            value={v ? 'attended' : 'pending'}
+            onChange={(e) => verifyParticipant.mutate({
+              participantId: row.id,
+              verified: e.target.value === 'attended',
+            })}
+            disabled={verifyParticipant.isPending}
+          >
+            <option value="attended">Attended</option>
+            <option value="pending">Attendance Pending</option>
+          </select>
         )
       }
     },
