@@ -950,19 +950,28 @@ export default function StudentDashboard() {
     })
   }
 
-  const generatedCertificatesCount = (certs || []).filter((c) => ['generated', 'emailed'].includes((c?.status || '').toLowerCase())).length
-  const visibleCertificates = (certs || []).filter((c) => ['generated', 'emailed', 'verified'].includes((c?.status || '').toLowerCase()))
-  const uploadedVerifiedCount = (manualSubmissions || []).filter((s) => s?.status === 'verified').length
-  const totalCerts   = generatedCertificatesCount + uploadedVerifiedCount
-  const totalCredits = credits?.total_credits ?? 0
   const currentSemester = credits?.current_semester
-  const semesterTotals = credits?.semester_totals || []
   const creditHistory = credits?.credit_history || []
   const creditHistoryByCertificate = new Map(
     creditHistory
       .filter((entry) => entry.cert_number)
       .map((entry) => [entry.cert_number, entry]),
   )
+  const generatedCertificatesCount = currentSemester
+    ? (certs || []).filter((certificate) => (
+      ['generated', 'emailed'].includes((certificate?.status || '').toLowerCase())
+      && creditHistoryByCertificate.get(certificate.cert_number)?.semester === currentSemester
+    )).length
+    : 0
+  const visibleCertificates = (certs || []).filter((c) => ['generated', 'emailed', 'verified'].includes((c?.status || '').toLowerCase()))
+  const uploadedVerifiedCount = currentSemester
+    ? (manualSubmissions || []).filter((submission) => (
+      submission?.status === 'verified' && submission?.semester === currentSemester
+    )).length
+    : 0
+  const totalCerts   = generatedCertificatesCount + uploadedVerifiedCount
+  const totalCredits = credits?.total_credits ?? 0
+  const semesterTotals = credits?.semester_totals || []
   const certificateRows = visibleCertificates.map((certificate) => {
     const history = creditHistoryByCertificate.get(certificate.cert_number)
     return {
@@ -1915,7 +1924,7 @@ export default function StudentDashboard() {
 
             <div className="grid grid-cols-2 gap-4">
               <StatCard
-                label="My Certificates"
+                label="Current Semester Certificates"
                 value={totalCerts}
                 subText={`Generated: ${generatedCertificatesCount} • Uploaded & Verified: ${uploadedVerifiedCount}`}
                 icon={Icons.cert}
