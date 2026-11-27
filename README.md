@@ -1,4 +1,4 @@
-# PSG iTech Activity Points Management Software — Deployment & Overview
+# PSG iTech Activity Points Management & Certificate Generation Platform
 
 Official self-hosted Activity Points Management and Certificate Generation Platform for PSG Institute of Technology and Applied Research.
 
@@ -14,7 +14,6 @@ The app is prepared for deployment under a subpath:
 
 ## Key Capabilities & Recent Features
 - **Activity Points Management**: Track, calculate, and roll over student activity credits semester by semester.
-- **HOD Overview**: Department-scoped student search with current-semester average credit charts on a 0–20 scale for batches 2025–2029 and 2026–2030; charts read the same configured database as student credit endpoints and accept either short (`2025`, `2026`) or full (`2025-2029`, `2026-2030`) batch values. Hover over a section to see its tutors, average points, students below 10 points, and class size. Performance analytics has a batch filter and ranks sections within the selected batch by average credits, median credits, and students with at least 10 credits.
 - **Club Dashboard**: Mandatory event completion report submission before certificates can be issued; live semester and cumulative completed event counts.
 - **Student Dashboard**: 1-time registration number update for students admitted with temporary IDs (e.g., `T24Z108` → 12-digit permanent ID); credit breakdown, event registration, and certificate verification submissions.
 - **Tutor Dashboard**: Class credit monitoring, external certificate verification, and mapped student registration number editing (strictly up to 2 times).
@@ -50,149 +49,200 @@ npm run dev
 ### First-time setup
 1. Copy the root env template and update values:
 
-```bash
-cp .env.example .env
+```
+┌────────────────────────┐
+│  Raw Signature Upload  │ (JPG/PNG from paper scan or camera)
+└───────────┬────────────┘
+            │
+            ▼
+┌────────────────────────┐
+│ Compute MD5 Checksum   │ ──► Cache Hit? ──► Return cached transparent PNG
+└───────────┬────────────┘
+            │ (New Upload)
+            ▼
+┌────────────────────────┐
+│  Alpha Channel Check   │ ──► Already Transparent? ──► Use Original Bytes
+└───────────┬────────────┘
+            │ (Opaque Background)
+            ▼
+┌────────────────────────┐
+│   rembg (U2-Net AI)    │ ──► Segments ink strokes from background paper
+└───────────┬────────────┘
+            │
+            ▼
+┌────────────────────────┐
+│  Blank Image Fallback  │ ──► If fully transparent, fall back to safe upload
+└───────────┬────────────┘
+            │
+            ▼
+┌────────────────────────┐
+│  Save to Assets Cache  │ ──► storage/assets/<club_slug>/sig_<md5>.png
+└────────────────────────┘
 ```
 
-On Windows PowerShell:
+- **Algorithm**: `rembg.remove()` uses deep learning saliency detection to isolate black/blue ink strokes from textured or off-white paper.
+- **Fail-Safe Protection**: If background removal removes too much content resulting in a blank alpha bounding box, the service automatically falls back to original bytes.
+- **Deduplication**: Identical uploads share cached assets, eliminating redundant CPU overhead.
 
-```powershell
-Copy-Item .env.example .env
+---
+
+## Activity Points & Semester Cap Enforcement
+
+To encourage well-rounded student participation and prevent credit hoarding, the system supports configurable **Semester Caps**:
+- **Super Admin Configuration**:
+  - Superadmin defines points awarded per certificate type (Participation, Winner, Organizer, Volunteer, External Presentation, etc.).
+  - Superadmin sets **Max Certificates / Semester** (e.g., maximum 2 technical participation certificates count towards credit per semester).
+- **Graceful Rollover**:
+  - Certificates earned beyond the semester cap are still issued, valid, and stored in the student's wallet, but grant **0 activity credit points**.
+  - When the Superadmin initiates a **Semester Reset / Rollover**, current semester totals reset to zero, and past semester history is permanently archived into historical semester records.
+
+---
+
+## Student Registration Number Update Policy
+
+To accommodate first-year students admitted with temporary IDs:
+1. **Temporary ID Support**: Students entering with temporary roll numbers (e.g. `T24Z108`) can use the system normally.
+2. **Student Self-Service Update**:
+   - Once official 12-digit university registration numbers are issued, students can update their registration number **once** in Profile Settings.
+   - After one successful update, the field is permanently locked to the student.
+3. **Tutor Override Security**:
+   - If a student makes an error or requires correction, only their assigned class **Tutor** can edit the mapped registration number.
+   - Tutors are strictly limited to **2 updates per student** to guarantee administrative auditability.
+
+---
+
+## Local Development Setup
+
+### Prerequisites
+- Python 3.10 or higher
+- Node.js 18+ and npm
+- MongoDB 6.0+ (running locally on port 27017)
+
+### 1. Backend Setup
+```bash
+# Navigate to backend directory
+cd backend
+
+# Create and activate virtual environment
+python -m venv venv
+venv\Scripts\activate        # On Windows
+# source venv/bin/activate   # On Linux/macOS
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment
+copy .env.example .env       # On Windows
+# cp .env.example .env       # On Linux/macOS
+
+# Download required TTF fonts for certificate rendering
+python download_fonts.py
+
+# Start the FastAPI server
+uvicorn app.main:app --reload --port 8000
+```
+- API Documentation: `http://localhost:8000/docs`
+- Alternative ReDoc: `http://localhost:8000/redoc`
+
+### 2. Frontend Setup
+```bash
+# Navigate to frontend directory
+cd frontend
+
+# Install npm dependencies
+npm install
+
+# Start Vite development server
+npm run dev
+```
+- Frontend Web App: `http://localhost:2848` (or port configured in `vite.config.js`)
+
+---
+
+## Docker Production Deployment
+
+The entire stack is production-ready via Docker Compose with volume persistence and health checks.
+
+### 1. Configuration
+```bash
+# Copy root environment template
+copy .env.example .env       # Windows PowerShell
+# cp .env.example .env       # Linux
+
+# Edit .env with secure production values:
+# - SECRET_KEY
+# - SUPERADMIN_PASSWORD
+# - SMTP configuration
+# - ALLOWED_ORIGINS & FRONTEND_URL
 ```
 
-2. Build images:
-
+### 2. Build and Launch
 ```bash
-docker compose build
-```
-
-3. Start all services:
-
-```bash
-docker compose up -d
-```
-
-4. View status/logs:
-
-```bash
-docker compose ps
-docker compose logs -f
-```
-
-5. Stop services:
-
-```bash
-docker compose down
-```
-
-To also remove volumes (destructive to DB data):
-
-```bash
-docker compose down -v
-```
-
-## 3. Production Deployment (Ubuntu + Host Nginx)
-
-1. Install Docker Engine + Docker Compose plugin.
-2. Clone repository to server, e.g. `/opt/certificate-software`.
-3. Create production env:
-
-```bash
-cp .env.example .env
-```
-
-4. Set secure values in `.env`:
-- `SECRET_KEY`
-- SMTP credentials
-- `SUPERADMIN_PASSWORD`
-- domain values (`FRONTEND_URL`, `ALLOWED_ORIGINS`, `BASE_URL`)
-
-5. Start containers:
-
-```bash
+# Build and start all containers in detached mode
 docker compose up -d --build
+
+# View container status
+docker compose ps
+
+# View live application logs
+docker compose logs -f backend
 ```
 
-6. Configure host Nginx with:
-- `deploy/nginx.project-name.conf`
-
-7. Reload Nginx:
-
+### 3. Production Nginx Reverse Proxy
+Deploy under subpath (e.g. `/project-name`) using host Nginx configuration from `deploy/nginx.project-name.conf`:
 ```bash
+sudo cp deploy/nginx.project-name.conf /etc/nginx/sites-available/certificate-software
+sudo ln -s /etc/nginx/sites-available/certificate-software /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## 4. Updating After Code Changes
+---
 
-```bash
-git pull
-docker compose build
-docker compose up -d
-```
+## Environment Configuration
 
-For a single service:
+Key environment variables in `.env`:
 
-```bash
-docker compose build frontend
-docker compose up -d frontend
-```
+| Variable | Description | Example / Default |
+| :--- | :--- | :--- |
+| `MONGODB_URL` | MongoDB connection connection string | `mongodb://mongodb:27017` or `mongodb://localhost:27017` |
+| `DATABASE_NAME` | Database name | `certificate_software` |
+| `SECRET_KEY` | Cryptographic secret for JWT access tokens | *High-entropy random 64-char string* |
+| `ALGORITHM` | JWT signing algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Session token lifetime | `1440` (24 hours) |
+| `ALLOWED_ORIGINS` | Comma-separated CORS allowed origins | `http://localhost:2848,http://localhost:8000` |
+| `STORAGE_ROOT` | File storage path for templates, certs, and assets | `./storage` |
+| `SMTP_HOST` | Outgoing email SMTP server | `smtp.gmail.com` |
+| `SMTP_PORT` | SMTP port | `587` |
+| `SMTP_USERNAME` | SMTP account email | `notifications@psgitech.ac.in` |
+| `SMTP_PASSWORD` | SMTP app password | *App-specific password* |
+| `EMAIL_DAILY_LIMIT` | Max emails sent per 24-hour cycle | `500` |
+| `SUPERADMIN_EMAIL` | Initial seed superadmin email | `admin@psgitech.ac.in` |
+| `SUPERADMIN_PASSWORD` | Initial seed superadmin password | `Admin@123456` |
 
-## 5. Environment Variables
+---
 
-### Root `.env`
-Used by Docker Compose for backend runtime and frontend build arguments.
+## Troubleshooting & FAQs
 
-### `backend/.env.example`
-Documents backend app variables for direct backend execution.
+### 1. "Event report must be submitted to Student Affairs and approved before certificates can be generated"
+- **Cause**: The event completion report has not been uploaded, is still `pending_review`, or was `rejected` by Student Affairs.
+- **Resolution**: Have the Club Coordinator upload the event completion report under the event's Report tab. Then, log in with a `student_affairs` account to review and click **Accept Report**.
 
-### `frontend/.env.example`
-Documents Vite build/dev variables:
-- `VITE_BASE_PATH` should be `/project-name/` in production.
-- `VITE_API_URL` should be `/project-name/api`.
-- `VITE_BACKEND_BASE_URL` should be `/project-name`.
+### 2. "Signature background still appears white or discolored"
+- **Cause**: Scanned image has high noise or compressed artifacts.
+- **Resolution**: Ensure `rembg` and its underlying dependencies are installed in your Python environment (`pip install rembg`). Alternatively, coordinators can upload a transparent PNG signature directly, which the system preserves as-is.
 
-## 6. Networking Notes
+### 3. "CORS Error: Disallowed CORS origin"
+- **Cause**: Frontend origin does not match `ALLOWED_ORIGINS` in `.env` or another background service occupies port 8000.
+- **Resolution**: Check `netstat -ano | findstr :8000` to verify only the certificate backend uvicorn process is listening. Update `ALLOWED_ORIGINS` in `backend/.env` with your frontend's exact origin (e.g. `http://localhost:2848`).
 
-- Containers communicate over the Compose network using service names.
-- Backend Mongo URI uses `mongodb` service hostname.
-- Frontend does not call `localhost` directly; it uses configurable base URLs.
-- Exposed ports are bound to `127.0.0.1` so host Nginx can proxy safely.
+### 4. "Email sending limit reached"
+- **Cause**: Outgoing email quota exceeded `EMAIL_DAILY_LIMIT`.
+- **Resolution**: Certificates remain securely generated in status `GENERATED`. Once the next day's limit resets, click **Send Remaining** in the event certificates tab to dispatch the queued certificates.
 
-## 7. Troubleshooting
+---
 
-### Containers not starting
-```bash
-docker compose logs --tail=200
-```
+## License & Credits
 
-### Backend cannot connect to MongoDB
-- Verify `MONGODB_URL=mongodb://mongodb:27017` in `.env`.
-- Verify Mongo health:
-
-```bash
-docker compose ps
-```
-
-### Frontend path issues under `/project-name`
-- Ensure `.env` contains:
-  - `VITE_BASE_PATH=/project-name/`
-  - `VITE_API_URL=/project-name/api`
-  - `VITE_BACKEND_BASE_URL=/project-name`
-- Rebuild frontend image:
-
-```bash
-docker compose build frontend
-docker compose up -d frontend
-```
-
-### CORS errors
-- Set `ALLOWED_ORIGINS` to your public origin (comma-separated for multiple).
-- Restart backend container after env changes.
-
-## 8. Security Checklist
-
-- `.env` is ignored by git.
-- Do not commit secrets.
-- Change default `SUPERADMIN_PASSWORD` and `SECRET_KEY` in production.
-- Keep Docker images updated (`docker compose build --pull`).
+Developed for **PSG Institute of Technology and Applied Research (PSG iTech)**.  
+All rights reserved © 2026.
